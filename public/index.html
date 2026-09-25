@@ -6,52 +6,122 @@
 <title>AB Platform — Admin</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
-  :root { font-family: -apple-system, Segoe UI, Roboto, sans-serif; }
-  body { max-width: 960px; margin: 40px auto; padding: 0 20px; color: #1B2A2E; }
-  h1 { color: #1AB7C8; }
-  h2 { font-size: 1.1em; }
-  section { margin-bottom: 40px; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
-  label { display: block; margin-top: 12px; font-weight: 600; font-size: 0.9em; }
-  input, textarea, select { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; font-family: -apple-system, sans-serif; border: 1px solid #ccc; border-radius: 4px; }
-  input[type=number] { width: auto; min-width: 80px; }
-  textarea { height: 90px; font-family: Menlo, monospace; font-size: 0.85em; }
-  button { margin-top: 16px; padding: 10px 18px; background: #1AB7C8; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; }
-  button:hover { background: #159aa8; }
-  button.secondary { background: #eee; color: #1B2A2E; padding: 6px 12px; margin-top: 8px; font-weight: 500; }
-  button.secondary:hover { background: #ddd; }
-  button.remove-row { background: transparent; color: #c0392b; padding: 4px 8px; margin: 0; font-size: 1.1em; line-height: 1; }
+  :root {
+    --ink: #131723;
+    --indigo: #5635FB;
+    --indigo-dark: #4527d6;
+    --mint: #02DEB5;
+    --mint-dark: #02b895;
+    --bg: #f5f6fb;
+    --card: #ffffff;
+    --border: #e6e7f0;
+    --text-muted: #6b6f83;
+    --danger: #d64545;
+    --danger-bg: #fdeaea;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { max-width: 980px; margin: 0 auto; padding: 32px 20px 80px; background: var(--bg); color: var(--ink); line-height: 1.5; }
+  h1, h2, h3 { color: var(--ink); font-weight: 700; letter-spacing: -0.01em; }
+  h2 { font-size: 1.05em; margin: 0 0 4px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 0.95em; margin: 20px 0 8px; color: var(--ink); }
+  section {
+    margin-bottom: 24px; padding: 24px; background: var(--card);
+    border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(19,23,35,0.04);
+  }
+  label { display: block; margin-top: 14px; font-weight: 600; font-size: 0.85em; color: var(--ink); }
+  input, textarea, select {
+    width: 100%; padding: 9px 11px; margin-top: 5px; box-sizing: border-box;
+    font-family: -apple-system, sans-serif; font-size: 0.95em;
+    border: 1px solid #d5d7e3; border-radius: 8px; background: #fff; color: var(--ink);
+    transition: border-color 0.15s ease;
+  }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(86,53,251,0.12); }
+  input[type=number] { width: auto; min-width: 90px; }
+  textarea { height: 90px; font-family: "SF Mono", Menlo, monospace; font-size: 0.85em; }
+  button {
+    margin-top: 16px; padding: 10px 20px; background: var(--indigo); color: white;
+    border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.9em;
+    transition: background 0.15s ease, transform 0.1s ease;
+  }
+  button:hover { background: var(--indigo-dark); }
+  button:active { transform: scale(0.98); }
+  button:disabled { background: #c9cadb; cursor: not-allowed; }
+  button.secondary {
+    background: #f0f0f7; color: var(--ink); padding: 7px 14px; margin-top: 8px;
+    font-weight: 600; font-size: 0.85em; border: 1px solid var(--border);
+  }
+  button.secondary:hover { background: #e6e6f2; }
+  button.remove-row { background: transparent; color: var(--danger); padding: 4px 8px; margin: 0; font-size: 1.1em; line-height: 1; }
+  button.remove-row:hover { background: var(--danger-bg); }
   table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-  th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
-  .hint { color: #666; font-size: 0.85em; }
-  .error-msg { color: #c0392b; }
-  .ok-msg { color: #1a8a5c; }
-  pre { background: #f5f5f5; padding: 12px; border-radius: 6px; overflow-x: auto; }
-  .change-row, .goal-row { display: grid; grid-template-columns: 1.3fr 1fr; gap: 10px; padding: 12px; margin-top: 10px; background: #fafafa; border-radius: 6px; position: relative; }
+  th { text-align: left; padding: 10px 8px; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); border-bottom: 2px solid var(--border); }
+  td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 0.92em; }
+  tr:last-child td { border-bottom: none; }
+  .hint { color: var(--text-muted); font-size: 0.85em; }
+  .error-msg { color: var(--danger); font-weight: 600; }
+  .ok-msg { color: var(--mint-dark); font-weight: 600; }
+  pre { background: #f7f7fc; border: 1px solid var(--border); padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 0.85em; }
+  .change-row, .goal-row {
+    display: grid; grid-template-columns: 1.3fr 1fr; gap: 10px; padding: 14px;
+    margin-top: 10px; background: #fafafe; border: 1px solid var(--border); border-radius: 8px; position: relative;
+  }
   .goal-row { grid-template-columns: 1.3fr 1fr auto; align-items: center; }
   .change-row .full-width { grid-column: 1 / -1; }
-  .picker-link { display: inline-block; padding: 10px 18px; background: #1B2A2E; color: white; border-radius: 6px; text-decoration: none; font-weight: 600; cursor: grab; }
-  .variant-card { display: flex; justify-content: space-between; align-items: center; padding: 14px; margin-top: 10px; background: #fafafa; border-radius: 6px; border-left: 4px solid #1AB7C8; }
-  .variant-card.disabled { border-left-color: #ccc; opacity: 0.65; }
-  .variant-card .vc-meta { font-size: 0.85em; color: #666; }
+  .picker-link {
+    display: inline-block; padding: 10px 20px; background: var(--ink); color: white;
+    border-radius: 8px; text-decoration: none; font-weight: 600; cursor: grab; font-size: 0.9em;
+  }
+  .variant-card {
+    display: flex; justify-content: space-between; align-items: center; padding: 16px;
+    margin-top: 10px; background: #fafafe; border: 1px solid var(--border); border-radius: 8px;
+    border-left: 4px solid var(--indigo);
+  }
+  .variant-card.disabled { border-left-color: #c9cadb; opacity: 0.7; }
+  .variant-card .vc-meta { font-size: 0.85em; color: var(--text-muted); margin-top: 4px; }
   .variant-card .vc-actions button { margin: 0 0 0 8px; padding: 6px 12px; font-size: 0.85em; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75em; font-weight: 600; }
-  .badge.live { background: #d4f4e2; color: #1a8a5c; }
-  .badge.paused { background: #eee; color: #666; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.72em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+  .badge.live { background: rgba(2,222,181,0.15); color: var(--mint-dark); }
+  .badge.paused { background: #f0f0f7; color: var(--text-muted); }
+  .badge.draft { background: #fff4e0; color: #a3690f; }
+  .badge.archived { background: #eceef5; color: #5a5d70; }
   .chart-wrap { max-width: 100%; margin-top: 20px; }
-  .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; position: relative; }
-  .topbar img.logo { height: 32px; display: block; }
-  .topbar-link { color: #1B2A2E; font-weight: 600; text-decoration: none; font-size: 0.9em; cursor: pointer; }
-  .topbar-link:hover { color: #1AB7C8; }
-  .snippet-popover { display: none; position: absolute; top: 100%; right: 0; margin-top: 8px; background: white; border: 1px solid #ddd; border-radius: 8px; padding: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 10; width: 360px; max-width: 90vw; }
+  .topbar {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 28px; padding: 16px 24px; position: relative;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(19,23,35,0.04);
+  }
+  .topbar img.logo { height: 30px; display: block; }
+  .topbar-link {
+    color: var(--ink); font-weight: 600; text-decoration: none; font-size: 0.88em;
+    cursor: pointer; padding: 8px 14px; border-radius: 8px; background: #f0f0f7;
+  }
+  .topbar-link:hover { background: #e6e6f2; }
+  .snippet-popover {
+    display: none; position: absolute; top: 100%; right: 0; margin-top: 10px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px; box-shadow: 0 8px 28px rgba(19,23,35,0.14); z-index: 10; width: 360px; max-width: 90vw;
+  }
   .snippet-popover pre { white-space: pre-wrap; word-break: break-all; font-size: 0.8em; }
-  details { border: 1px solid #ddd; border-radius: 6px; margin-top: 12px; }
-  details summary { padding: 12px 16px; font-weight: 600; cursor: pointer; }
-  details[open] summary { border-bottom: 1px solid #ddd; }
-  details .accordion-body { padding: 16px; }
-  .api-key-row { display: flex; gap: 8px; align-items: flex-start; }
+  details {
+    border: 1px solid var(--border); border-radius: 10px; margin-top: 12px; overflow: hidden;
+  }
+  details summary {
+    padding: 14px 18px; font-weight: 700; cursor: pointer; background: #fafafe;
+    font-size: 0.92em; list-style: none; display: flex; align-items: center;
+  }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before { content: "▸"; color: var(--indigo); margin-right: 10px; transition: transform 0.15s ease; }
+  details[open] summary::before { transform: rotate(90deg); }
+  details[open] summary { border-bottom: 1px solid var(--border); }
+  details .accordion-body { padding: 18px; }
+  .api-key-row { display: flex; gap: 10px; align-items: flex-start; }
   .api-key-row input { flex: 1; }
-  .api-key-row button { white-space: nowrap; }
-  .activity-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #eee; font-size: 0.85em; }
+  .api-key-row button { white-space: nowrap; margin-top: 5px; }
+  .activity-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.85em; }
+  .activity-row:last-child { border-bottom: none; }
 </style>
 </head>
 <body>
@@ -175,15 +245,22 @@
   <h2>5. View Results</h2>
   <label>Experiment</label>
   <select id="results-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
+  <label>Visitors <span class="hint">(filters the table and rate chart below)</span></label>
+  <select id="visitor-type-filter">
+    <option value="">All visitors</option>
+    <option value="new">New only</option>
+    <option value="returning">Returning only</option>
+  </select>
   <button onclick="loadResults()">Load Results</button>
   <p id="results-msg" class="hint"></p>
   <table id="results-table" style="display:none">
-    <thead><tr><th>Variant</th><th>Visitors</th><th>Clicks</th><th>Conversions</th><th>Rate</th></tr></thead>
+    <thead><tr><th>Variant</th><th>Visitors</th><th>New</th><th>Returning</th><th>Clicks</th><th>Conversions</th><th>Rate</th></tr></thead>
     <tbody id="results-body"></tbody>
   </table>
   <div class="chart-wrap"><canvas id="rate-chart" style="display:none"></canvas></div>
   <div class="chart-wrap"><canvas id="trend-chart" style="display:none"></canvas></div>
   <button type="button" class="secondary" id="refresh-results-btn" style="display:none" onclick="loadResults()">🔄 Refresh Results</button>
+  <button type="button" class="secondary" id="export-results-btn" style="display:none" onclick="exportResultsCsv(document.getElementById('results-exp-id').value)">⬇ Export CSV</button>
 
   <h3 style="margin-top:24px;">Recent Activity <span class="hint">(raw events, most recent 20 — useful for confirming events are arriving at all)</span></h3>
   <div id="activity-log" class="hint">Load results above to see recent activity.</div>
@@ -226,7 +303,7 @@ async function callApi(path, options = {}) {
 
 // --- Experiments list ---
 
-const STATUS_COLORS = { running: 'live', draft: 'paused', paused: 'paused', archived: 'paused' };
+const STATUS_COLORS = { running: 'live', draft: 'draft', paused: 'paused', archived: 'archived' };
 const EXP_SELECT_IDS = ['var-exp-id', 'manage-exp-id', 'status-exp-id', 'results-exp-id'];
 
 // Rebuilds all four "Experiment" dropdowns from the current list, preserving
@@ -263,17 +340,53 @@ async function loadExperimentList() {
   experiments.forEach((exp) => {
     const tr = document.createElement('tr');
     const created = new Date(exp.created_at).toLocaleDateString();
+    const archivedActions = exp.status === 'archived'
+      ? `<button type="button" class="secondary" onclick="exportResultsCsv('${exp.id}')">Export CSV</button>
+         <button type="button" class="secondary" style="color:#c0392b" onclick="deleteExperiment('${exp.id}', this)">Delete</button>`
+      : '';
     tr.innerHTML = `
       <td>${exp.name}</td>
       <td><span class="badge ${STATUS_COLORS[exp.status] || 'paused'}">${exp.status}</span></td>
       <td class="hint">${exp.url_match}</td>
       <td>${exp.variant_count}</td>
       <td class="hint">${created}</td>
-      <td><button type="button" class="secondary" onclick="useExperiment('${exp.id}', '${(exp.url_match || '').replace(/'/g, "\\'")}')">Use ↓</button></td>
+      <td><button type="button" class="secondary" onclick="useExperiment('${exp.id}', '${(exp.url_match || '').replace(/'/g, "\\'")}')">Use ↓</button> ${archivedActions}</td>
     `;
     tbody.appendChild(tr);
   });
   table.style.display = 'table';
+}
+
+// Downloads the full raw-event CSV for an experiment. Works from any row (Your
+// Experiments list or Results section) since it just needs the id.
+async function exportResultsCsv(expId) {
+  const res = await fetch(`/api/results/${expId}/export`, { headers: authHeaders() });
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try { const data = await res.json(); message = data.detail ? `${data.error} — ${data.detail}` : data.error; } catch (e) {}
+    alert(`Export failed: ${message}`);
+    return;
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `experiment-${expId}-export.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Permanent — server also enforces "archived only" as a safety net, but check here
+// too so the confirm text is accurate before the request even goes out.
+async function deleteExperiment(expId, btn) {
+  if (!confirm('Delete this experiment permanently? This removes all its variants and every recorded event — there is no undo.\n\nMake sure you\'ve exported the CSV first if you want to keep the data.')) return;
+  btn.disabled = true;
+  const result = await callApi(`/api/experiments/${expId}`, { method: 'DELETE', headers: authHeaders() });
+  btn.disabled = false;
+  if (!result.ok) { alert(`Error: ${result.message}`); return; }
+  loadExperimentList();
 }
 
 // Selects this experiment in every dropdown below, and the preview page URL
@@ -296,6 +409,9 @@ document.getElementById('api-key').addEventListener('change', () => {
 // no separate click needed once it's picked.
 document.getElementById('results-exp-id').addEventListener('change', (e) => {
   if (e.target.value) loadResults();
+});
+document.getElementById('visitor-type-filter').addEventListener('change', () => {
+  if (document.getElementById('results-exp-id').value) loadResults();
 });
 document.getElementById('manage-exp-id').addEventListener('change', (e) => {
   if (e.target.value) loadManageVariants();
@@ -723,9 +839,12 @@ async function loadResults() {
   const expId = document.getElementById('results-exp-id').value.trim();
   const msgEl = document.getElementById('results-msg');
   const refreshBtn = document.getElementById('refresh-results-btn');
-  if (!expId) { msgEl.className = 'error-msg'; msgEl.textContent = 'Select an experiment above first.'; refreshBtn.style.display = 'none'; return; }
+  const exportBtn = document.getElementById('export-results-btn');
+  if (!expId) { msgEl.className = 'error-msg'; msgEl.textContent = 'Select an experiment above first.'; refreshBtn.style.display = 'none'; exportBtn.style.display = 'none'; return; }
 
-  const result = await callApi(`/api/results/${expId}`, { headers: authHeaders() });
+  const visitorType = document.getElementById('visitor-type-filter').value;
+  const qs = visitorType ? `?visitor_type=${visitorType}` : '';
+  const result = await callApi(`/api/results/${expId}${qs}`, { headers: authHeaders() });
 
   if (!result.ok) {
     msgEl.className = 'error-msg';
@@ -734,16 +853,18 @@ async function loadResults() {
     document.getElementById('rate-chart').style.display = 'none';
     document.getElementById('trend-chart').style.display = 'none';
     refreshBtn.style.display = 'none';
+    exportBtn.style.display = 'none';
     return;
   }
   refreshBtn.style.display = 'inline-block';
+  exportBtn.style.display = 'inline-block';
   msgEl.textContent = '';
   const results = result.data.results || [];
   const tbody = document.getElementById('results-body');
   tbody.innerHTML = '';
   results.forEach(r => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${r.variant_name}</td><td>${r.visitors}</td><td>${r.clicks}</td><td>${r.conversions}</td><td>${r.conversion_rate}%</td>`;
+    tr.innerHTML = `<td>${r.variant_name}</td><td>${r.visitors}</td><td>${r.new_visitors}</td><td>${r.returning_visitors}</td><td>${r.clicks}</td><td>${r.conversions}</td><td>${r.conversion_rate}%</td>`;
     tbody.appendChild(tr);
   });
   document.getElementById('results-table').style.display = 'table';
@@ -757,7 +878,7 @@ async function loadResults() {
       type: 'bar',
       data: {
         labels: results.map(r => r.variant_name),
-        datasets: [{ label: 'Conversion rate (%)', data: results.map(r => r.conversion_rate), backgroundColor: '#1AB7C8' }]
+        datasets: [{ label: 'Conversion rate (%)', data: results.map(r => r.conversion_rate), backgroundColor: '#5635FB' }]
       },
       options: { responsive: true, plugins: { title: { display: true, text: 'Conversion rate by variant' } }, scales: { y: { beginAtZero: true } } }
     });
@@ -771,7 +892,7 @@ async function loadResults() {
     const series = trendResult.data.series;
     const days = [...new Set(series.map(r => r.day))].sort();
     const variantNames = [...new Set(series.map(r => r.variant_name))];
-    const palette = ['#1AB7C8', '#1B2A2E', '#e07a5f', '#8a5cf6', '#1a8a5c'];
+    const palette = ['#5635FB', '#02DEB5', '#e07a5f', '#131723', '#a3690f'];
 
     const datasets = variantNames.map((name, i) => {
       let running = 0;

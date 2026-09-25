@@ -221,6 +221,26 @@ router.delete('/:id/variants/:variantId', async (req, res) => {
   }
 });
 
+// DELETE /api/experiments/:id
+// Permanent — cascades to its variants and all their events. Only allowed once the
+// experiment is archived, as a guard rail against deleting a live/paused test by
+// mistake; export the CSV first if you want to keep the data.
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rows: expRows } = await db.query(`SELECT status FROM experiments WHERE id = $1`, [id]);
+    if (expRows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (expRows[0].status !== 'archived') {
+      return res.status(400).json({ error: 'only archived experiments can be deleted — archive it first, and export the CSV if you want to keep the data' });
+    }
+    await db.query(`DELETE FROM experiments WHERE id = $1`, [id]);
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
 router.patch('/:id/status', async (req, res) => {
   try {
     const { id } = req.params;

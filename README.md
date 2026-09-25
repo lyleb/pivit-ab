@@ -107,6 +107,15 @@ Every "Experiment" field is now a dropdown (Add Variant, Manage Variants, Status
 
 There's no caching or batch/polling delay anywhere — every view and conversion event is written to the database the instant it happens on a visitor's browser, and every "Load Results" click queries live. A **🔄 Refresh Results** button appears under the results table once you've loaded something, for a quick re-pull without scrolling back up.
 
+## Exporting and deleting an experiment
+
+Once an experiment is **archived**, "Your Experiments" shows two extra buttons on that row: **Export CSV** (every raw event — timestamp, type, variant, goal, visitor id, and new/returning label) and **Delete** (permanent — removes the experiment, its variants, and all events; the server refuses this unless the experiment is archived, as a guard rail). Export first if you want to keep the data before deleting.
+
+## New vs returning visitors
+
+A visitor counts as **new** on the calendar day of their first-ever view of an experiment, and **returning** on any later day they come back — a second pageview in the same sitting (a refresh, browsing to another page and back) doesn't count as "returning," only an actual later visit does. The Results table shows both counts alongside the total, and the **Visitors** filter above it (All / New only / Returning only) restricts the table and bar chart to just that segment. The CSV export includes a `visitor_type` column with this same classification per event.
+
+
 
 ## Results & performance charts
 
