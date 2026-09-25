@@ -51,6 +51,16 @@
 </section>
 
 <section>
+  <h2>Your Experiments</h2>
+  <button onclick="loadExperimentList()">Refresh List</button>
+  <p id="exp-list-msg" class="hint"></p>
+  <table id="exp-list-table" style="display:none">
+    <thead><tr><th>Name</th><th>Status</th><th>URL match</th><th>Variants</th><th>Created</th><th></th></tr></thead>
+    <tbody id="exp-list-body"></tbody>
+  </table>
+</section>
+
+<section>
   <h2>Find a selector on the page</h2>
   <p class="hint">Drag this to your bookmarks bar. Then, while on the actual client page (e.g. cantsaythat.co.uk/shop), click the bookmark, then click any element — its selector gets copied to your clipboard so you can paste it below.</p>
   <a class="picker-link" id="picker-bookmarklet" href="#">🎯 AB Selector Picker</a>
@@ -169,6 +179,54 @@ async function callApi(path, options = {}) {
   return { ok: true, data };
 }
 
+// --- Experiments list ---
+
+const STATUS_COLORS = { running: 'live', draft: 'paused', paused: 'paused', archived: 'paused' };
+
+async function loadExperimentList() {
+  const msgEl = document.getElementById('exp-list-msg');
+  const table = document.getElementById('exp-list-table');
+  const key = document.getElementById('api-key').value;
+  if (!key) { msgEl.className = 'hint'; msgEl.textContent = 'Paste your Admin API Key above, then refresh.'; table.style.display = 'none'; return; }
+
+  const result = await callApi('/api/experiments/all', { headers: authHeaders() });
+  if (!result.ok) { msgEl.className = 'error-msg'; msgEl.textContent = `Error: ${result.message}`; table.style.display = 'none'; return; }
+
+  const experiments = result.data.experiments || [];
+  if (experiments.length === 0) { msgEl.className = 'hint'; msgEl.textContent = 'No experiments yet — create one below.'; table.style.display = 'none'; return; }
+
+  msgEl.textContent = '';
+  const tbody = document.getElementById('exp-list-body');
+  tbody.innerHTML = '';
+  experiments.forEach((exp) => {
+    const tr = document.createElement('tr');
+    const created = new Date(exp.created_at).toLocaleDateString();
+    tr.innerHTML = `
+      <td>${exp.name}</td>
+      <td><span class="badge ${STATUS_COLORS[exp.status] || 'paused'}">${exp.status}</span></td>
+      <td class="hint">${exp.url_match}</td>
+      <td>${exp.variant_count}</td>
+      <td class="hint">${created}</td>
+      <td><button type="button" class="secondary" onclick="useExperiment('${exp.id}', '${(exp.url_match || '').replace(/'/g, "\\'")}')">Use ↓</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+  table.style.display = 'table';
+}
+
+// Fills every "Experiment ID" field below with this one, and the preview page URL
+// if url_match looks like a full URL — so picking from the list is one click.
+function useExperiment(id, urlMatch) {
+  ['var-exp-id', 'manage-exp-id', 'status-exp-id', 'results-exp-id'].forEach((fieldId) => {
+    document.getElementById(fieldId).value = id;
+  });
+  if (/^https?:\/\//.test(urlMatch)) document.getElementById('manage-page-url').value = urlMatch;
+  document.getElementById('manage-exp-id').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// Refresh the list whenever the key is filled in (paste, then tab/click away).
+document.getElementById('api-key').addEventListener('change', loadExperimentList);
+
 async function createExperiment() {
   const name = document.getElementById('exp-name').value;
   const url_match = document.getElementById('exp-url').value;
@@ -185,6 +243,7 @@ async function createExperiment() {
     });
     // If the url_match looks like a real URL (not just a path fragment), pre-fill the preview URL too.
     if (/^https?:\/\//.test(url_match)) document.getElementById('manage-page-url').value = url_match;
+    loadExperimentList();
   } else {
     el.textContent = `Error: ${result.message}`;
   }
@@ -399,6 +458,7 @@ async function updateStatus() {
   });
   el.className = result.ok ? 'ok-msg' : 'error-msg';
   el.textContent = result.ok ? `Status updated to "${result.data.status}"` : `Error: ${result.message}`;
+  if (result.ok) loadExperimentList();
 }
 
 let rateChart, trendChart;

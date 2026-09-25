@@ -45,6 +45,25 @@ router.get('/', async (req, res) => {
 // Everything below is admin-only, requires x-api-key.
 router.use(requireApiKey);
 
+// GET /api/experiments/all — every experiment regardless of status, with a variant
+// count, for the dashboard's "Your Experiments" list. Must be registered before
+// GET /:id below, or Express will try to match "all" as an :id value.
+router.get('/all', async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT e.*, COUNT(v.id)::int AS variant_count
+       FROM experiments e
+       LEFT JOIN variants v ON v.experiment_id = e.id
+       GROUP BY e.id
+       ORDER BY e.created_at DESC`
+    );
+    res.json({ experiments: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
 // GET /api/experiments/:id — full experiment + ALL its variants (including paused
 // ones and their enabled state), for the dashboard's manage/preview view.
 router.get('/:id', async (req, res) => {

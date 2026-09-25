@@ -35,6 +35,10 @@ Basic A/B testing platform: snippet + API + results dashboard.
 6. Add `goals` to a variant (see below) to track clicks as conversions.
 7. **View results** on the dashboard by experiment ID.
 
+## Finding your experiments again
+
+The dashboard's **"Your Experiments"** section (right at the top, under the API key field) lists every experiment you've created — name, status, URL match, variant count, created date — pulled fresh from the database, so nothing needs to be written down or remembered. It loads automatically once you paste your API key, or click "Refresh List" any time. Each row has a **"Use ↓"** button that fills the Experiment ID into every section below it in one click, so you don't need to copy-paste IDs around manually.
+
 ## Change format (`changes` field on a variant)
 
 The dashboard's "Add Variant" section now builds this for you via a form (selector + dropdown + value) — you shouldn't need to hand-write this JSON anymore. Documented here for reference / if you ever call the API directly:
