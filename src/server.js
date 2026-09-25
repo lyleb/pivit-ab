@@ -11,7 +11,13 @@ const resultsRouter = require('./routes/results');
 const { router: goalsRouter } = require('./routes/goals');
 
 const app = express();
-app.use(cors()); // the snippet runs on client sites, so cross-origin calls must be allowed
+// origin: true reflects whatever site is actually calling (rather than a fixed
+// wildcard '*'), and credentials: true allows it — both are required together
+// because navigator.sendBeacon (used to log view/conversion events) always sends
+// requests in credentialed mode, and CORS forbids pairing that with a wildcard
+// Access-Control-Allow-Origin. This still permits the snippet on ANY client site,
+// it's just no longer a literal '*' in the response header.
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
 // Serve the built snippet + the admin dashboard as static files
