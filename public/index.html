@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AB Platform — Admin</title>
+<style>
+  :root { font-family: -apple-system, Segoe UI, Roboto, sans-serif; }
+  body { max-width: 900px; margin: 40px auto; padding: 0 20px; color: #1B2A2E; }
+  h1 { color: #1AB7C8; }
+  section { margin-bottom: 40px; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
+  label { display: block; margin-top: 12px; font-weight: 600; }
+  input, textarea, select { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; font-family: monospace; }
+  textarea { height: 120px; }
+  button { margin-top: 16px; padding: 10px 18px; background: #1AB7C8; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; }
+  button:hover { background: #159aa8; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+  .hint { color: #666; font-size: 0.85em; }
+  pre { background: #f5f5f5; padding: 12px; border-radius: 6px; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>AB Platform</h1>
+
+<section>
+  <h2>0. Admin API Key</h2>
+  <p class="hint">Required for everything below except the snippet itself. Set on the server via the <code>ADMIN_API_KEY</code> env var — paste the same value here. Stored only in this browser tab's memory, not saved anywhere.</p>
+  <label>API Key</label>
+  <input id="api-key" type="password" placeholder="paste your ADMIN_API_KEY">
+</section>
+
+<section>
+  <h2>1. Create Experiment</h2>
+  <label>Name</label>
+  <input id="exp-name" placeholder="Homepage CTA button copy">
+  <label>URL match <span class="hint">(substring the page URL must contain)</span></label>
+  <input id="exp-url" placeholder="/pricing">
+  <button onclick="createExperiment()">Create</button>
+  <p id="exp-result" class="hint"></p>
+</section>
+
+<section>
+  <h2>2. Add Variant</h2>
+  <label>Experiment ID</label>
+  <input id="var-exp-id" placeholder="paste experiment id">
+  <label>Variant Name</label>
+  <input id="var-name" placeholder="control / variant-b">
+  <label>Traffic Split (%)</label>
+  <input id="var-split" type="number" value="50">
+  <label>Changes (JSON array)</label>
+  <textarea id="var-changes">[
+  { "selector": "#cta-button", "type": "text", "value": "Get Started Free" }
+]</textarea>
+  <p class="hint">Change types: text, html, hide, show, style ({property: value}), attr (needs "attr" field)</p>
+  <label>Goals (JSON array, optional) — clicks on these count as conversions</label>
+  <textarea id="var-goals">[
+  { "selector": "#cta-button", "id": "cta_click" }
+]</textarea>
+  <button onclick="createVariant()">Add Variant</button>
+  <p id="var-result" class="hint"></p>
+</section>
+
+<section>
+  <h2>3. Start / Pause Experiment</h2>
+  <label>Experiment ID</label>
+  <input id="status-exp-id" placeholder="paste experiment id">
+  <label>Status</label>
+  <select id="status-value">
+    <option value="running">running</option>
+    <option value="paused">paused</option>
+    <option value="draft">draft</option>
+    <option value="archived">archived</option>
+  </select>
+  <button onclick="updateStatus()">Update</button>
+  <p id="status-result" class="hint"></p>
+</section>
+
+<section>
+  <h2>4. View Results</h2>
+  <label>Experiment ID</label>
+  <input id="results-exp-id" placeholder="paste experiment id">
+  <button onclick="loadResults()">Load Results</button>
+  <table id="results-table" style="display:none">
+    <thead><tr><th>Variant</th><th>Visitors</th><th>Clicks</th><th>Conversions</th><th>Rate</th></tr></thead>
+    <tbody id="results-body"></tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Snippet to give clients</h2>
+  <pre id="snippet-code">&lt;script src="SNIPPET_URL" data-api="API_BASE"&gt;&lt;/script&gt;</pre>
+  <p class="hint">Replace SNIPPET_URL and API_BASE with your deployed host once live.</p>
+</section>
+
+<script>
+const API = '';
+
+function authHeaders() {
+  const key = document.getElementById('api-key').value;
+  return { 'Content-Type': 'application/json', 'x-api-key': key };
+}
+
+async function createExperiment() {
+  const name = document.getElementById('exp-name').value;
+  const url_match = document.getElementById('exp-url').value;
+  const res = await fetch(API + '/api/experiments', {
+    method: 'POST', headers: authHeaders(),
+    body: JSON.stringify({ name, url_match })
+  });
+  const data = await res.json();
+  document.getElementById('exp-result').textContent = res.ok
+    ? `Created. Experiment ID: ${data.id}`
+    : `Error: ${data.error}`;
+}
+
+async function createVariant() {
+  const expId = document.getElementById('var-exp-id').value;
+  const name = document.getElementById('var-name').value;
+  const traffic_split = parseInt(document.getElementById('var-split').value, 10);
+  let changes, goals;
+  try {
+    changes = JSON.parse(document.getElementById('var-changes').value);
+    goals = JSON.parse(document.getElementById('var-goals').value || '[]');
+  } catch (e) {
+    document.getElementById('var-result').textContent = 'Invalid JSON in changes or goals field.';
+    return;
+  }
+  const res = await fetch(`${API}/api/experiments/${expId}/variants`, {
+    method: 'POST', headers: authHeaders(),
+    body: JSON.stringify({ name, traffic_split, changes, goals })
+  });
+  const data = await res.json();
+  document.getElementById('var-result').textContent = res.ok
+    ? `Variant created. ID: ${data.id}`
+    : `Error: ${data.error}`;
+}
+
+async function updateStatus() {
+  const expId = document.getElementById('status-exp-id').value;
+  const status = document.getElementById('status-value').value;
+  const res = await fetch(`${API}/api/experiments/${expId}/status`, {
+    method: 'PATCH', headers: authHeaders(),
+    body: JSON.stringify({ status })
+  });
+  const data = await res.json();
+  document.getElementById('status-result').textContent = res.ok
+    ? `Status updated to "${data.status}"`
+    : `Error: ${data.error}`;
+}
+
+async function loadResults() {
+  const expId = document.getElementById('results-exp-id').value;
+  const res = await fetch(`${API}/api/results/${expId}`, { headers: authHeaders() });
+  const data = await res.json();
+  const tbody = document.getElementById('results-body');
+  tbody.innerHTML = '';
+  (data.results || []).forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${r.variant_name}</td><td>${r.visitors}</td><td>${r.clicks}</td><td>${r.conversions}</td><td>${r.conversion_rate}%</td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('results-table').style.display = 'table';
+}
+</script>
+</body>
+</html>
