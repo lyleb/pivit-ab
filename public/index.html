@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AB Platform — Admin</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
   :root { font-family: -apple-system, Segoe UI, Roboto, sans-serif; }
   body { max-width: 960px; margin: 40px auto; padding: 0 20px; color: #1B2A2E; }
@@ -29,6 +30,14 @@
   .goal-row { grid-template-columns: 1.3fr 1fr auto; align-items: center; }
   .change-row .full-width { grid-column: 1 / -1; }
   .picker-link { display: inline-block; padding: 10px 18px; background: #1B2A2E; color: white; border-radius: 6px; text-decoration: none; font-weight: 600; cursor: grab; }
+  .variant-card { display: flex; justify-content: space-between; align-items: center; padding: 14px; margin-top: 10px; background: #fafafa; border-radius: 6px; border-left: 4px solid #1AB7C8; }
+  .variant-card.disabled { border-left-color: #ccc; opacity: 0.65; }
+  .variant-card .vc-meta { font-size: 0.85em; color: #666; }
+  .variant-card .vc-actions button { margin: 0 0 0 8px; padding: 6px 12px; font-size: 0.85em; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75em; font-weight: 600; }
+  .badge.live { background: #d4f4e2; color: #1a8a5c; }
+  .badge.paused { background: #eee; color: #666; }
+  .chart-wrap { max-width: 100%; margin-top: 20px; }
 </style>
 </head>
 <body>
@@ -80,7 +89,18 @@
 </section>
 
 <section>
-  <h2>3. Start / Pause Experiment</h2>
+  <h2>3. Preview & Manage Variants</h2>
+  <label>Experiment ID</label>
+  <input id="manage-exp-id" placeholder="paste experiment id">
+  <label>Page URL to preview on <span class="hint">(the actual page, e.g. https://cantsaythat.co.uk/shop)</span></label>
+  <input id="manage-page-url" placeholder="https://cantsaythat.co.uk/shop">
+  <button onclick="loadManageVariants()">Load Variants</button>
+  <p id="manage-msg" class="hint"></p>
+  <div id="manage-variants-list"></div>
+</section>
+
+<section>
+  <h2>4. Start / Pause Experiment</h2>
   <label>Experiment ID</label>
   <input id="status-exp-id" placeholder="paste experiment id">
   <label>Status</label>
@@ -95,7 +115,7 @@
 </section>
 
 <section>
-  <h2>4. View Results</h2>
+  <h2>5. View Results</h2>
   <label>Experiment ID</label>
   <input id="results-exp-id" placeholder="paste experiment id">
   <button onclick="loadResults()">Load Results</button>
@@ -104,6 +124,8 @@
     <thead><tr><th>Variant</th><th>Visitors</th><th>Clicks</th><th>Conversions</th><th>Rate</th></tr></thead>
     <tbody id="results-body"></tbody>
   </table>
+  <div class="chart-wrap"><canvas id="rate-chart" style="display:none"></canvas></div>
+  <div class="chart-wrap"><canvas id="trend-chart" style="display:none"></canvas></div>
 </section>
 
 <section>
@@ -136,7 +158,12 @@ async function callApi(path, options = {}) {
   try { data = raw ? JSON.parse(raw) : null; } catch (e) { /* not JSON */ }
 
   if (!res.ok) {
-    const detail = data && data.error ? data.error : (raw || `HTTP ${res.status}`);
+    let detail;
+    if (data && (data.error || data.detail)) {
+      detail = data.detail ? `${data.error} — ${data.detail}` : data.error;
+    } else {
+      detail = raw || `HTTP ${res.status}`;
+    }
     return { ok: false, message: `${res.status}: ${detail}` };
   }
   return { ok: true, data };
@@ -153,9 +180,11 @@ async function createExperiment() {
   if (result.ok) {
     el.textContent = `Created. Experiment ID: ${result.data.id}`;
     // Auto-fill downstream sections so the id doesn't need copy-pasting around.
-    ['var-exp-id', 'status-exp-id', 'results-exp-id'].forEach((fieldId) => {
+    ['var-exp-id', 'manage-exp-id', 'status-exp-id', 'results-exp-id'].forEach((fieldId) => {
       document.getElementById(fieldId).value = result.data.id;
     });
+    // If the url_match looks like a real URL (not just a path fragment), pre-fill the preview URL too.
+    if (/^https?:\/\//.test(url_match)) document.getElementById('manage-page-url').value = url_match;
   } else {
     el.textContent = `Error: ${result.message}`;
   }
@@ -294,6 +323,71 @@ async function createVariant() {
   el.textContent = result.ok ? `Variant created. ID: ${result.data.id}` : `Error: ${result.message}`;
 }
 
+// --- Preview & manage variants ---
+
+function buildPreviewUrl(pageUrl, variantId) {
+  const sep = pageUrl.includes('?') ? '&' : '?';
+  return `${pageUrl}${sep}ab_preview=${variantId}`;
+}
+
+async function loadManageVariants() {
+  const expId = document.getElementById('manage-exp-id').value.trim();
+  const msgEl = document.getElementById('manage-msg');
+  const listEl = document.getElementById('manage-variants-list');
+  listEl.innerHTML = '';
+  if (!expId) { msgEl.className = 'error-msg'; msgEl.textContent = 'Enter an Experiment ID first (or create one above).'; return; }
+
+  const result = await callApi(`/api/experiments/${expId}`, { headers: authHeaders() });
+  if (!result.ok) { msgEl.className = 'error-msg'; msgEl.textContent = `Error: ${result.message}`; return; }
+
+  const pageUrl = document.getElementById('manage-page-url').value.trim();
+  const variants = result.data.variants || [];
+  if (variants.length === 0) { msgEl.className = 'hint'; msgEl.textContent = 'No variants yet on this experiment.'; return; }
+
+  msgEl.textContent = '';
+  variants.forEach((v) => {
+    const card = document.createElement('div');
+    card.className = 'variant-card' + (v.enabled ? '' : ' disabled');
+    const previewBtn = pageUrl
+      ? `<button type="button" class="secondary" onclick="window.open('${buildPreviewUrl(pageUrl, v.id)}', '_blank')">Preview</button>`
+      : `<button type="button" class="secondary" disabled title="Enter a page URL above first">Preview</button>`;
+    card.innerHTML = `
+      <div>
+        <strong>${v.name}</strong>
+        <span class="badge ${v.enabled ? 'live' : 'paused'}">${v.enabled ? 'live' : 'paused'}</span>
+        <div class="vc-meta">${v.traffic_split}% traffic · ${(v.changes || []).length} change(s) · ${(v.goals || []).length} goal(s)</div>
+      </div>
+      <div class="vc-actions">
+        ${previewBtn}
+        <button type="button" class="secondary" onclick="toggleVariantEnabled('${expId}', '${v.id}', ${!v.enabled}, this)">${v.enabled ? 'Pause' : 'Resume'}</button>
+        <button type="button" class="secondary" style="color:#c0392b" onclick="deleteVariant('${expId}', '${v.id}', this)">Delete</button>
+      </div>
+    `;
+    listEl.appendChild(card);
+  });
+}
+
+async function toggleVariantEnabled(expId, variantId, enabled, btn) {
+  btn.disabled = true;
+  const result = await callApi(`/api/experiments/${expId}/variants/${variantId}/enabled`, {
+    method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ enabled })
+  });
+  btn.disabled = false;
+  if (!result.ok) { alert(`Error: ${result.message}`); return; }
+  loadManageVariants();
+}
+
+async function deleteVariant(expId, variantId, btn) {
+  if (!confirm('Delete this variant permanently? This also deletes its recorded views/conversions and cannot be undone.\n\nIf you just want to stop it running while keeping its history, use Pause instead.')) return;
+  btn.disabled = true;
+  const result = await callApi(`/api/experiments/${expId}/variants/${variantId}`, {
+    method: 'DELETE', headers: authHeaders()
+  });
+  btn.disabled = false;
+  if (!result.ok) { alert(`Error: ${result.message}`); return; }
+  loadManageVariants();
+}
+
 async function updateStatus() {
   const expId = document.getElementById('status-exp-id').value.trim();
   const el = document.getElementById('status-result');
@@ -307,6 +401,8 @@ async function updateStatus() {
   el.textContent = result.ok ? `Status updated to "${result.data.status}"` : `Error: ${result.message}`;
 }
 
+let rateChart, trendChart;
+
 async function loadResults() {
   const expId = document.getElementById('results-exp-id').value.trim();
   const msgEl = document.getElementById('results-msg');
@@ -318,17 +414,65 @@ async function loadResults() {
     msgEl.className = 'error-msg';
     msgEl.textContent = `Error: ${result.message}`;
     document.getElementById('results-table').style.display = 'none';
+    document.getElementById('rate-chart').style.display = 'none';
+    document.getElementById('trend-chart').style.display = 'none';
     return;
   }
   msgEl.textContent = '';
+  const results = result.data.results || [];
   const tbody = document.getElementById('results-body');
   tbody.innerHTML = '';
-  (result.data.results || []).forEach(r => {
+  results.forEach(r => {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${r.variant_name}</td><td>${r.visitors}</td><td>${r.clicks}</td><td>${r.conversions}</td><td>${r.conversion_rate}%</td>`;
     tbody.appendChild(tr);
   });
   document.getElementById('results-table').style.display = 'table';
+
+  // Bar chart: conversion rate per variant — the headline "which one's winning" view.
+  const rateCanvas = document.getElementById('rate-chart');
+  rateCanvas.style.display = results.length ? 'block' : 'none';
+  if (rateChart) rateChart.destroy();
+  if (results.length) {
+    rateChart = new Chart(rateCanvas, {
+      type: 'bar',
+      data: {
+        labels: results.map(r => r.variant_name),
+        datasets: [{ label: 'Conversion rate (%)', data: results.map(r => r.conversion_rate), backgroundColor: '#1AB7C8' }]
+      },
+      options: { responsive: true, plugins: { title: { display: true, text: 'Conversion rate by variant' } }, scales: { y: { beginAtZero: true } } }
+    });
+  }
+
+  // Line chart: cumulative visitors over time per variant — the trend view.
+  const trendResult = await callApi(`/api/results/${expId}/timeseries`, { headers: authHeaders() });
+  const trendCanvas = document.getElementById('trend-chart');
+  if (trendChart) trendChart.destroy();
+  if (trendResult.ok && trendResult.data.series && trendResult.data.series.length) {
+    const series = trendResult.data.series;
+    const days = [...new Set(series.map(r => r.day))].sort();
+    const variantNames = [...new Set(series.map(r => r.variant_name))];
+    const palette = ['#1AB7C8', '#1B2A2E', '#e07a5f', '#8a5cf6', '#1a8a5c'];
+
+    const datasets = variantNames.map((name, i) => {
+      let running = 0;
+      const dataByDay = days.map((day) => {
+        const row = series.find(r => r.day === day && r.variant_name === name);
+        running += row ? row.visitors : 0;
+        return running;
+      });
+      return { label: name, data: dataByDay, borderColor: palette[i % palette.length], backgroundColor: palette[i % palette.length], tension: 0.2, fill: false };
+    });
+
+    trendCanvas.style.display = 'block';
+    trendChart = new Chart(trendCanvas, {
+      type: 'line',
+      data: { labels: days.map(d => new Date(d).toLocaleDateString()), datasets },
+      options: { responsive: true, plugins: { title: { display: true, text: 'Cumulative visitors over time' } }, scales: { y: { beginAtZero: true } } }
+    });
+  } else {
+    trendCanvas.style.display = 'none';
+  }
 }
 
 // --- Selector picker bookmarklet ---

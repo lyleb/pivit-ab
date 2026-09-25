@@ -3,27 +3,30 @@ const db = require('../db');
 const { requireApiKey } = require('../middleware/auth');
 const router = express.Router();
 
-// GET /api/experiments?url=https://client-site.com/pricing
+// GET /api/experiments?url=https://client-site.com/pricing[&preview=1]
 // PUBLIC — called by the snippet from any visitor's browser. No auth.
-// Returns all *running* experiments whose url_match is found in the given URL,
-// each with its variants, DOM-change instructions, and goals.
+// Normally returns only *running* experiments with only their *enabled* variants.
+// With preview=1 (set by the snippet when it sees an ?ab_preview= param), status
+// and enabled are ignored so you can preview a draft/paused experiment or a paused variant.
 router.get('/', async (req, res) => {
-  const { url } = req.query;
+  const { url, preview } = req.query;
   if (!url) return res.status(400).json({ error: 'url query param is required' });
 
   try {
+    const statusClause = preview ? '' : `AND status = 'running'`;
     const { rows: experiments } = await db.query(
       `SELECT id, name, url_match FROM experiments
-       WHERE status = 'running' AND $1 ILIKE '%' || url_match || '%'`,
+       WHERE $1 ILIKE '%' || url_match || '%' ${statusClause}`,
       [url]
     );
 
     if (experiments.length === 0) return res.json({ experiments: [] });
 
     const experimentIds = experiments.map((e) => e.id);
+    const enabledClause = preview ? '' : 'AND enabled = true';
     const { rows: variants } = await db.query(
       `SELECT id, experiment_id, name, traffic_split, changes, goals
-       FROM variants WHERE experiment_id = ANY($1::uuid[])`,
+       FROM variants WHERE experiment_id = ANY($1::uuid[]) ${enabledClause}`,
       [experimentIds]
     );
 
@@ -39,8 +42,27 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Everything below creates/edits experiments — admin-only, requires x-api-key.
+// Everything below is admin-only, requires x-api-key.
 router.use(requireApiKey);
+
+// GET /api/experiments/:id — full experiment + ALL its variants (including paused
+// ones and their enabled state), for the dashboard's manage/preview view.
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rows: expRows } = await db.query(`SELECT * FROM experiments WHERE id = $1`, [id]);
+    if (expRows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
+
+    const { rows: variants } = await db.query(
+      `SELECT * FROM variants WHERE experiment_id = $1 ORDER BY created_at`,
+      [id]
+    );
+    res.json({ ...expRows[0], variants });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
 
 router.post('/', async (req, res) => {
   try {
@@ -73,8 +95,47 @@ router.post('/:id/variants', async (req, res) => {
     res.status(201).json(rows[0]);
   } catch (err) {
     console.error(err);
-    // A bad/non-existent experiment id lands here as a foreign-key violation — surface that clearly.
     if (err.code === '23503') return res.status(400).json({ error: 'no experiment found with that id' });
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
+// PATCH /api/experiments/:id/variants/:variantId/enabled  { enabled: true|false }
+// "Stop" a variant without losing its history — it's excluded from new visitor
+// traffic (and re-included from disk) but past events stay in the results table.
+router.patch('/:id/variants/:variantId/enabled', async (req, res) => {
+  try {
+    const { id, variantId } = req.params;
+    const { enabled } = req.body;
+    if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be true or false' });
+
+    const { rows } = await db.query(
+      `UPDATE variants SET enabled = $1 WHERE id = $2 AND experiment_id = $3 RETURNING *`,
+      [enabled, variantId, id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id on that experiment' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
+// DELETE /api/experiments/:id/variants/:variantId
+// Permanent — also removes that variant's events (ON DELETE CASCADE), so its
+// history is gone too. Pausing (above) is the safer option if you just want to
+// stop traffic while keeping results to look back on.
+router.delete('/:id/variants/:variantId', async (req, res) => {
+  try {
+    const { id, variantId } = req.params;
+    const { rows } = await db.query(
+      `DELETE FROM variants WHERE id = $1 AND experiment_id = $2 RETURNING id`,
+      [variantId, id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id on that experiment' });
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });
   }
 });

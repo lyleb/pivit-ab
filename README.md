@@ -70,6 +70,20 @@ The dashboard has a "Goals" section alongside "Changes" when adding a variant �
 
 Any click on a goal's selector fires a `convert` event back to the API (distinct from the automatic `view` event and from plain `click` events, which aren't sent unless tied to a goal). The results table counts these under "conversions" and calculates the rate as conversions ÷ visitors.
 
+## Previewing a variant
+
+Use the **"Preview & Manage Variants"** section: enter the Experiment ID and the actual page URL you're testing on, click Load, then hit **Preview** on any variant. It opens that variant in a new tab via `?ab_preview=<variant_id>` appended to the URL. This works even for a draft/paused experiment or a paused variant, and it never logs a view/conversion event — previewing never touches your real results.
+
+## Pausing or deleting a variant
+
+Same section as above:
+- **Pause** stops a variant from being shown to new visitors but keeps all its recorded history — use this to stop a losing variant while still being able to look back at its numbers.
+- **Delete** removes the variant permanently, including its recorded events (`ON DELETE CASCADE`). No undo — pause instead if you're not certain.
+
+## Results & performance charts
+
+The "View Results" section now draws two charts alongside the table: a bar chart of conversion rate per variant, and a line chart of cumulative visitors over time per variant, so you can see a trend rather than just a single snapshot.
+
 ## Admin authentication
 
 Every route except the two the snippet calls (`GET /api/experiments`, `POST /api/event`) requires an `x-api-key` header matching your `ADMIN_API_KEY` env var. This covers creating experiments, adding variants, changing status, and viewing results.

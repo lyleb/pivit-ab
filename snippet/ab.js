@@ -1,5 +1,5 @@
 /**
- * AB Platform snippet — v0.1
+ * AB Platform snippet — v0.2
  *
  * Usage on client site:
  *   <script src="https://your-api.example.com/snippet/ab.js"
@@ -8,6 +8,11 @@
  * Fetches active experiments for the current page, assigns the visitor
  * to a variant per experiment (sticky via localStorage), applies DOM
  * changes, and reports view/click events back to the API.
+ *
+ * Preview mode: append ?ab_preview=<variant_id> to any URL to force that
+ * variant (works even if the experiment is draft/paused or the variant is
+ * disabled) without logging any view/conversion events. The admin dashboard
+ * generates these links for you.
  */
 (function () {
   const scriptTag = document.currentScript;
@@ -118,18 +123,35 @@
     const visitorId = getVisitorId();
     const url = encodeURIComponent(window.location.href);
 
+    // Preview mode: ?ab_preview=<variant_id> forces that exact variant, works even
+    // for a draft/paused experiment or a paused variant, and never logs events —
+    // so previewing never pollutes your real results.
+    const previewVariantId = new URLSearchParams(window.location.search).get('ab_preview');
+    const previewQuery = previewVariantId ? '&preview=1' : '';
+
     try {
-      const res = await fetch(`${API_BASE}/api/experiments?url=${url}`);
+      const res = await fetch(`${API_BASE}/api/experiments?url=${url}${previewQuery}`);
       const data = await res.json();
 
       (data.experiments || []).forEach((experiment) => {
         if (!experiment.variants || experiment.variants.length === 0) return;
 
-        const variant = pickVariant(experiment, visitorId);
+        let variant;
+        let isPreview = false;
+        if (previewVariantId) {
+          const match = experiment.variants.find((v) => v.id === previewVariantId);
+          if (match) { variant = match; isPreview = true; }
+        }
+        if (!variant) variant = pickVariant(experiment, visitorId);
+
         (variant.changes || []).forEach(applyChange);
 
-        sendEvent(experiment.id, variant.id, visitorId, 'view');
-        wireConversionTracking(experiment.id, variant.id, visitorId, variant);
+        if (isPreview) {
+          console.info(`[ab] preview mode — showing variant "${variant.name}" for experiment "${experiment.name}". No events are being logged.`);
+        } else {
+          sendEvent(experiment.id, variant.id, visitorId, 'view');
+          wireConversionTracking(experiment.id, variant.id, visitorId, variant);
+        }
       });
     } catch (err) {
       console.warn('[ab] failed to load experiments:', err);
