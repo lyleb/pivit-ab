@@ -67,6 +67,14 @@
 </section>
 
 <section>
+  <h2>Your Snippet</h2>
+  <p class="hint">Same tag for every experiment on this app — paste it once per site, just before <code>&lt;/body&gt;</code>.</p>
+  <pre id="snippet-code"></pre>
+  <button type="button" class="secondary" onclick="copySnippet()">Copy</button>
+  <span id="snippet-copied" class="hint"></span>
+</section>
+
+<section>
   <h2>1. Create Experiment</h2>
   <label>Name</label>
   <input id="exp-name" placeholder="Homepage CTA button copy">
@@ -136,12 +144,6 @@
   </table>
   <div class="chart-wrap"><canvas id="rate-chart" style="display:none"></canvas></div>
   <div class="chart-wrap"><canvas id="trend-chart" style="display:none"></canvas></div>
-</section>
-
-<section>
-  <h2>Snippet to give clients</h2>
-  <pre id="snippet-code">&lt;script src="SNIPPET_URL" data-api="API_BASE"&gt;&lt;/script&gt;</pre>
-  <p class="hint">Replace SNIPPET_URL and API_BASE with your deployed host once live.</p>
 </section>
 
 <script>
@@ -227,6 +229,23 @@ function useExperiment(id, urlMatch) {
 // Refresh the list whenever the key is filled in (paste, then tab/click away).
 document.getElementById('api-key').addEventListener('change', loadExperimentList);
 
+// --- Snippet, computed from wherever this dashboard is actually hosted ---
+
+function snippetTag() {
+  return `<script src="${location.origin}/snippet/ab.js" data-api="${location.origin}"></script>`;
+}
+document.getElementById('snippet-code').textContent = snippetTag();
+
+function copySnippet() {
+  navigator.clipboard.writeText(snippetTag()).then(() => {
+    const el = document.getElementById('snippet-copied');
+    el.textContent = 'Copied!';
+    setTimeout(() => { el.textContent = ''; }, 2000);
+  }).catch(() => {
+    document.getElementById('snippet-copied').textContent = 'Could not copy — select the text above manually.';
+  });
+}
+
 async function createExperiment() {
   const name = document.getElementById('exp-name').value;
   const url_match = document.getElementById('exp-url').value;
@@ -236,7 +255,7 @@ async function createExperiment() {
   });
   el.className = result.ok ? 'ok-msg' : 'error-msg';
   if (result.ok) {
-    el.textContent = `Created. Experiment ID: ${result.data.id}`;
+    el.textContent = `Created. Experiment ID: ${result.data.id}. Make sure the snippet above is installed on the target page.`;
     // Auto-fill downstream sections so the id doesn't need copy-pasting around.
     ['var-exp-id', 'manage-exp-id', 'status-exp-id', 'results-exp-id'].forEach((fieldId) => {
       document.getElementById(fieldId).value = result.data.id;
@@ -308,15 +327,40 @@ function addGoalRow(prefill) {
   const row = document.createElement('div');
   row.className = 'goal-row';
   row.innerHTML = `
-    <div><label>Selector</label><input class="g-selector" placeholder="#cta-button"></div>
+    <div>
+      <label>Goal type</label>
+      <select class="g-type">
+        <option value="click">Click on element (any selector — button, div, span, etc.)</option>
+        <option value="url">Visited a URL (e.g. a thank-you / confirmation page)</option>
+      </select>
+      <label class="g-value-label">Selector</label>
+      <input class="g-value" placeholder="#cta-button">
+    </div>
     <div><label>Label</label><input class="g-id" placeholder="cta_click"></div>
     <button type="button" class="remove-row" onclick="this.closest('.goal-row').remove()">✕</button>
   `;
   list.appendChild(row);
-  if (prefill) {
-    row.querySelector('.g-selector').value = prefill.selector || '';
-    row.querySelector('.g-id').value = prefill.id || '';
+
+  const typeEl = row.querySelector('.g-type');
+  const valueLabelEl = row.querySelector('.g-value-label');
+  const valueEl = row.querySelector('.g-value');
+  function renderValueField() {
+    if (typeEl.value === 'url') {
+      valueLabelEl.textContent = 'URL contains';
+      valueEl.placeholder = '/thank-you';
+    } else {
+      valueLabelEl.textContent = 'Selector';
+      valueEl.placeholder = '#cta-button';
+    }
   }
+  typeEl.addEventListener('change', renderValueField);
+
+  if (prefill) {
+    typeEl.value = prefill.type || 'click';
+    row.querySelector('.g-id').value = prefill.id || '';
+    valueEl.value = prefill.type === 'url' ? (prefill.url_match || '') : (prefill.selector || '');
+  }
+  renderValueField();
 }
 
 // Parses "attr=value" into { attr, value } for the attribute change type.
@@ -355,15 +399,17 @@ function collectChanges() {
 }
 
 function collectGoals() {
-  return Array.from(document.querySelectorAll('#goals-list .goal-row')).map((row) => ({
-    selector: row.querySelector('.g-selector').value.trim(),
-    id: row.querySelector('.g-id').value.trim(),
-  })).filter((g) => g.selector);
+  return Array.from(document.querySelectorAll('#goals-list .goal-row')).map((row) => {
+    const type = row.querySelector('.g-type').value;
+    const value = row.querySelector('.g-value').value.trim();
+    const id = row.querySelector('.g-id').value.trim();
+    return type === 'url' ? { type: 'url', url_match: value, id } : { type: 'click', selector: value, id };
+  }).filter((g) => (g.type === 'url' ? g.url_match : g.selector));
 }
 
 // Seed one example row of each on load so the form isn't empty.
 addChangeRow({ selector: '#cta-button', type: 'text', value: 'Get Started Free' });
-addGoalRow({ selector: '#cta-button', id: 'cta_click' });
+addGoalRow({ type: 'click', selector: '#cta-button', id: 'cta_click' });
 
 async function createVariant() {
   const expId = document.getElementById('var-exp-id').value.trim();

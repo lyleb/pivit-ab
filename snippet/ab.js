@@ -111,12 +111,54 @@
 
   function wireConversionTracking(experimentId, variantId, visitorId, variant) {
     (variant.goals || []).forEach((goal) => {
+      const type = goal.type || 'click'; // goals saved before this feature have no "type" — always click
+      if (type !== 'click') return; // 'url' goals are handled by checkUrlGoals below, not here
       document.querySelectorAll(goal.selector).forEach((el) => {
         el.addEventListener('click', () => {
           sendEvent(experimentId, variantId, visitorId, 'convert', goal.id || goal.selector);
         });
       });
     });
+  }
+
+  // "Visited a URL" goals can't be wired up as a click listener on the page the
+  // experiment runs on, because the goal page (e.g. /thank-you) is often a
+  // completely different page. Instead, on every page load, check every experiment
+  // this visitor has ever been assigned to (found via localStorage) against the
+  // current URL, and fire a conversion once per goal if it matches.
+  async function checkUrlGoals(visitorId) {
+    const assignments = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.indexOf(ASSIGNMENT_PREFIX) === 0) {
+        assignments[key.slice(ASSIGNMENT_PREFIX.length)] = localStorage.getItem(key);
+      }
+    }
+    const experimentIds = Object.keys(assignments);
+    if (experimentIds.length === 0) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/experiments/by-ids?ids=${experimentIds.join(',')}`);
+      const data = await res.json();
+
+      (data.experiments || []).forEach((experiment) => {
+        const variantId = assignments[experiment.id];
+        const variant = (experiment.variants || []).find((v) => v.id === variantId);
+        if (!variant) return;
+
+        (variant.goals || []).forEach((goal) => {
+          if (goal.type !== 'url' || !goal.url_match) return;
+          if (window.location.href.indexOf(goal.url_match) === -1) return;
+
+          const firedKey = '_ab_converted_' + experiment.id + '_' + (goal.id || goal.url_match);
+          if (localStorage.getItem(firedKey)) return; // only count once per visitor per goal
+          localStorage.setItem(firedKey, '1');
+          sendEvent(experiment.id, variantId, visitorId, 'convert', goal.id || goal.url_match);
+        });
+      });
+    } catch (err) {
+      console.warn('[ab] failed to check URL goals:', err);
+    }
   }
 
   async function init() {
@@ -153,6 +195,10 @@
           wireConversionTracking(experiment.id, variant.id, visitorId, variant);
         }
       });
+
+      // Check "visited a URL" goals on every page load — including pages with no
+      // on-page experiment at all, e.g. a /thank-you confirmation page.
+      if (!previewVariantId) await checkUrlGoals(visitorId);
     } catch (err) {
       console.warn('[ab] failed to load experiments:', err);
     }

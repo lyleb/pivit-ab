@@ -42,6 +42,42 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /api/experiments/by-ids?ids=id1,id2
+// PUBLIC — used by the snippet to check "visited a URL" goals on pages other than
+// the one an experiment's changes run on (e.g. a /thank-you page after a /pricing
+// test). Looks up by exact id for whatever this visitor was already assigned to,
+// regardless of the experiment's current status, so a goal still counts even if
+// you've since paused/archived the test.
+router.get('/by-ids', async (req, res) => {
+  const { ids } = req.query;
+  if (!ids) return res.json({ experiments: [] });
+  const idList = ids.split(',').map((s) => s.trim()).filter(Boolean);
+  if (idList.length === 0) return res.json({ experiments: [] });
+
+  try {
+    const { rows: experiments } = await db.query(
+      `SELECT id, name FROM experiments WHERE id = ANY($1::uuid[])`,
+      [idList]
+    );
+    if (experiments.length === 0) return res.json({ experiments: [] });
+
+    const { rows: variants } = await db.query(
+      `SELECT id, experiment_id, name, goals FROM variants WHERE experiment_id = ANY($1::uuid[])`,
+      [idList]
+    );
+
+    const result = experiments.map((exp) => ({
+      ...exp,
+      variants: variants.filter((v) => v.experiment_id === exp.id),
+    }));
+
+    res.json({ experiments: result });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
 // Everything below is admin-only, requires x-api-key.
 router.use(requireApiKey);
 

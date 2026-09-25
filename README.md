@@ -70,9 +70,16 @@ This is a standalone tool (`snippet/picker-bookmarklet.js`) — it's not part of
 
 ## Goals (conversion tracking, optional per variant)
 
-The dashboard has a "Goals" section alongside "Changes" when adding a variant — just a selector and a label per goal, no JSON needed.
+The dashboard has a "Goals" section alongside "Changes" when adding a variant, with two goal types:
 
-Any click on a goal's selector fires a `convert` event back to the API (distinct from the automatic `view` event and from plain `click` events, which aren't sent unless tied to a goal). The results table counts these under "conversions" and calculates the rate as conversions ÷ visitors.
+- **Click on element** — fires when the visitor clicks anything matching the selector. Works on any element, not just `<button>` — a `div`, `span`, link, whatever you point it at.
+- **Visited a URL** — fires when the visitor later loads any page whose URL contains the text you give (e.g. `/thank-you`). This works even though that page is completely different from the one the experiment's changes run on — the snippet checks every page load against every experiment you've ever been assigned to, not just the one currently "running" there. Each goal only ever counts once per visitor.
+
+Any goal firing sends a `convert` event back to the API (distinct from the automatic `view` event). The results table counts these under "conversions" and calculates the rate as conversions ÷ visitors.
+
+## Running experiments across multiple sites
+
+One deployment of this app can run experiments on as many different domains as you like at once. `url_match` is just a substring check against whatever page the snippet loads on — it has nothing to do with which site it's running on. Install the same snippet tag (see "Your Snippet" at the top of the dashboard) once per site, and the server figures out which experiments apply based on the current page's URL every time it loads. No per-site configuration needed beyond pasting the tag in.
 
 ## Previewing a variant
 
