@@ -8,6 +8,7 @@ const db = require('./db');
 const experimentsRouter = require('./routes/experiments');
 const eventsRouter = require('./routes/events');
 const resultsRouter = require('./routes/results');
+const { router: goalsRouter } = require('./routes/goals');
 
 const app = express();
 app.use(cors()); // the snippet runs on client sites, so cross-origin calls must be allowed
@@ -20,6 +21,7 @@ app.use(express.static(path.join(__dirname, '../public')));
 app.use('/api/experiments', experimentsRouter);
 app.use('/api/event', eventsRouter);
 app.use('/api/results', resultsRouter);
+app.use('/api/goals', goalsRouter);
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 

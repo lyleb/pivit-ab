@@ -86,8 +86,9 @@
 
 <section>
   <h2>2. Add Variant</h2>
-  <label>Experiment ID</label>
-  <input id="var-exp-id" placeholder="paste experiment id">
+  <p id="edit-banner" class="hint" style="display:none; color:#c0392b;">Editing an existing variant — changes take effect immediately for live traffic. <button type="button" class="secondary" onclick="cancelEditVariant()" style="margin:0 0 0 8px;">Cancel edit</button></p>
+  <label>Experiment</label>
+  <select id="var-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
   <label>Variant Name</label>
   <input id="var-name" placeholder="control / variant-b">
   <label>Traffic Split (%)</label>
@@ -97,19 +98,21 @@
   <div id="changes-list"></div>
   <button type="button" class="secondary" onclick="addChangeRow()">+ Add another change</button>
 
-  <h3>Goals <span class="hint">(optional — clicks on these count as conversions)</span></h3>
+  <h3>Goals <span class="hint">(optional — clicks or URL visits that count as conversions)</span></h3>
+  <div id="popular-goals"></div>
   <div id="goals-list"></div>
   <button type="button" class="secondary" onclick="addGoalRow()">+ Add another goal</button>
 
   <br>
-  <button onclick="createVariant()">Add Variant</button>
+  <input type="hidden" id="editing-variant-id" value="">
+  <button id="save-variant-btn" onclick="saveVariant()">Add Variant</button>
   <p id="var-result" class="hint"></p>
 </section>
 
 <section>
   <h2>3. Preview & Manage Variants</h2>
-  <label>Experiment ID</label>
-  <input id="manage-exp-id" placeholder="paste experiment id">
+  <label>Experiment</label>
+  <select id="manage-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
   <label>Page URL to preview on <span class="hint">(the actual page, e.g. https://cantsaythat.co.uk/shop)</span></label>
   <input id="manage-page-url" placeholder="https://cantsaythat.co.uk/shop">
   <button onclick="loadManageVariants()">Load Variants</button>
@@ -119,8 +122,8 @@
 
 <section>
   <h2>4. Start / Pause Experiment</h2>
-  <label>Experiment ID</label>
-  <input id="status-exp-id" placeholder="paste experiment id">
+  <label>Experiment</label>
+  <select id="status-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
   <label>Status</label>
   <select id="status-value">
     <option value="running">running</option>
@@ -134,8 +137,8 @@
 
 <section>
   <h2>5. View Results</h2>
-  <label>Experiment ID</label>
-  <input id="results-exp-id" placeholder="paste experiment id">
+  <label>Experiment</label>
+  <select id="results-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
   <button onclick="loadResults()">Load Results</button>
   <p id="results-msg" class="hint"></p>
   <table id="results-table" style="display:none">
@@ -144,6 +147,7 @@
   </table>
   <div class="chart-wrap"><canvas id="rate-chart" style="display:none"></canvas></div>
   <div class="chart-wrap"><canvas id="trend-chart" style="display:none"></canvas></div>
+  <button type="button" class="secondary" id="refresh-results-btn" style="display:none" onclick="loadResults()">🔄 Refresh Results</button>
 </section>
 
 <script>
@@ -184,6 +188,21 @@ async function callApi(path, options = {}) {
 // --- Experiments list ---
 
 const STATUS_COLORS = { running: 'live', draft: 'paused', paused: 'paused', archived: 'paused' };
+const EXP_SELECT_IDS = ['var-exp-id', 'manage-exp-id', 'status-exp-id', 'results-exp-id'];
+
+// Rebuilds all four "Experiment" dropdowns from the current list, preserving
+// whatever was selected in each if that experiment still exists.
+function populateExperimentSelects(experiments) {
+  EXP_SELECT_IDS.forEach((fieldId) => {
+    const select = document.getElementById(fieldId);
+    const previousValue = select.value;
+    const options = experiments.map((exp) =>
+      `<option value="${exp.id}">${exp.name} — ${exp.status} (${exp.id.slice(0, 8)}…)</option>`
+    ).join('');
+    select.innerHTML = '<option value="">— select an experiment —</option>' + options;
+    if (experiments.some((exp) => exp.id === previousValue)) select.value = previousValue;
+  });
+}
 
 async function loadExperimentList() {
   const msgEl = document.getElementById('exp-list-msg');
@@ -195,6 +214,8 @@ async function loadExperimentList() {
   if (!result.ok) { msgEl.className = 'error-msg'; msgEl.textContent = `Error: ${result.message}`; table.style.display = 'none'; return; }
 
   const experiments = result.data.experiments || [];
+  populateExperimentSelects(experiments);
+
   if (experiments.length === 0) { msgEl.className = 'hint'; msgEl.textContent = 'No experiments yet — create one below.'; table.style.display = 'none'; return; }
 
   msgEl.textContent = '';
@@ -216,18 +237,30 @@ async function loadExperimentList() {
   table.style.display = 'table';
 }
 
-// Fills every "Experiment ID" field below with this one, and the preview page URL
+// Selects this experiment in every dropdown below, and the preview page URL
 // if url_match looks like a full URL — so picking from the list is one click.
 function useExperiment(id, urlMatch) {
-  ['var-exp-id', 'manage-exp-id', 'status-exp-id', 'results-exp-id'].forEach((fieldId) => {
+  EXP_SELECT_IDS.forEach((fieldId) => {
     document.getElementById(fieldId).value = id;
   });
   if (/^https?:\/\//.test(urlMatch)) document.getElementById('manage-page-url').value = urlMatch;
   document.getElementById('manage-exp-id').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
-// Refresh the list whenever the key is filled in (paste, then tab/click away).
-document.getElementById('api-key').addEventListener('change', loadExperimentList);
+// Refresh the list (and dropdowns, and popular goals) whenever the key is filled in.
+document.getElementById('api-key').addEventListener('change', () => {
+  loadExperimentList();
+  loadPopularGoals();
+});
+
+// Selecting an experiment in these two dropdowns loads its data immediately —
+// no separate click needed once it's picked.
+document.getElementById('results-exp-id').addEventListener('change', (e) => {
+  if (e.target.value) loadResults();
+});
+document.getElementById('manage-exp-id').addEventListener('change', (e) => {
+  if (e.target.value) loadManageVariants();
+});
 
 // --- Snippet, computed from wherever this dashboard is actually hosted ---
 
@@ -261,13 +294,14 @@ async function createExperiment() {
   el.className = result.ok ? 'ok-msg' : 'error-msg';
   if (result.ok) {
     el.textContent = `Created. Experiment ID: ${result.data.id}. Make sure the snippet above is installed on the target page.`;
-    // Auto-fill downstream sections so the id doesn't need copy-pasting around.
-    ['var-exp-id', 'manage-exp-id', 'status-exp-id', 'results-exp-id'].forEach((fieldId) => {
+    // Refresh the dropdowns FIRST so the new experiment's <option> actually exists
+    // before we try to select it — otherwise the assignment below is silently ignored.
+    await loadExperimentList();
+    EXP_SELECT_IDS.forEach((fieldId) => {
       document.getElementById(fieldId).value = result.data.id;
     });
     // If the url_match looks like a real URL (not just a path fragment), pre-fill the preview URL too.
     if (/^https?:\/\//.test(url_match)) document.getElementById('manage-page-url').value = url_match;
-    loadExperimentList();
   } else {
     el.textContent = `Error: ${result.message}`;
   }
@@ -317,13 +351,32 @@ function addChangeRow(prefill) {
     valueWrap.innerHTML = `<label class="c-value-label">${cfg.valueLabel}</label><${tag} class="c-value" placeholder="${cfg.placeholder || ''}"></${tag}>`;
   }
   selectEl.addEventListener('change', renderValueField);
-  renderValueField();
 
   if (prefill) {
     row.querySelector('.c-selector').value = prefill.selector || '';
-    selectEl.value = prefill.type || 'text';
+    let uiType = prefill.type || 'text';
+    let uiValueStr = '';
+
+    if (uiType === 'style') {
+      // Stored as {property: value} JS-style object — rebuild as editable "prop: value;" CSS text.
+      uiType = 'css';
+      uiValueStr = Object.entries(prefill.value || {}).map(([k, v]) => {
+        const kebab = k.replace(/([A-Z])/g, '-$1').toLowerCase();
+        return `${kebab}: ${v};`;
+      }).join(' ');
+    } else if (uiType === 'attr') {
+      // Stored as separate {attr, value} fields — rebuild as the editable "attr=value" text.
+      uiValueStr = `${prefill.attr || ''}=${prefill.value || ''}`;
+    } else if (prefill.value !== undefined) {
+      uiValueStr = typeof prefill.value === 'string' ? prefill.value : JSON.stringify(prefill.value);
+    }
+
+    selectEl.value = uiType;
     renderValueField();
-    if (prefill.value !== undefined) row.querySelector('.c-value').value = typeof prefill.value === 'string' ? prefill.value : JSON.stringify(prefill.value);
+    const valueInput = row.querySelector('.c-value');
+    if (valueInput) valueInput.value = uiValueStr;
+  } else {
+    renderValueField();
   }
 }
 
@@ -416,24 +469,67 @@ function collectGoals() {
 addChangeRow({ selector: '#cta-button', type: 'text', value: 'Get Started Free' });
 addGoalRow({ type: 'click', selector: '#cta-button', id: 'cta_click' });
 
-async function createVariant() {
+// --- Popular goals (reuse across variants) ---
+
+let popularGoalsCache = [];
+
+async function loadPopularGoals() {
+  const container = document.getElementById('popular-goals');
+  const key = document.getElementById('api-key').value;
+  if (!key) { container.innerHTML = ''; return; }
+
+  const result = await callApi('/api/goals/popular?limit=5', { headers: authHeaders() });
+  if (!result.ok || !result.data.goals || result.data.goals.length === 0) { container.innerHTML = ''; popularGoalsCache = []; return; }
+
+  popularGoalsCache = result.data.goals;
+  const chips = popularGoalsCache.map((g, i) => {
+    const display = g.type === 'url' ? `Visited "${g.value}"` : `Click "${g.value}"`;
+    const labelPart = g.label ? ` (${g.label})` : '';
+    return `<button type="button" class="secondary" style="margin:4px 4px 0 0; font-size:0.8em;" onclick="usePopularGoal(${i})">${display}${labelPart}</button>`;
+  }).join('');
+  container.innerHTML = '<div class="hint" style="margin-bottom:4px;">Frequently used — click to add:</div>' + chips;
+}
+
+function usePopularGoal(i) {
+  const g = popularGoalsCache[i];
+  if (!g) return;
+  addGoalRow({
+    type: g.type,
+    selector: g.type === 'click' ? g.value : undefined,
+    url_match: g.type === 'url' ? g.value : undefined,
+    id: g.label,
+  });
+}
+
+async function saveVariant() {
   const expId = document.getElementById('var-exp-id').value.trim();
   const el = document.getElementById('var-result');
-  if (!expId) { el.className = 'error-msg'; el.textContent = 'Enter an Experiment ID first (or create one above).'; return; }
+  if (!expId) { el.className = 'error-msg'; el.textContent = 'Select an experiment above first (or create one, or refresh the list).'; return; }
 
   const name = document.getElementById('var-name').value;
   const traffic_split = parseInt(document.getElementById('var-split').value, 10);
   const changes = collectChanges();
   const goals = collectGoals();
+  const editingId = document.getElementById('editing-variant-id').value;
 
-  const result = await callApi(`/api/experiments/${expId}/variants`, {
-    method: 'POST', headers: authHeaders(), body: JSON.stringify({ name, traffic_split, changes, goals })
+  const path = editingId ? `/api/experiments/${expId}/variants/${editingId}` : `/api/experiments/${expId}/variants`;
+  const result = await callApi(path, {
+    method: editingId ? 'PATCH' : 'POST', headers: authHeaders(), body: JSON.stringify({ name, traffic_split, changes, goals })
   });
   el.className = result.ok ? 'ok-msg' : 'error-msg';
-  el.textContent = result.ok ? `Variant created. ID: ${result.data.id}` : `Error: ${result.message}`;
+  if (result.ok) {
+    el.textContent = editingId ? 'Variant updated.' : `Variant created. ID: ${result.data.id}`;
+    if (editingId) cancelEditVariant();
+    loadPopularGoals();
+  } else {
+    el.textContent = `Error: ${result.message}`;
+  }
 }
 
 // --- Preview & manage variants ---
+
+let currentManageVariants = [];
+let currentManageExpId = '';
 
 function buildPreviewUrl(pageUrl, variantId) {
   const sep = pageUrl.includes('?') ? '&' : '?';
@@ -445,17 +541,19 @@ async function loadManageVariants() {
   const msgEl = document.getElementById('manage-msg');
   const listEl = document.getElementById('manage-variants-list');
   listEl.innerHTML = '';
-  if (!expId) { msgEl.className = 'error-msg'; msgEl.textContent = 'Enter an Experiment ID first (or create one above).'; return; }
+  if (!expId) { msgEl.className = 'error-msg'; msgEl.textContent = 'Select an experiment above first.'; return; }
 
   const result = await callApi(`/api/experiments/${expId}`, { headers: authHeaders() });
   if (!result.ok) { msgEl.className = 'error-msg'; msgEl.textContent = `Error: ${result.message}`; return; }
 
   const pageUrl = document.getElementById('manage-page-url').value.trim();
   const variants = result.data.variants || [];
+  currentManageVariants = variants;
+  currentManageExpId = expId;
   if (variants.length === 0) { msgEl.className = 'hint'; msgEl.textContent = 'No variants yet on this experiment.'; return; }
 
   msgEl.textContent = '';
-  variants.forEach((v) => {
+  variants.forEach((v, i) => {
     const card = document.createElement('div');
     card.className = 'variant-card' + (v.enabled ? '' : ' disabled');
     const previewBtn = pageUrl
@@ -469,12 +567,50 @@ async function loadManageVariants() {
       </div>
       <div class="vc-actions">
         ${previewBtn}
+        <button type="button" class="secondary" onclick="editVariant(${i})">Edit</button>
         <button type="button" class="secondary" onclick="toggleVariantEnabled('${expId}', '${v.id}', ${!v.enabled}, this)">${v.enabled ? 'Pause' : 'Resume'}</button>
         <button type="button" class="secondary" style="color:#c0392b" onclick="deleteVariant('${expId}', '${v.id}', this)">Delete</button>
       </div>
     `;
     listEl.appendChild(card);
   });
+}
+
+// Loads a variant's current data into the "Add Variant" form and switches it into
+// edit mode. Saving will PATCH this variant instead of creating a new one.
+function editVariant(index) {
+  const v = currentManageVariants[index];
+  if (!v) return;
+
+  document.getElementById('var-exp-id').value = currentManageExpId;
+  document.getElementById('var-name').value = v.name;
+  document.getElementById('var-split').value = v.traffic_split;
+
+  const changesList = document.getElementById('changes-list');
+  changesList.innerHTML = '';
+  if (v.changes && v.changes.length) v.changes.forEach((c) => addChangeRow(c)); else addChangeRow();
+
+  const goalsList = document.getElementById('goals-list');
+  goalsList.innerHTML = '';
+  if (v.goals && v.goals.length) v.goals.forEach((g) => addGoalRow(g));
+
+  document.getElementById('editing-variant-id').value = v.id;
+  document.getElementById('edit-banner').style.display = 'block';
+  document.getElementById('save-variant-btn').textContent = `Save Changes to "${v.name}"`;
+  document.getElementById('var-result').textContent = '';
+  document.getElementById('var-name').closest('section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cancelEditVariant() {
+  document.getElementById('editing-variant-id').value = '';
+  document.getElementById('edit-banner').style.display = 'none';
+  document.getElementById('save-variant-btn').textContent = 'Add Variant';
+  document.getElementById('var-name').value = '';
+  document.getElementById('var-split').value = 50;
+  document.getElementById('changes-list').innerHTML = '';
+  document.getElementById('goals-list').innerHTML = '';
+  addChangeRow({ selector: '#cta-button', type: 'text', value: 'Get Started Free' });
+  addGoalRow({ type: 'click', selector: '#cta-button', id: 'cta_click' });
 }
 
 async function toggleVariantEnabled(expId, variantId, enabled, btn) {
@@ -501,7 +637,7 @@ async function deleteVariant(expId, variantId, btn) {
 async function updateStatus() {
   const expId = document.getElementById('status-exp-id').value.trim();
   const el = document.getElementById('status-result');
-  if (!expId) { el.className = 'error-msg'; el.textContent = 'Enter an Experiment ID first (or create one above).'; return; }
+  if (!expId) { el.className = 'error-msg'; el.textContent = 'Select an experiment above first.'; return; }
 
   const status = document.getElementById('status-value').value;
   const result = await callApi(`/api/experiments/${expId}/status`, {
@@ -517,7 +653,8 @@ let rateChart, trendChart;
 async function loadResults() {
   const expId = document.getElementById('results-exp-id').value.trim();
   const msgEl = document.getElementById('results-msg');
-  if (!expId) { msgEl.className = 'error-msg'; msgEl.textContent = 'Enter an Experiment ID first (or create one above).'; return; }
+  const refreshBtn = document.getElementById('refresh-results-btn');
+  if (!expId) { msgEl.className = 'error-msg'; msgEl.textContent = 'Select an experiment above first.'; refreshBtn.style.display = 'none'; return; }
 
   const result = await callApi(`/api/results/${expId}`, { headers: authHeaders() });
 
@@ -527,8 +664,10 @@ async function loadResults() {
     document.getElementById('results-table').style.display = 'none';
     document.getElementById('rate-chart').style.display = 'none';
     document.getElementById('trend-chart').style.display = 'none';
+    refreshBtn.style.display = 'none';
     return;
   }
+  refreshBtn.style.display = 'inline-block';
   msgEl.textContent = '';
   const results = result.data.results || [];
   const tbody = document.getElementById('results-body');

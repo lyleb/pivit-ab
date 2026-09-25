@@ -91,6 +91,23 @@ Same section as above:
 - **Pause** stops a variant from being shown to new visitors but keeps all its recorded history — use this to stop a losing variant while still being able to look back at its numbers.
 - **Delete** removes the variant permanently, including its recorded events (`ON DELETE CASCADE`). No undo — pause instead if you're not certain.
 
+## Editing a variant
+
+Same section: **Edit** loads that variant's name, traffic split, changes, and goals back into the "Add Variant" form above and switches it into edit mode (a red banner confirms this). Saving updates the existing variant instead of creating a new one — including for a variant that's currently live, so changes take effect for visitors immediately. There's no staged/draft version; if you want to test a change safely first, use Preview before saving, or pause the variant while you edit it. "Cancel edit" resets the form back to create-new mode.
+
+## Reusing goals
+
+The "Add Variant" section shows your 5 most-used goals as quick-pick buttons above the goals list — click one to add it to the current variant instead of retyping the selector or URL. Usage is tracked automatically every time you create or edit a variant with goals attached; no separate setup needed.
+
+## Finding an experiment quickly
+
+Every "Experiment" field is now a dropdown (Add Variant, Manage Variants, Status, Results) built from the same list as "Your Experiments" at the top — showing each one's name and status, not just a raw ID. Selecting an experiment in the Results or Manage Variants dropdown loads its data immediately; no extra click needed. The dropdowns refresh automatically whenever the list does (after creating an experiment, changing status, or clicking Refresh List).
+
+## Data freshness
+
+There's no caching or batch/polling delay anywhere — every view and conversion event is written to the database the instant it happens on a visitor's browser, and every "Load Results" click queries live. A **🔄 Refresh Results** button appears under the results table once you've loaded something, for a quick re-pull without scrolling back up.
+
+
 ## Results & performance charts
 
 The "View Results" section now draws two charts alongside the table: a bar chart of conversion rate per variant, and a line chart of cumulative visitors over time per variant, so you can see a trend rather than just a single snapshot.

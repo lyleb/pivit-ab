@@ -36,3 +36,16 @@ CREATE INDEX IF NOT EXISTS idx_variants_experiment ON variants(experiment_id);
 -- Additive migrations for columns added after the table already existed in production —
 -- safe to re-run every startup, matching the CREATE TABLE IF NOT EXISTS pattern above.
 ALTER TABLE variants ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT true;
+
+-- Tracks how often each distinct goal (type + selector/url_match + label) has been
+-- used across all variants, so the dashboard can offer your most-used goals as
+-- one-click quick-picks instead of retyping the same selector every time.
+CREATE TABLE IF NOT EXISTS goal_templates (
+  id BIGSERIAL PRIMARY KEY,
+  type TEXT NOT NULL,        -- 'click' or 'url'
+  value TEXT NOT NULL,       -- the selector (click) or url_match text (url)
+  label TEXT NOT NULL DEFAULT '', -- the goal's "id"/label field, e.g. "cta_click"
+  usage_count INTEGER NOT NULL DEFAULT 1,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (type, value, label)
+);
