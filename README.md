@@ -37,24 +37,36 @@ Basic A/B testing platform: snippet + API + results dashboard.
 
 ## Change format (`changes` field on a variant)
 
+The dashboard's "Add Variant" section now builds this for you via a form (selector + dropdown + value) — you shouldn't need to hand-write this JSON anymore. Documented here for reference / if you ever call the API directly:
+
 ```json
 [
   { "selector": "#cta-button", "type": "text", "value": "Get Started Free" },
   { "selector": ".old-banner", "type": "hide" },
   { "selector": ".cta", "type": "style", "value": { "backgroundColor": "#1AB7C8" } },
-  { "selector": "a.buy", "type": "attr", "attr": "href", "value": "/checkout-v2" }
+  { "selector": "a.buy", "type": "attr", "attr": "href", "value": "/checkout-v2" },
+  { "selector": "#signup-form", "type": "js", "value": "el.addEventListener('submit', () => console.log('tracked'));" }
 ]
 ```
 
-Supported `type` values: `text`, `html`, `hide`, `show`, `style`, `attr`.
+Supported `type` values: `text`, `html`, `hide`, `show`, `style`, `attr`, `js`.
+
+**On `js`**: this runs exactly what you type, against the matched element, on the client's live page. There's no sandboxing — treat it like writing to the client's site directly, because that's what it is. Since only you (holder of `ADMIN_API_KEY`) can create variants, the risk is the same as any other code you'd deploy to that site; there's no path for a client's visitors to inject their own JS through this. Use it for genuinely custom behaviour the other types can't cover — most banner/button tests won't need it.
+
+## Finding a selector on the client's page
+
+Hand-picking CSS selectors via devtools is tedious, especially on sites with auto-generated IDs (Wix, Squarespace, etc. often produce these). The dashboard has an **"AB Selector Picker"** link — drag it to your bookmarks bar once. Then, on the actual client page:
+
+1. Click the bookmark
+2. Click the element you want to target
+3. Its selector is copied to your clipboard (and shown in a prompt as a fallback if clipboard access is blocked)
+4. Paste it into the Selector field on the dashboard
+
+This is a standalone tool (`snippet/picker-bookmarklet.js`) — it's not part of the tracking snippet and doesn't get deployed to client sites.
 
 ## Goals (conversion tracking, optional per variant)
 
-The dashboard has a "Goals" field alongside "Changes" when adding a variant:
-
-```json
-[ { "selector": "#submit-form", "id": "form_submit" } ]
-```
+The dashboard has a "Goals" section alongside "Changes" when adding a variant — just a selector and a label per goal, no JSON needed.
 
 Any click on a goal's selector fires a `convert` event back to the API (distinct from the automatic `view` event and from plain `click` events, which aren't sent unless tied to a goal). The results table counts these under "conversions" and calculates the rate as conversions ÷ visitors.
 

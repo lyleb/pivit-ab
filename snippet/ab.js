@@ -72,6 +72,16 @@
         case 'attr':
           if (change.attr) el.setAttribute(change.attr, change.value);
           break;
+        case 'js':
+          // Advanced / power-user option: runs arbitrary JS you configured yourself
+          // against the matched element. Only ever set by you via the admin dashboard —
+          // never accept this from anything outside your own control.
+          try {
+            new Function('el', change.value)(el);
+          } catch (err) {
+            console.warn('[ab] custom JS change failed:', err);
+          }
+          break;
         default:
           console.warn('[ab] unknown change type:', change.type);
       }
