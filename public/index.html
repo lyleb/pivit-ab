@@ -38,21 +38,48 @@
   .badge.live { background: #d4f4e2; color: #1a8a5c; }
   .badge.paused { background: #eee; color: #666; }
   .chart-wrap { max-width: 100%; margin-top: 20px; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; position: relative; }
+  .topbar img.logo { height: 32px; display: block; }
+  .topbar-link { color: #1B2A2E; font-weight: 600; text-decoration: none; font-size: 0.9em; cursor: pointer; }
+  .topbar-link:hover { color: #1AB7C8; }
+  .snippet-popover { display: none; position: absolute; top: 100%; right: 0; margin-top: 8px; background: white; border: 1px solid #ddd; border-radius: 8px; padding: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 10; width: 360px; max-width: 90vw; }
+  .snippet-popover pre { white-space: pre-wrap; word-break: break-all; font-size: 0.8em; }
+  details { border: 1px solid #ddd; border-radius: 6px; margin-top: 12px; }
+  details summary { padding: 12px 16px; font-weight: 600; cursor: pointer; }
+  details[open] summary { border-bottom: 1px solid #ddd; }
+  details .accordion-body { padding: 16px; }
+  .api-key-row { display: flex; gap: 8px; align-items: flex-start; }
+  .api-key-row input { flex: 1; }
+  .api-key-row button { white-space: nowrap; }
+  .activity-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #eee; font-size: 0.85em; }
 </style>
 </head>
 <body>
-<h1>AB Platform</h1>
+<div class="topbar">
+  <img src="/assets/logo.png" alt="Pivit" class="logo">
+  <div>
+    <a class="topbar-link" onclick="toggleSnippetPopover(event)">📋 Copy Snippet</a>
+    <div id="snippet-popover" class="snippet-popover">
+      <p class="hint" style="margin-top:0;">Same tag for every experiment — paste it once per site, just before <code>&lt;/body&gt;</code>.</p>
+      <pre id="snippet-code"></pre>
+      <button type="button" class="secondary" onclick="copySnippet()">Copy</button>
+      <span id="snippet-copied" class="hint"></span>
+    </div>
+  </div>
+</div>
 
 <section>
   <h2>0. Admin API Key</h2>
   <p class="hint">Required for everything below except the snippet itself. Paste the same value you set as <code>ADMIN_API_KEY</code> on the server. Kept only in this tab's memory — you'll need to re-paste it after a page reload.</p>
   <label>API Key</label>
-  <input id="api-key" type="password" placeholder="paste your ADMIN_API_KEY">
+  <div class="api-key-row">
+    <input id="api-key" type="password" placeholder="paste your ADMIN_API_KEY">
+    <button type="button" onclick="loadExperimentList(); loadPopularGoals();">🔄 Refresh</button>
+  </div>
 </section>
 
 <section>
   <h2>Your Experiments</h2>
-  <button onclick="loadExperimentList()">Refresh List</button>
   <p id="exp-list-msg" class="hint"></p>
   <table id="exp-list-table" style="display:none">
     <thead><tr><th>Name</th><th>Status</th><th>URL match</th><th>Variants</th><th>Created</th><th></th></tr></thead>
@@ -67,46 +94,55 @@
 </section>
 
 <section>
-  <h2>Your Snippet</h2>
-  <p class="hint">Same tag for every experiment on this app — paste it once per site, just before <code>&lt;/body&gt;</code>.</p>
-  <pre id="snippet-code"></pre>
-  <button type="button" class="secondary" onclick="copySnippet()">Copy</button>
-  <span id="snippet-copied" class="hint"></span>
-</section>
+  <h2>Create Experiment & Add Variant</h2>
 
-<section>
-  <h2>1. Create Experiment</h2>
-  <label>Name</label>
-  <input id="exp-name" placeholder="Homepage CTA button copy">
-  <label>URL match <span class="hint">(substring the page URL must contain — this is just stored for later, it doesn't check anything right now)</span></label>
-  <input id="exp-url" placeholder="/pricing">
-  <button onclick="createExperiment()">Create</button>
-  <p id="exp-result" class="hint"></p>
-</section>
+  <details open>
+    <summary>1. Create Experiment</summary>
+    <div class="accordion-body">
+      <label>Name</label>
+      <input id="exp-name" placeholder="Homepage CTA button copy">
+      <label>URL match <span class="hint">(substring the page URL must contain — this is just stored for later, it doesn't check anything right now)</span></label>
+      <input id="exp-url" placeholder="/pricing">
+      <button onclick="createExperiment()">Create</button>
+      <p id="exp-result" class="hint"></p>
+    </div>
+  </details>
 
-<section>
-  <h2>2. Add Variant</h2>
-  <p id="edit-banner" class="hint" style="display:none; color:#c0392b;">Editing an existing variant — changes take effect immediately for live traffic. <button type="button" class="secondary" onclick="cancelEditVariant()" style="margin:0 0 0 8px;">Cancel edit</button></p>
-  <label>Experiment</label>
-  <select id="var-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
-  <label>Variant Name</label>
-  <input id="var-name" placeholder="control / variant-b">
-  <label>Traffic Split (%)</label>
-  <input id="var-split" type="number" value="50">
+  <details open>
+    <summary>2. Add Variant</summary>
+    <div class="accordion-body">
+      <p id="edit-banner" class="hint" style="display:none; color:#c0392b;">Editing an existing variant — changes take effect immediately for live traffic. <button type="button" class="secondary" onclick="cancelEditVariant()" style="margin:0 0 0 8px;">Cancel edit</button></p>
+      <label>Experiment</label>
+      <select id="var-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
+      <label>Variant Name</label>
+      <input id="var-name" placeholder="control / variant-b">
+      <label>Traffic Split (%)</label>
+      <input id="var-split" type="number" value="50">
+    </div>
+  </details>
 
-  <h3>Changes</h3>
-  <div id="changes-list"></div>
-  <button type="button" class="secondary" onclick="addChangeRow()">+ Add another change</button>
+  <details open>
+    <summary>3. Make Changes</summary>
+    <div class="accordion-body">
+      <div id="changes-list"></div>
+      <button type="button" class="secondary" onclick="addChangeRow()">+ Add another change</button>
+    </div>
+  </details>
 
-  <h3>Goals <span class="hint">(optional — clicks or URL visits that count as conversions)</span></h3>
-  <div id="popular-goals"></div>
-  <div id="goals-list"></div>
-  <button type="button" class="secondary" onclick="addGoalRow()">+ Add another goal</button>
+  <details>
+    <summary>4. Add Goals <span class="hint">(optional)</span></summary>
+    <div class="accordion-body">
+      <div id="popular-goals"></div>
+      <div id="goals-list"></div>
+      <button type="button" class="secondary" onclick="addGoalRow()">+ Add another goal</button>
+    </div>
+  </details>
 
-  <br>
   <input type="hidden" id="editing-variant-id" value="">
-  <button id="save-variant-btn" onclick="saveVariant()">Add Variant</button>
+  <button id="save-variant-btn" onclick="saveVariant()">Save Variant</button>
   <p id="var-result" class="hint"></p>
+
+  <div id="saved-variant-summary"></div>
 </section>
 
 <section>
@@ -148,6 +184,9 @@
   <div class="chart-wrap"><canvas id="rate-chart" style="display:none"></canvas></div>
   <div class="chart-wrap"><canvas id="trend-chart" style="display:none"></canvas></div>
   <button type="button" class="secondary" id="refresh-results-btn" style="display:none" onclick="loadResults()">🔄 Refresh Results</button>
+
+  <h3 style="margin-top:24px;">Recent Activity <span class="hint">(raw events, most recent 20 — useful for confirming events are arriving at all)</span></h3>
+  <div id="activity-log" class="hint">Load results above to see recent activity.</div>
 </section>
 
 <script>
@@ -263,6 +302,18 @@ document.getElementById('manage-exp-id').addEventListener('change', (e) => {
 });
 
 // --- Snippet, computed from wherever this dashboard is actually hosted ---
+
+function toggleSnippetPopover(e) {
+  e.preventDefault();
+  const el = document.getElementById('snippet-popover');
+  el.style.display = el.style.display === 'block' ? 'none' : 'block';
+}
+document.addEventListener('click', (e) => {
+  const popover = document.getElementById('snippet-popover');
+  if (popover.style.display === 'block' && !popover.contains(e.target) && !e.target.classList.contains('topbar-link')) {
+    popover.style.display = 'none';
+  }
+});
 
 function snippetTag() {
   // Deliberately built without the literal closing-script-tag sequence anywhere in
@@ -519,11 +570,29 @@ async function saveVariant() {
   el.className = result.ok ? 'ok-msg' : 'error-msg';
   if (result.ok) {
     el.textContent = editingId ? 'Variant updated.' : `Variant created. ID: ${result.data.id}`;
+    const expSelect = document.getElementById('var-exp-id');
+    const expLabel = expSelect.selectedOptions[0] ? expSelect.selectedOptions[0].text : '';
+    renderSavedVariantSummary(result.data, expLabel);
     if (editingId) cancelEditVariant();
     loadPopularGoals();
   } else {
     el.textContent = `Error: ${result.message}`;
   }
+}
+
+// Shows a quick read-only recap right after saving, so what you just submitted is
+// visible without having to jump to the Manage Variants section to confirm it.
+function renderSavedVariantSummary(variant, expLabel) {
+  const container = document.getElementById('saved-variant-summary');
+  const card = document.createElement('div');
+  card.className = 'variant-card';
+  card.innerHTML = `
+    <div>
+      <strong>${variant.name}</strong> <span class="hint">saved to ${expLabel || 'experiment'}</span>
+      <div class="vc-meta">${variant.traffic_split}% traffic · ${(variant.changes || []).length} change(s) · ${(variant.goals || []).length} goal(s)</div>
+    </div>
+  `;
+  container.prepend(card);
 }
 
 // --- Preview & manage variants ---
@@ -722,6 +791,23 @@ async function loadResults() {
     });
   } else {
     trendCanvas.style.display = 'none';
+  }
+
+  // Recent activity — raw, unaggregated events, for confirming whether anything
+  // is actually arriving at all, independent of the totals above.
+  const activityEl = document.getElementById('activity-log');
+  const recentResult = await callApi(`/api/results/${expId}/recent`, { headers: authHeaders() });
+  if (!recentResult.ok) {
+    activityEl.textContent = `Error loading activity: ${recentResult.message}`;
+  } else if (!recentResult.data.events || recentResult.data.events.length === 0) {
+    activityEl.innerHTML = '<strong>No events recorded yet for this experiment.</strong> If you\'ve visited the live page normally and expect to see something here, check: the experiment\'s status is "running" (not draft/paused), at least one variant is enabled (not paused) in Manage Variants, the snippet is actually present on the page you\'re testing (view page source), and your browser\'s console/network tab shows no errors calling the snippet or /api/event.';
+  } else {
+    activityEl.innerHTML = recentResult.data.events.map((ev) => `
+      <div class="activity-row">
+        <span><strong>${ev.event_type}</strong> · ${ev.variant_name}${ev.goal_id ? ' · ' + ev.goal_id : ''}</span>
+        <span class="hint">${new Date(ev.created_at).toLocaleString()}</span>
+      </div>
+    `).join('');
   }
 }
 

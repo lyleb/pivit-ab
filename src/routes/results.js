@@ -77,4 +77,25 @@ router.get('/:experimentId/timeseries', async (req, res) => {
   }
 });
 
+// GET /api/results/:experimentId/recent
+// The most recent 20 raw events, unaggregated — a direct "is anything actually
+// arriving?" check, independent of the totals/rate calculations above.
+router.get('/:experimentId/recent', async (req, res) => {
+  const { experimentId } = req.params;
+  try {
+    const { rows } = await db.query(
+      `SELECT e.event_type, e.goal_id, e.created_at, v.name AS variant_name
+       FROM events e JOIN variants v ON v.id = e.variant_id
+       WHERE e.experiment_id = $1
+       ORDER BY e.created_at DESC
+       LIMIT 20`,
+      [experimentId]
+    );
+    res.json({ events: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
 module.exports = router;
