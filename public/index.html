@@ -232,7 +232,12 @@ document.getElementById('api-key').addEventListener('change', loadExperimentList
 // --- Snippet, computed from wherever this dashboard is actually hosted ---
 
 function snippetTag() {
-  return `<script src="${location.origin}/snippet/ab.js" data-api="${location.origin}"></script>`;
+  // Deliberately built without the literal closing-script-tag sequence anywhere in
+  // this file's source (not even in a comment) — that exact text, even inside a JS
+  // string or comment, makes the browser's HTML parser end THIS surrounding script
+  // block early, dumping everything after it onto the page as plain text.
+  const closeTag = '</' + 'script>';
+  return `<script src="${location.origin}/snippet/ab.js" data-api="${location.origin}">${closeTag}`;
 }
 document.getElementById('snippet-code').textContent = snippetTag();
 
