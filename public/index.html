@@ -150,7 +150,15 @@ async function createExperiment() {
     method: 'POST', headers: authHeaders(), body: JSON.stringify({ name, url_match })
   });
   el.className = result.ok ? 'ok-msg' : 'error-msg';
-  el.textContent = result.ok ? `Created. Experiment ID: ${result.data.id}` : `Error: ${result.message}`;
+  if (result.ok) {
+    el.textContent = `Created. Experiment ID: ${result.data.id}`;
+    // Auto-fill downstream sections so the id doesn't need copy-pasting around.
+    ['var-exp-id', 'status-exp-id', 'results-exp-id'].forEach((fieldId) => {
+      document.getElementById(fieldId).value = result.data.id;
+    });
+  } else {
+    el.textContent = `Error: ${result.message}`;
+  }
 }
 
 // --- Change / Goal row builder (replaces hand-written JSON) ---
@@ -270,12 +278,14 @@ addChangeRow({ selector: '#cta-button', type: 'text', value: 'Get Started Free' 
 addGoalRow({ selector: '#cta-button', id: 'cta_click' });
 
 async function createVariant() {
-  const expId = document.getElementById('var-exp-id').value;
+  const expId = document.getElementById('var-exp-id').value.trim();
+  const el = document.getElementById('var-result');
+  if (!expId) { el.className = 'error-msg'; el.textContent = 'Enter an Experiment ID first (or create one above).'; return; }
+
   const name = document.getElementById('var-name').value;
   const traffic_split = parseInt(document.getElementById('var-split').value, 10);
   const changes = collectChanges();
   const goals = collectGoals();
-  const el = document.getElementById('var-result');
 
   const result = await callApi(`/api/experiments/${expId}/variants`, {
     method: 'POST', headers: authHeaders(), body: JSON.stringify({ name, traffic_split, changes, goals })
@@ -285,9 +295,11 @@ async function createVariant() {
 }
 
 async function updateStatus() {
-  const expId = document.getElementById('status-exp-id').value;
-  const status = document.getElementById('status-value').value;
+  const expId = document.getElementById('status-exp-id').value.trim();
   const el = document.getElementById('status-result');
+  if (!expId) { el.className = 'error-msg'; el.textContent = 'Enter an Experiment ID first (or create one above).'; return; }
+
+  const status = document.getElementById('status-value').value;
   const result = await callApi(`/api/experiments/${expId}/status`, {
     method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ status })
   });
@@ -296,8 +308,10 @@ async function updateStatus() {
 }
 
 async function loadResults() {
-  const expId = document.getElementById('results-exp-id').value;
+  const expId = document.getElementById('results-exp-id').value.trim();
   const msgEl = document.getElementById('results-msg');
+  if (!expId) { msgEl.className = 'error-msg'; msgEl.textContent = 'Enter an Experiment ID first (or create one above).'; return; }
+
   const result = await callApi(`/api/results/${expId}`, { headers: authHeaders() });
 
   if (!result.ok) {
