@@ -77,6 +77,17 @@ The dashboard has a "Goals" section alongside "Changes" when adding a variant, w
 
 Any goal firing sends a `convert` event back to the API (distinct from the automatic `view` event). The results table counts these under "conversions" and calculates the rate as conversions ÷ visitors.
 
+## Reducing flicker
+
+The "Copy Snippet" popover now shows two snippets, not one:
+
+1. **In `<head>`** (new, optional but recommended) — a tiny inline snippet that hides the page the instant it starts loading, before the browser paints anything.
+2. **Just before `</body>`** — the existing tracking snippet, unchanged.
+
+Why two: true flicker prevention requires hiding the page before first paint, which only code running in `<head>` can do — by the time a script at the end of `<body>` runs, the browser has often already shown the original content for a moment. The `<head>` snippet hides the page via a CSS class, and `ab.js` removes that class the instant it's applied any DOM changes (or determined none apply) — normally well under a second. If something goes wrong (the API is slow or down), a 3-second timeout built into the `<head>` snippet reveals the page regardless, so a backend problem can never leave a visitor looking at a permanently blank page.
+
+The trade-off: instead of a flash of the *original* content before it swaps to the variant, visitors see a brief blank page. That's the standard approach (Optimizely and Google Optimize both work the same way) — there's no way to show the final content instantly, since which variant to show depends on an API call that takes some non-zero time.
+
 ## Running experiments across multiple sites
 
 One deployment of this app can run experiments on as many different domains as you like at once. `url_match` is just a substring check against whatever page the snippet loads on — it has nothing to do with which site it's running on. Install the same snippet tag (see "Your Snippet" at the top of the dashboard) once per site, and the server figures out which experiments apply based on the current page's URL every time it loads. No per-site configuration needed beyond pasting the tag in.

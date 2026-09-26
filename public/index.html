@@ -130,7 +130,12 @@
   <div>
     <a class="topbar-link" onclick="toggleSnippetPopover(event)">📋 Copy Snippet</a>
     <div id="snippet-popover" class="snippet-popover">
-      <p class="hint" style="margin-top:0;">Same tag for every experiment — paste it once per site, just before <code>&lt;/body&gt;</code>.</p>
+      <p class="hint" style="margin-top:0; font-weight:600; color:var(--ink);">1. Add to &lt;head&gt; <span class="hint" style="font-weight:400;">(prevents flicker — optional but recommended)</span></p>
+      <pre id="antiflicker-code"></pre>
+      <button type="button" class="secondary" onclick="copyAntiflicker()">Copy</button>
+      <span id="antiflicker-copied" class="hint"></span>
+
+      <p class="hint" style="margin-top:16px; font-weight:600; color:var(--ink);">2. Add just before &lt;/body&gt;</p>
       <pre id="snippet-code"></pre>
       <button type="button" class="secondary" onclick="copySnippet()">Copy</button>
       <span id="snippet-copied" class="hint"></span>
@@ -448,6 +453,24 @@ function copySnippet() {
     setTimeout(() => { el.textContent = ''; }, 2000);
   }).catch(() => {
     document.getElementById('snippet-copied').textContent = 'Could not copy — select the text above manually.';
+  });
+}
+
+function antiflickerSnippet() {
+  // Same closing-tag caveat as snippetTag() above — built without the literal
+  // substring anywhere in this file's source.
+  const closeTag = '</' + 'script>';
+  return `<style>html.ab-hide{opacity:0 !important}</style>\n<script>document.documentElement.classList.add('ab-hide');setTimeout(function(){document.documentElement.classList.remove('ab-hide')},3000)${closeTag}`;
+}
+document.getElementById('antiflicker-code').textContent = antiflickerSnippet();
+
+function copyAntiflicker() {
+  navigator.clipboard.writeText(antiflickerSnippet()).then(() => {
+    const el = document.getElementById('antiflicker-copied');
+    el.textContent = 'Copied!';
+    setTimeout(() => { el.textContent = ''; }, 2000);
+  }).catch(() => {
+    document.getElementById('antiflicker-copied').textContent = 'Could not copy — select the text above manually.';
   });
 }
 

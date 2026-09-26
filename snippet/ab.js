@@ -1,5 +1,5 @@
 /**
- * AB Platform snippet — v0.2
+ * AB Platform snippet — v0.3
  *
  * Usage on client site:
  *   <script src="https://your-api.example.com/snippet/ab.js"
@@ -13,12 +13,24 @@
  * variant (works even if the experiment is draft/paused or the variant is
  * disabled) without logging any view/conversion events. The admin dashboard
  * generates these links for you.
+ *
+ * Anti-flicker: if the anti-flicker snippet (from the dashboard's "Copy
+ * Snippet" popover) is also installed in <head>, it hides the page via an
+ * `ab-hide` class on <html>. This file removes that class as soon as DOM
+ * changes are applied, so the reveal happens as fast as possible rather than
+ * waiting for anything else (e.g. goal-checking) to finish. The anti-flicker
+ * snippet has its own 3-second timeout as a safety net, so this file doesn't
+ * need one — if you skip installing it, this call is just a harmless no-op.
  */
 (function () {
   const scriptTag = document.currentScript;
   const API_BASE = scriptTag.getAttribute('data-api') || '';
   const VISITOR_KEY = '_ab_visitor_id';
   const ASSIGNMENT_PREFIX = '_ab_assign_';
+
+  function revealPage() {
+    document.documentElement.classList.remove('ab-hide');
+  }
 
   function getVisitorId() {
     let id = localStorage.getItem(VISITOR_KEY);
@@ -196,11 +208,16 @@
         }
       });
 
+      // Reveal now — DOM changes are applied, so this is the earliest safe moment.
+      // Everything after this (goal-checking) doesn't affect what's visible.
+      revealPage();
+
       // Check "visited a URL" goals on every page load — including pages with no
       // on-page experiment at all, e.g. a /thank-you confirmation page.
       if (!previewVariantId) await checkUrlGoals(visitorId);
     } catch (err) {
       console.warn('[ab] failed to load experiments:', err);
+      revealPage(); // never leave the page hidden just because the API call failed
     }
   }
 
