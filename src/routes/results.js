@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const { computeBayesianStats } = require('../bayesian');
 const router = express.Router();
 
 router.use(requireAuth(['owner'])); // results are for your eyes only, not the public snippet
@@ -161,6 +162,45 @@ router.get('/:experimentId/export', async (req, res) => {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="experiment-${experimentId}-export.csv"`);
     res.send(lines.join('\n'));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
+// GET /api/results/:experimentId/bayesian
+// Bayesian read on the same data as the main endpoint: for each variant, the
+// posterior mean conversion rate, a 95% credible interval, and the probability
+// it's the best-performing variant. See src/bayesian.js for the model itself.
+router.get('/:experimentId/bayesian', async (req, res) => {
+  const { experimentId } = req.params;
+  try {
+    const { rows } = await db.query(
+      `SELECT
+         v.id AS variant_id,
+         v.name AS variant_name,
+         COUNT(DISTINCT e.visitor_id) FILTER (WHERE e.event_type = 'view') AS visitors,
+         COUNT(*) FILTER (WHERE e.event_type = 'convert') AS conversions
+       FROM variants v
+       LEFT JOIN events e ON e.variant_id = v.id
+       WHERE v.experiment_id = $1
+       GROUP BY v.id, v.name
+       ORDER BY v.name`,
+      [experimentId]
+    );
+
+    const variantData = rows.map((r) => ({
+      variant_id: r.variant_id,
+      variant_name: r.variant_name,
+      visitors: Number(r.visitors),
+      conversions: Number(r.conversions),
+    }));
+
+    const stats = computeBayesianStats(variantData);
+    const totalVisitors = variantData.reduce((sum, v) => sum + v.visitors, 0);
+    const lowSample = variantData.some((v) => v.visitors < 30);
+
+    res.json({ experiment_id: experimentId, total_visitors: totalVisitors, low_sample_warning: lowSample, stats });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });

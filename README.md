@@ -132,6 +132,15 @@ A visitor counts as **new** on the calendar day of their first-ever view of an e
 
 The "View Results" section now draws two charts alongside the table: a bar chart of conversion rate per variant, and a line chart of cumulative visitors over time per variant, so you can see a trend rather than just a single snapshot.
 
+## Bayesian analysis
+
+Below the results table and charts is a "Bayesian Analysis" panel — the answer to "is this difference real, or just noise?" It models each variant's true (unknown) conversion rate as a distribution rather than a single number, using a standard Beta-Binomial approach, and shows:
+
+- **Est. Rate (95% range)** — the likely true conversion rate and how wide the uncertainty around it still is. A wide range (e.g. 4%–64%) means "we genuinely don't know yet," not "the number is wrong."
+- **Probability Best** — the chance that variant is actually the top performer, computed by simulating the posterior distributions against each other 20,000 times (see `src/bayesian.js` for the exact method). A 🏆 marks a variant at 90%+.
+
+A low-traffic warning appears whenever any variant has under 30 visitors, since the estimate is still wide at that point and can swing a lot with the next handful of visitors. This panel loads automatically alongside the main results — no separate button.
+
 ## Owner login
 
 There's a real login screen now at `/login.html` (branded, matching the dashboard), backed by proper sessions instead of a key pasted into a field:
@@ -159,14 +168,12 @@ The public snippet endpoints (`GET /api/experiments`, `POST /api/event`, `GET /a
 ## What's NOT in v1 (by design)
 
 - Single owner account, not per-teammate logins — client accounts exist, but if you ever bring on a co-worker, they'd share the one owner password
-- No Bayesian/statistical significance view yet — raw counts and rate only, so a small early lead can look more meaningful than it is
 - 50/50-style manual splits only, no auto traffic allocation
 - No multi-page funnels
 - No password reset flow — if you forget the owner password, it's whatever `ADMIN_API_KEY` is set to in Railway; for a client, you reset it for them from the dashboard
 
 ## Next steps to consider
 
-- Statistical significance / Bayesian indicator on results (e.g. probability B beats A, credible intervals)
 - Support for multiple goals per variant with individual conversion rates
 - Per-teammate owner logins if you ever bring someone else onto the admin side
 - A visual click-to-configure variant editor, once the current form-based one has been stress-tested on a genuinely complex experiment

@@ -279,6 +279,14 @@
   <button type="button" class="secondary" id="refresh-results-btn" style="display:none" onclick="loadResults()">🔄 Refresh Results</button>
   <button type="button" class="secondary" id="export-results-btn" style="display:none" onclick="exportResultsCsv(document.getElementById('results-exp-id').value)">⬇ Export CSV</button>
 
+  <h3 style="margin-top:24px;">Bayesian Analysis <span class="hint">(which variant is actually winning, and how sure we can be)</span></h3>
+  <p class="hint">Instead of just a raw percentage, this treats each variant's true conversion rate as uncertain and narrows that uncertainty as data comes in — so a 20% lead from 10 visitors and a 20% lead from 10,000 visitors don't look equally convincing. "Probability best" is the chance that variant is genuinely the top performer, not just ahead by chance.</p>
+  <div id="bayesian-warning" class="hint" style="display:none; color:#a3690f; font-weight:600;"></div>
+  <table id="bayesian-table" style="display:none">
+    <thead><tr><th>Variant</th><th>Visitors</th><th>Conversions</th><th>Est. Rate (95% range)</th><th>Probability Best</th></tr></thead>
+    <tbody id="bayesian-body"></tbody>
+  </table>
+
   <h3 style="margin-top:24px;">Recent Activity <span class="hint">(raw events, most recent 20 — useful for confirming events are arriving at all)</span></h3>
   <div id="activity-log" class="hint">Load results above to see recent activity.</div>
 </section>
@@ -1088,6 +1096,41 @@ async function loadResults() {
         <span class="hint">${new Date(ev.created_at).toLocaleString()}</span>
       </div>
     `).join('');
+  }
+
+  // Bayesian analysis — see src/bayesian.js for the model. Renders alongside the
+  // raw table rather than replacing it, since the raw numbers are still useful
+  // on their own (e.g. for the CSV export workflow).
+  const bayesianTable = document.getElementById('bayesian-table');
+  const bayesianWarning = document.getElementById('bayesian-warning');
+  const bayesianResult = await callApi(`/api/results/${expId}/bayesian`, { headers: authHeaders() });
+
+  if (!bayesianResult.ok || !bayesianResult.data.stats || bayesianResult.data.stats.length === 0) {
+    bayesianTable.style.display = 'none';
+    bayesianWarning.style.display = 'none';
+  } else {
+    const stats = bayesianResult.data.stats;
+    if (bayesianResult.data.low_sample_warning) {
+      bayesianWarning.style.display = 'block';
+      bayesianWarning.textContent = '⚠ At least one variant still has under 30 visitors — treat these numbers as indicative, not conclusive. The credible interval (the range after "±") will narrow as more data comes in.';
+    } else {
+      bayesianWarning.style.display = 'none';
+    }
+
+    const bayesianBody = document.getElementById('bayesian-body');
+    bayesianBody.innerHTML = stats.map((s) => {
+      const isLikelyBest = s.probability_best >= 90;
+      return `
+        <tr>
+          <td>${s.variant_name}${isLikelyBest ? ' 🏆' : ''}</td>
+          <td>${s.visitors}</td>
+          <td>${s.conversions}</td>
+          <td>${s.posterior_mean}% <span class="hint">(${s.ci_low}%–${s.ci_high}%)</span></td>
+          <td><strong>${s.probability_best}%</strong></td>
+        </tr>
+      `;
+    }).join('');
+    bayesianTable.style.display = 'table';
   }
 }
 
