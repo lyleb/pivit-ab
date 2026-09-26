@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pivit — Log in</title>
+<style>
+  :root {
+    --ink: #131723;
+    --indigo: #5635FB;
+    --indigo-dark: #4527d6;
+    --bg: #f5f6fb;
+    --card: #ffffff;
+    --border: #e6e7f0;
+    --text-muted: #6b6f83;
+    --danger: #d64545;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: var(--bg); color: var(--ink);
+  }
+  .card {
+    width: 360px; max-width: 90vw; background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 36px 32px; box-shadow: 0 4px 20px rgba(19,23,35,0.06);
+  }
+  .card img.logo { height: 34px; display: block; margin: 0 auto 28px; }
+  label { display: block; font-weight: 600; font-size: 0.85em; margin-bottom: 6px; }
+  input {
+    width: 100%; padding: 11px 13px; font-size: 0.95em; border: 1px solid #d5d7e3;
+    border-radius: 8px; background: #fff; color: var(--ink); box-sizing: border-box;
+    transition: border-color 0.15s ease; margin-bottom: 14px;
+  }
+  input:focus { outline: none; border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(86,53,251,0.12); }
+  button {
+    width: 100%; margin-top: 4px; padding: 12px; background: var(--indigo); color: white;
+    border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.95em;
+    transition: background 0.15s ease;
+  }
+  button:hover { background: var(--indigo-dark); }
+  button:disabled { background: #c9cadb; cursor: not-allowed; }
+  .error-msg { color: var(--danger); font-size: 0.85em; margin-top: 14px; min-height: 1.2em; }
+  .toggle-link {
+    display: block; text-align: center; margin-top: 20px; font-size: 0.85em;
+    color: var(--text-muted); cursor: pointer; text-decoration: underline;
+  }
+  .toggle-link:hover { color: var(--indigo); }
+  #client-form { display: none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <img src="/assets/logo.png" alt="Pivit" class="logo">
+
+  <form id="owner-form">
+    <label for="password">Password</label>
+    <input id="password" type="password" placeholder="Enter your password" autofocus required>
+    <button id="owner-btn" type="submit">Log in</button>
+  </form>
+
+  <form id="client-form">
+    <label for="username">Username</label>
+    <input id="username" type="text" placeholder="Your username" required>
+    <label for="client-password">Password</label>
+    <input id="client-password" type="password" placeholder="Enter your password" required>
+    <button id="client-btn" type="submit">Log in</button>
+  </form>
+
+  <p id="login-error" class="error-msg"></p>
+  <a class="toggle-link" id="toggle-link" onclick="toggleForm()">Client login</a>
+</div>
+
+<script>
+let mode = 'owner';
+
+function toggleForm() {
+  mode = mode === 'owner' ? 'client' : 'owner';
+  document.getElementById('owner-form').style.display = mode === 'owner' ? 'block' : 'none';
+  document.getElementById('client-form').style.display = mode === 'client' ? 'block' : 'none';
+  document.getElementById('toggle-link').textContent = mode === 'owner' ? 'Client login' : 'Owner login';
+  document.getElementById('login-error').textContent = '';
+}
+
+async function submitLogin(path, body, btn) {
+  const errorEl = document.getElementById('login-error');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Logging in…';
+  errorEl.textContent = '';
+
+  try {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (res.ok) {
+      window.location.href = data.role === 'client' ? '/client.html' : '/index.html';
+      return;
+    }
+    errorEl.textContent = data.error || `Login failed (${res.status})`;
+  } catch (err) {
+    errorEl.textContent = `Network error — could not reach the server (${err.message}).`;
+  }
+
+  btn.disabled = false;
+  btn.textContent = originalText;
+}
+
+document.getElementById('owner-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('owner-btn');
+  submitLogin('/api/auth/login', { password: document.getElementById('password').value }, btn);
+});
+
+document.getElementById('client-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('client-btn');
+  submitLogin('/api/auth/client-login', {
+    username: document.getElementById('username').value,
+    password: document.getElementById('client-password').value,
+  }, btn);
+});
+</script>
+</body>
+</html>

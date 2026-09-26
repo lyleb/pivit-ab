@@ -4,13 +4,23 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const db = require('./db');
+const sessionMiddleware = require('./session');
 
 const experimentsRouter = require('./routes/experiments');
 const eventsRouter = require('./routes/events');
 const resultsRouter = require('./routes/results');
 const { router: goalsRouter } = require('./routes/goals');
+const authRouter = require('./routes/auth');
+const clientsRouter = require('./routes/clients');
+const clientRouter = require('./routes/client');
 
 const app = express();
+// Railway (like most hosts) sits behind a reverse proxy. Without this, Express
+// never sees the connection as "secure" (it only sees the proxy's internal HTTP
+// hop), so a cookie flagged secure: true would silently never get set — and
+// req.ip (used for the login throttle) would show the proxy's IP for everyone.
+app.set('trust proxy', 1);
+
 // origin: true reflects whatever site is actually calling (rather than a fixed
 // wildcard '*'), and credentials: true allows it — both are required together
 // because navigator.sendBeacon (used to log view/conversion events) always sends
@@ -19,15 +29,19 @@ const app = express();
 // it's just no longer a literal '*' in the response header.
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
+app.use(sessionMiddleware);
 
 // Serve the built snippet + the admin dashboard as static files
 app.use('/snippet', express.static(path.join(__dirname, '../snippet')));
 app.use(express.static(path.join(__dirname, '../public')));
 
+app.use('/api/auth', authRouter);
 app.use('/api/experiments', experimentsRouter);
 app.use('/api/event', eventsRouter);
 app.use('/api/results', resultsRouter);
 app.use('/api/goals', goalsRouter);
+app.use('/api/clients', clientsRouter);
+app.use('/api/client', clientRouter);
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 

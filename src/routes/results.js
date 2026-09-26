@@ -1,9 +1,9 @@
 const express = require('express');
 const db = require('../db');
-const { requireApiKey } = require('../middleware/auth');
+const { requireAuth } = require('../middleware/auth');
 const router = express.Router();
 
-router.use(requireApiKey); // results are for your eyes only, not the public snippet
+router.use(requireAuth(['owner'])); // results are for your eyes only, not the public snippet
 
 // "New" vs "returning" is defined by day, not by event count: a visitor is "new"
 // on the calendar day of their first-ever view for this experiment, and

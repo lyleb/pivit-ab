@@ -49,3 +49,21 @@ CREATE TABLE IF NOT EXISTS goal_templates (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (type, value, label)
 );
+
+-- Client accounts: read-only logins scoped to whichever experiments you manually
+-- assign them (via experiments.client_id below). Not the same as the owner login —
+-- clients have individual per-row credentials since there can be many of them.
+CREATE TABLE IF NOT EXISTS clients (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,             -- display name shown on their dashboard, e.g. "Can't Say That?"
+  username TEXT NOT NULL UNIQUE,  -- login identifier, e.g. an email or a short slug
+  password_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Additive: which client (if any) an experiment belongs to. ON DELETE SET NULL —
+-- deleting a client account never deletes their experiments/results, it just
+-- un-assigns them back to owner-only.
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS client_id UUID REFERENCES clients(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_experiments_client ON experiments(client_id);
+

@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pivit — Results</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --ink: #131723; --indigo: #5635FB; --mint: #02DEB5; --mint-dark: #02b895;
+    --bg: #f5f6fb; --card: #ffffff; --border: #e6e7f0; --text-muted: #6b6f83;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { max-width: 900px; margin: 0 auto; padding: 32px 20px 80px; background: var(--bg); color: var(--ink); line-height: 1.5; }
+  h1, h2, h3 { color: var(--ink); font-weight: 700; letter-spacing: -0.01em; }
+  h2 { font-size: 1.05em; margin: 0 0 4px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 0.9em; margin: 20px 0 8px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+  section { margin-bottom: 24px; padding: 24px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 1px 2px rgba(19,23,35,0.04); }
+  .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; padding: 16px 24px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+  .topbar img.logo { height: 30px; display: block; }
+  .topbar-link { color: var(--ink); font-weight: 600; text-decoration: none; font-size: 0.88em; cursor: pointer; padding: 8px 14px; border-radius: 8px; background: #f0f0f7; }
+  .topbar-link:hover { background: #e6e6f2; }
+  .welcome { font-size: 0.85em; color: var(--text-muted); }
+  .experiment-row {
+    display: flex; justify-content: space-between; align-items: center; padding: 14px 16px;
+    margin-top: 8px; background: #fafafe; border: 1px solid var(--border); border-radius: 8px;
+    cursor: pointer; transition: border-color 0.15s ease;
+  }
+  .experiment-row:hover { border-color: var(--indigo); }
+  .experiment-row.selected { border-color: var(--indigo); background: #f4f2fe; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.72em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+  .badge.live { background: rgba(2,222,181,0.15); color: var(--mint-dark); }
+  .badge.paused { background: #f0f0f7; color: var(--text-muted); }
+  .badge.draft { background: #fff4e0; color: #a3690f; }
+  .badge.archived { background: #eceef5; color: #5a5d70; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  th { text-align: left; padding: 10px 8px; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); border-bottom: 2px solid var(--border); }
+  td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 0.92em; }
+  .hint { color: var(--text-muted); font-size: 0.85em; }
+  .url-group { margin-top: 20px; }
+  .url-group:first-child { margin-top: 0; }
+  .url-group-label { font-size: 0.8em; color: var(--text-muted); font-family: "SF Mono", Menlo, monospace; margin-bottom: 6px; }
+  .chart-wrap { max-width: 100%; margin-top: 20px; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <img src="/assets/logo.png" alt="Pivit" class="logo">
+  <div>
+    <span class="welcome" id="welcome-msg"></span>
+    <a class="topbar-link" onclick="logout()" style="margin-left:12px;">🚪 Log out</a>
+  </div>
+</div>
+
+<section>
+  <h2>Your Experiments</h2>
+  <p id="exp-msg" class="hint">Loading…</p>
+  <div id="experiments-list"></div>
+</section>
+
+<section id="results-section" style="display:none;">
+  <h2 id="results-title">Results</h2>
+  <p id="results-msg" class="hint"></p>
+  <table id="results-table" style="display:none">
+    <thead><tr><th>Variant</th><th>Visitors</th><th>New</th><th>Returning</th><th>Conversions</th><th>Rate</th></tr></thead>
+    <tbody id="results-body"></tbody>
+  </table>
+  <div class="chart-wrap"><canvas id="rate-chart" style="display:none"></canvas></div>
+  <div class="chart-wrap"><canvas id="trend-chart" style="display:none"></canvas></div>
+</section>
+
+<script>
+const STATUS_CLASS = { running: 'live', draft: 'draft', paused: 'paused', archived: 'archived' };
+let rateChart, trendChart;
+
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login.html';
+}
+
+async function callApi(path) {
+  let res;
+  try {
+    res = await fetch(path);
+  } catch (err) {
+    return { ok: false, message: `Network error — ${err.message}` };
+  }
+  if (res.status === 401) { window.location.href = '/login.html'; return { ok: false, message: 'not authenticated' }; }
+  const raw = await res.text();
+  let data = null;
+  try { data = raw ? JSON.parse(raw) : null; } catch (e) {}
+  if (!res.ok) {
+    const detail = data && (data.detail || data.error) ? (data.detail ? `${data.error} — ${data.detail}` : data.error) : `HTTP ${res.status}`;
+    return { ok: false, message: detail };
+  }
+  return { ok: true, data };
+}
+
+async function init() {
+  const me = await callApi('/api/auth/me');
+  if (!me.ok) return;
+  if (me.data.role !== 'client') { window.location.href = '/login.html'; return; }
+  document.getElementById('welcome-msg').textContent = `Signed in as ${me.data.client.name}`;
+
+  const result = await callApi('/api/client/experiments');
+  const msgEl = document.getElementById('exp-msg');
+  if (!result.ok) { msgEl.textContent = `Error: ${result.message}`; return; }
+
+  const experiments = result.data.experiments || [];
+  if (experiments.length === 0) { msgEl.textContent = 'No experiments have been shared with you yet.'; return; }
+  msgEl.textContent = '';
+
+  // Group by url_match, as a rough stand-in for "which page/site" — clients
+  // typically think in terms of pages, not experiment names.
+  const groups = {};
+  experiments.forEach((exp) => {
+    const key = exp.url_match || '(no URL set)';
+    (groups[key] = groups[key] || []).push(exp);
+  });
+
+  const listEl = document.getElementById('experiments-list');
+  listEl.innerHTML = '';
+  Object.entries(groups).forEach(([url, exps]) => {
+    const group = document.createElement('div');
+    group.className = 'url-group';
+    group.innerHTML = `<div class="url-group-label">${url}</div>`;
+    exps.forEach((exp) => {
+      const row = document.createElement('div');
+      row.className = 'experiment-row';
+      row.id = `exp-row-${exp.id}`;
+      row.innerHTML = `
+        <div><strong>${exp.name}</strong> <span class="badge ${STATUS_CLASS[exp.status] || 'paused'}">${exp.status}</span></div>
+        <span class="hint">View results →</span>
+      `;
+      row.addEventListener('click', () => loadResults(exp.id, exp.name));
+      group.appendChild(row);
+    });
+    listEl.appendChild(group);
+  });
+}
+
+async function loadResults(expId, expName) {
+  document.querySelectorAll('.experiment-row').forEach((el) => el.classList.remove('selected'));
+  document.getElementById(`exp-row-${expId}`).classList.add('selected');
+
+  const section = document.getElementById('results-section');
+  section.style.display = 'block';
+  document.getElementById('results-title').textContent = `Results — ${expName}`;
+  const msgEl = document.getElementById('results-msg');
+  msgEl.textContent = 'Loading…';
+  section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  const result = await callApi(`/api/client/results/${expId}`);
+  if (!result.ok) {
+    msgEl.textContent = `Error: ${result.message}`;
+    document.getElementById('results-table').style.display = 'none';
+    document.getElementById('rate-chart').style.display = 'none';
+    document.getElementById('trend-chart').style.display = 'none';
+    return;
+  }
+  msgEl.textContent = '';
+
+  const results = result.data.results || [];
+  const tbody = document.getElementById('results-body');
+  tbody.innerHTML = '';
+  results.forEach((r) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${r.variant_name}</td><td>${r.visitors}</td><td>${r.new_visitors}</td><td>${r.returning_visitors}</td><td>${r.conversions}</td><td>${r.conversion_rate}%</td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('results-table').style.display = results.length ? 'table' : 'none';
+
+  const rateCanvas = document.getElementById('rate-chart');
+  rateCanvas.style.display = results.length ? 'block' : 'none';
+  if (rateChart) rateChart.destroy();
+  if (results.length) {
+    rateChart = new Chart(rateCanvas, {
+      type: 'bar',
+      data: { labels: results.map((r) => r.variant_name), datasets: [{ label: 'Conversion rate (%)', data: results.map((r) => r.conversion_rate), backgroundColor: '#5635FB' }] },
+      options: { responsive: true, plugins: { title: { display: true, text: 'Conversion rate by variant' } }, scales: { y: { beginAtZero: true } } },
+    });
+  }
+
+  const trendResult = await callApi(`/api/client/results/${expId}/timeseries`);
+  const trendCanvas = document.getElementById('trend-chart');
+  if (trendChart) trendChart.destroy();
+  if (trendResult.ok && trendResult.data.series && trendResult.data.series.length) {
+    const series = trendResult.data.series;
+    const days = [...new Set(series.map((r) => r.day))].sort();
+    const variantNames = [...new Set(series.map((r) => r.variant_name))];
+    const palette = ['#5635FB', '#02DEB5', '#e07a5f', '#131723', '#a3690f'];
+    const datasets = variantNames.map((name, i) => {
+      let running = 0;
+      const dataByDay = days.map((day) => {
+        const row = series.find((r) => r.day === day && r.variant_name === name);
+        running += row ? row.visitors : 0;
+        return running;
+      });
+      return { label: name, data: dataByDay, borderColor: palette[i % palette.length], backgroundColor: palette[i % palette.length], tension: 0.2, fill: false };
+    });
+    trendCanvas.style.display = 'block';
+    trendChart = new Chart(trendCanvas, {
+      type: 'line',
+      data: { labels: days.map((d) => new Date(d).toLocaleDateString()), datasets },
+      options: { responsive: true, plugins: { title: { display: true, text: 'Cumulative visitors over time' } }, scales: { y: { beginAtZero: true } } },
+    });
+  } else {
+    trendCanvas.style.display = 'none';
+  }
+}
+
+init();
+</script>
+</body>
+</html>

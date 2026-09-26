@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('../db');
-const { requireApiKey } = require('../middleware/auth');
+const { requireAuth } = require('../middleware/auth');
 const { recordGoalUsage } = require('./goals');
 const router = express.Router();
 
@@ -80,7 +80,7 @@ router.get('/by-ids', async (req, res) => {
 });
 
 // Everything below is admin-only, requires x-api-key.
-router.use(requireApiKey);
+router.use(requireAuth(['owner']));
 
 // GET /api/experiments/all — every experiment regardless of status, with a variant
 // count, for the dashboard's "Your Experiments" list. Must be registered before
@@ -88,10 +88,11 @@ router.use(requireApiKey);
 router.get('/all', async (req, res) => {
   try {
     const { rows } = await db.query(
-      `SELECT e.*, COUNT(v.id)::int AS variant_count
+      `SELECT e.*, COUNT(v.id)::int AS variant_count, c.name AS client_name
        FROM experiments e
        LEFT JOIN variants v ON v.experiment_id = e.id
-       GROUP BY e.id
+       LEFT JOIN clients c ON c.id = e.client_id
+       GROUP BY e.id, c.name
        ORDER BY e.created_at DESC`
     );
     res.json({ experiments: rows });
@@ -122,16 +123,36 @@ router.get('/:id', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { name, url_match } = req.body;
+    const { name, url_match, client_id } = req.body;
     if (!name || !url_match) return res.status(400).json({ error: 'name and url_match are required' });
 
     const { rows } = await db.query(
-      `INSERT INTO experiments (name, url_match) VALUES ($1, $2) RETURNING *`,
-      [name, url_match]
+      `INSERT INTO experiments (name, url_match, client_id) VALUES ($1, $2, $3) RETURNING *`,
+      [name, url_match, client_id || null]
     );
     res.status(201).json(rows[0]);
   } catch (err) {
     console.error(err);
+    if (err.code === '23503') return res.status(400).json({ error: 'no client found with that id' });
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
+// PATCH /api/experiments/:id/client  { client_id: <uuid> | null }
+// Reassigns (or un-assigns, with null) which client can see this experiment.
+router.patch('/:id/client', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { client_id } = req.body;
+    const { rows } = await db.query(
+      `UPDATE experiments SET client_id = $1 WHERE id = $2 RETURNING *`,
+      [client_id || null, id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    if (err.code === '23503') return res.status(400).json({ error: 'no client found with that id' });
     res.status(500).json({ error: 'internal error', detail: err.message });
   }
 });

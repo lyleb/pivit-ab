@@ -132,27 +132,41 @@ A visitor counts as **new** on the calendar day of their first-ever view of an e
 
 The "View Results" section now draws two charts alongside the table: a bar chart of conversion rate per variant, and a line chart of cumulative visitors over time per variant, so you can see a trend rather than just a single snapshot.
 
+## Owner login
+
+There's a real login screen now at `/login.html` (branded, matching the dashboard), backed by proper sessions instead of a key pasted into a field:
+
+- Your login password is your existing `ADMIN_API_KEY` value — no need to change it, its role just shifted from "header value" to "login password."
+- Sessions are signed cookies stored in Postgres (not memory), so logging in survives a Railway redeploy — you won't get logged out just because you shipped a change.
+- A new env var is required: `SESSION_SECRET` (see `.env.example` for how to generate one). If it's missing, the server still starts (fails toward staying up, like everywhere else in this app) but logs a warning and logs everyone out on every restart until you set it.
+- 5 failed login attempts locks that IP out for 60 seconds — a basic brute-force throttle, not a full rate-limiter.
+- Every admin route now requires an active owner session; the old `x-api-key` header no longer does anything.
+
+## Client login
+
+A second, separate login exists for clients — read-only, scoped to only the experiments you've explicitly assigned them.
+
+- **Creating a client**: dashboard → "Clients" section → "Add a client" (display name, username, password). Give them the login URL shown there (your dashboard's own `/login.html`), their username, and the password.
+- **Assigning experiments**: every row in "Your Experiments" has a Client dropdown — pick a client to give them access to that experiment's results, or "— none —" to keep it internal-only. This is manual, per-experiment, on purpose — there's no automatic assignment by domain or URL.
+- **What clients see**: their own branded dashboard at `/client.html`, listing only their assigned experiments (grouped by URL), with results (table + charts) for whichever one they click. No creation, editing, variant management, goals, CSV export, or any other admin control — it's genuinely read-only.
+- **Enforcement is server-side, not just hidden UI**: every client-facing route double-checks that the requested experiment's `client_id` actually matches the logged-in client's session before returning anything. A client can't see another client's data by guessing or editing an experiment ID.
+- Deleting a client account never deletes their experiments or results — it just un-assigns them back to owner-only.
+
 ## Admin authentication
 
-Every route except the two the snippet calls (`GET /api/experiments`, `POST /api/event`) requires an `x-api-key` header matching your `ADMIN_API_KEY` env var. This covers creating experiments, adding variants, changing status, and viewing results.
-
-- If `ADMIN_API_KEY` isn't set on the server, admin routes refuse everything (fails closed, so you can't accidentally run unprotected).
-- The dashboard sends the key from the "Admin API Key" field at the top of the page — it's kept in that page's memory only, not persisted, so you'll need to re-paste it each time you reload the dashboard.
-- The public snippet endpoints stay open on purpose — they're called from any visitor's browser and have no sensitive data to protect (just "which experiments run on this URL" and "log this event").
-
-This is a single shared secret, not per-user accounts — fine for one person running this, but if you ever add teammates you'd want to move to real per-user auth.
+The public snippet endpoints (`GET /api/experiments`, `POST /api/event`, `GET /api/experiments/by-ids`) stay open on purpose — they're called from any visitor's browser and have no sensitive data to protect (just "which experiments run on this URL" and "log this event"). Everything else requires an active session with the right role (`owner` or `client`), enforced per-route.
 
 ## What's NOT in v1 (by design)
 
-- Single shared API key, not per-user login — fine solo, not for a team
-- No visual point-and-click editor — variants are defined via JSON
-- No statistical significance calculation — raw counts and rate only
+- Single owner account, not per-teammate logins — client accounts exist, but if you ever bring on a co-worker, they'd share the one owner password
+- No Bayesian/statistical significance view yet — raw counts and rate only, so a small early lead can look more meaningful than it is
 - 50/50-style manual splits only, no auto traffic allocation
 - No multi-page funnels
+- No password reset flow — if you forget the owner password, it's whatever `ADMIN_API_KEY` is set to in Railway; for a client, you reset it for them from the dashboard
 
 ## Next steps to consider
 
-- Visual variant editor (click element → choose change type) instead of raw JSON
-- Statistical significance indicator on results (e.g. simple z-test)
+- Statistical significance / Bayesian indicator on results (e.g. probability B beats A, credible intervals)
 - Support for multiple goals per variant with individual conversion rates
-- Per-user login if you ever bring on a teammate
+- Per-teammate owner logins if you ever bring someone else onto the admin side
+- A visual click-to-configure variant editor, once the current form-based one has been stress-tested on a genuinely complex experiment

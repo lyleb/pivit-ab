@@ -117,9 +117,6 @@
   details[open] summary::before { transform: rotate(90deg); }
   details[open] summary { border-bottom: 1px solid var(--border); }
   details .accordion-body { padding: 18px; }
-  .api-key-row { display: flex; gap: 10px; align-items: flex-start; }
-  .api-key-row input { flex: 1; }
-  .api-key-row button { white-space: nowrap; margin-top: 5px; }
   .activity-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.85em; }
   .activity-row:last-child { border-bottom: none; }
 </style>
@@ -129,6 +126,7 @@
   <img src="/assets/logo.png" alt="Pivit" class="logo">
   <div>
     <a class="topbar-link" onclick="toggleSnippetPopover(event)">📋 Copy Snippet</a>
+    <a class="topbar-link" onclick="logout()" style="margin-left:8px;">🚪 Log out</a>
     <div id="snippet-popover" class="snippet-popover">
       <p class="hint" style="margin-top:0; font-weight:600; color:var(--ink);">1. Add to &lt;head&gt; <span class="hint" style="font-weight:400;">(prevents flicker — optional but recommended)</span></p>
       <pre id="antiflicker-code"></pre>
@@ -144,22 +142,34 @@
 </div>
 
 <section>
-  <h2>0. Admin API Key</h2>
-  <p class="hint">Required for everything below except the snippet itself. Paste the same value you set as <code>ADMIN_API_KEY</code> on the server. Kept only in this tab's memory — you'll need to re-paste it after a page reload.</p>
-  <label>API Key</label>
-  <div class="api-key-row">
-    <input id="api-key" type="password" placeholder="paste your ADMIN_API_KEY">
-    <button type="button" onclick="loadExperimentList(); loadPopularGoals();">🔄 Refresh</button>
-  </div>
+  <h2>Your Experiments</h2>
+  <button type="button" class="secondary" onclick="refreshAll()">🔄 Refresh</button>
+  <p id="exp-list-msg" class="hint"></p>
+  <table id="exp-list-table" style="display:none">
+    <thead><tr><th>Name</th><th>Status</th><th>URL match</th><th>Client</th><th>Variants</th><th>Created</th><th></th></tr></thead>
+    <tbody id="exp-list-body"></tbody>
+  </table>
 </section>
 
 <section>
-  <h2>Your Experiments</h2>
-  <p id="exp-list-msg" class="hint"></p>
-  <table id="exp-list-table" style="display:none">
-    <thead><tr><th>Name</th><th>Status</th><th>URL match</th><th>Variants</th><th>Created</th><th></th></tr></thead>
-    <tbody id="exp-list-body"></tbody>
-  </table>
+  <h2>Clients</h2>
+  <p class="hint">Create a login for a client here, then assign them to experiments above (or reassign anytime from the "Your Experiments" table) so they can see just their own results at <code id="client-login-url"></code>.</p>
+
+  <details>
+    <summary>Add a client</summary>
+    <div class="accordion-body">
+      <label>Display name</label>
+      <input id="new-client-name" placeholder="Can't Say That?">
+      <label>Username</label>
+      <input id="new-client-username" placeholder="cantsaythat">
+      <label>Password</label>
+      <input id="new-client-password" type="password" placeholder="At least 8 characters">
+      <button onclick="createClient()">Create client</button>
+      <p id="client-result" class="hint"></p>
+    </div>
+  </details>
+
+  <div id="clients-list" style="margin-top:12px;"></div>
 </section>
 
 <section>
@@ -178,6 +188,8 @@
       <input id="exp-name" placeholder="Homepage CTA button copy">
       <label>URL match <span class="hint">(substring the page URL must contain — this is just stored for later, it doesn't check anything right now)</span></label>
       <input id="exp-url" placeholder="/pricing">
+      <label>Client <span class="hint">(optional — only assigned clients can see this experiment's results)</span></label>
+      <select id="exp-client-id"><option value="">— internal only, no client —</option></select>
       <button onclick="createExperiment()">Create</button>
       <p id="exp-result" class="hint"></p>
     </div>
@@ -275,8 +287,10 @@
 const API = '';
 
 function authHeaders() {
-  const key = document.getElementById('api-key').value;
-  return { 'Content-Type': 'application/json', 'x-api-key': key };
+  // Auth is now the session cookie, sent automatically on same-origin requests —
+  // nothing to attach here. Kept as a function (rather than removing every call
+  // site) since it still centralizes the Content-Type header.
+  return { 'Content-Type': 'application/json' };
 }
 
 // Every request goes through here so failures always produce a readable message —
@@ -288,6 +302,13 @@ async function callApi(path, options = {}) {
     res = await fetch(API + path, options);
   } catch (networkErr) {
     return { ok: false, message: `Network error — could not reach the server (${networkErr.message}). Check the URL and that the server is running.` };
+  }
+
+  if (res.status === 401) {
+    // Session missing or expired — bounce to login rather than showing a
+    // confusing inline error on every section of the dashboard.
+    window.location.href = '/login.html';
+    return { ok: false, message: 'not authenticated' };
   }
 
   const raw = await res.text();
@@ -304,6 +325,28 @@ async function callApi(path, options = {}) {
     return { ok: false, message: `${res.status}: ${detail}` };
   }
   return { ok: true, data };
+}
+
+// Confirms an active owner session on load; bounces to login immediately if
+// there isn't one, before any data-fetching happens.
+async function requireOwnerSession() {
+  try {
+    const res = await fetch('/api/auth/me');
+    const data = await res.json();
+    if (data.role !== 'owner') {
+      window.location.href = '/login.html';
+      return false;
+    }
+    return true;
+  } catch (err) {
+    window.location.href = '/login.html';
+    return false;
+  }
+}
+
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login.html';
 }
 
 // --- Experiments list ---
@@ -328,8 +371,6 @@ function populateExperimentSelects(experiments) {
 async function loadExperimentList() {
   const msgEl = document.getElementById('exp-list-msg');
   const table = document.getElementById('exp-list-table');
-  const key = document.getElementById('api-key').value;
-  if (!key) { msgEl.className = 'hint'; msgEl.textContent = 'Paste your Admin API Key above, then refresh.'; table.style.display = 'none'; return; }
 
   const result = await callApi('/api/experiments/all', { headers: authHeaders() });
   if (!result.ok) { msgEl.className = 'error-msg'; msgEl.textContent = `Error: ${result.message}`; table.style.display = 'none'; return; }
@@ -349,10 +390,13 @@ async function loadExperimentList() {
       ? `<button type="button" class="secondary" onclick="exportResultsCsv('${exp.id}')">Export CSV</button>
          <button type="button" class="secondary" style="color:#c0392b" onclick="deleteExperiment('${exp.id}', this)">Delete</button>`
       : '';
+    const clientOptions = clientsCache.map((c) => `<option value="${c.id}" ${exp.client_id === c.id ? 'selected' : ''}>${c.name}</option>`).join('');
+    const clientSelect = `<select onchange="assignClient('${exp.id}', this.value)" style="width:auto; margin:0; padding:4px 6px; font-size:0.82em;"><option value="">— none —</option>${clientOptions}</select>`;
     tr.innerHTML = `
       <td>${exp.name}</td>
       <td><span class="badge ${STATUS_COLORS[exp.status] || 'paused'}">${exp.status}</span></td>
       <td class="hint">${exp.url_match}</td>
+      <td>${clientSelect}</td>
       <td>${exp.variant_count}</td>
       <td class="hint">${created}</td>
       <td><button type="button" class="secondary" onclick="useExperiment('${exp.id}', '${(exp.url_match || '').replace(/'/g, "\\'")}')">Use ↓</button> ${archivedActions}</td>
@@ -362,10 +406,102 @@ async function loadExperimentList() {
   table.style.display = 'table';
 }
 
+// Reassigns (or un-assigns with an empty value) which client can see an experiment.
+async function assignClient(expId, clientId) {
+  const result = await callApi(`/api/experiments/${expId}/client`, {
+    method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ client_id: clientId || null })
+  });
+  if (!result.ok) alert(`Error: ${result.message}`);
+  loadExperimentList();
+}
+
+// --- Clients ---
+
+let clientsCache = [];
+document.getElementById('client-login-url').textContent = `${location.origin}/login.html`;
+
+function populateClientDropdown() {
+  const select = document.getElementById('exp-client-id');
+  const previous = select.value;
+  select.innerHTML = '<option value="">— internal only, no client —</option>' +
+    clientsCache.map((c) => `<option value="${c.id}">${c.name}</option>`).join('');
+  if (clientsCache.some((c) => c.id === previous)) select.value = previous;
+}
+
+async function loadClients() {
+  const result = await callApi('/api/clients', { headers: authHeaders() });
+  const listEl = document.getElementById('clients-list');
+  if (!result.ok) { listEl.innerHTML = `<p class="error-msg">Error: ${result.message}</p>`; clientsCache = []; populateClientDropdown(); return; }
+
+  clientsCache = result.data.clients || [];
+  populateClientDropdown();
+
+  if (clientsCache.length === 0) { listEl.innerHTML = '<p class="hint">No clients yet — add one above.</p>'; return; }
+
+  listEl.innerHTML = clientsCache.map((c) => `
+    <div class="variant-card">
+      <div>
+        <strong>${c.name}</strong>
+        <div class="vc-meta">username: ${c.username} · ${c.experiment_count} experiment(s) assigned</div>
+      </div>
+      <div class="vc-actions">
+        <button type="button" class="secondary" onclick="renameClient('${c.id}', '${c.name.replace(/'/g, "\\'")}')">Rename</button>
+        <button type="button" class="secondary" onclick="resetClientPassword('${c.id}')">Reset password</button>
+        <button type="button" class="secondary" style="color:#c0392b" onclick="deleteClient('${c.id}', this)">Delete</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function createClient() {
+  const name = document.getElementById('new-client-name').value;
+  const username = document.getElementById('new-client-username').value;
+  const password = document.getElementById('new-client-password').value;
+  const el = document.getElementById('client-result');
+  const result = await callApi('/api/clients', {
+    method: 'POST', headers: authHeaders(), body: JSON.stringify({ name, username, password })
+  });
+  el.className = result.ok ? 'ok-msg' : 'error-msg';
+  el.textContent = result.ok ? `Client "${result.data.name}" created — give them the login URL above, their username, and this password.` : `Error: ${result.message}`;
+  if (result.ok) {
+    document.getElementById('new-client-name').value = '';
+    document.getElementById('new-client-username').value = '';
+    document.getElementById('new-client-password').value = '';
+    loadClients();
+  }
+}
+
+async function renameClient(id, currentName) {
+  const name = prompt('New display name:', currentName);
+  if (!name) return;
+  const result = await callApi(`/api/clients/${id}`, { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ name }) });
+  if (!result.ok) alert(`Error: ${result.message}`);
+  loadClients();
+  loadExperimentList();
+}
+
+async function resetClientPassword(id) {
+  const password = prompt('New password (at least 8 characters):');
+  if (!password) return;
+  const result = await callApi(`/api/clients/${id}`, { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ password }) });
+  alert(result.ok ? 'Password updated — let the client know their new password.' : `Error: ${result.message}`);
+}
+
+async function deleteClient(id, btn) {
+  if (!confirm('Delete this client login? Their experiments are kept, just unassigned from any client.')) return;
+  btn.disabled = true;
+  const result = await callApi(`/api/clients/${id}`, { method: 'DELETE', headers: authHeaders() });
+  btn.disabled = false;
+  if (!result.ok) { alert(`Error: ${result.message}`); return; }
+  loadClients();
+  loadExperimentList();
+}
+
 // Downloads the full raw-event CSV for an experiment. Works from any row (Your
 // Experiments list or Results section) since it just needs the id.
 async function exportResultsCsv(expId) {
   const res = await fetch(`/api/results/${expId}/export`, { headers: authHeaders() });
+  if (res.status === 401) { window.location.href = '/login.html'; return; }
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
     try { const data = await res.json(); message = data.detail ? `${data.error} — ${data.detail}` : data.error; } catch (e) {}
@@ -404,11 +540,13 @@ function useExperiment(id, urlMatch) {
   document.getElementById('manage-exp-id').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
-// Refresh the list (and dropdowns, and popular goals) whenever the key is filled in.
-document.getElementById('api-key').addEventListener('change', () => {
+// Refresh the list (and dropdowns, and popular goals) — called once the owner
+// session is confirmed on page load, and by the Refresh button.
+async function refreshAll() {
+  await loadClients();
   loadExperimentList();
   loadPopularGoals();
-});
+}
 
 // Selecting an experiment in these two dropdowns loads its data immediately —
 // no separate click needed once it's picked.
@@ -477,9 +615,10 @@ function copyAntiflicker() {
 async function createExperiment() {
   const name = document.getElementById('exp-name').value;
   const url_match = document.getElementById('exp-url').value;
+  const client_id = document.getElementById('exp-client-id').value || null;
   const el = document.getElementById('exp-result');
   const result = await callApi('/api/experiments', {
-    method: 'POST', headers: authHeaders(), body: JSON.stringify({ name, url_match })
+    method: 'POST', headers: authHeaders(), body: JSON.stringify({ name, url_match, client_id })
   });
   el.className = result.ok ? 'ok-msg' : 'error-msg';
   if (result.ok) {
@@ -665,9 +804,6 @@ let popularGoalsCache = [];
 
 async function loadPopularGoals() {
   const container = document.getElementById('popular-goals');
-  const key = document.getElementById('api-key').value;
-  if (!key) { container.innerHTML = ''; return; }
-
   const result = await callApi('/api/goals/popular?limit=5', { headers: authHeaders() });
   if (!result.ok || !result.data.goals || result.data.goals.length === 0) { container.innerHTML = ''; popularGoalsCache = []; return; }
 
@@ -960,6 +1096,12 @@ async function loadResults() {
 fetch('/snippet/picker-bookmarklet.js').then(r => r.text()).then(src => {
   document.getElementById('picker-bookmarklet').href = 'javascript:' + encodeURIComponent(src);
 }).catch(() => {});
+
+// Gate the whole page on an active owner session before loading anything else.
+(async () => {
+  const ok = await requireOwnerSession();
+  if (ok) refreshAll();
+})();
 </script>
 </body>
 </html>

@@ -1,9 +1,9 @@
 const express = require('express');
 const db = require('../db');
-const { requireApiKey } = require('../middleware/auth');
+const { requireAuth } = require('../middleware/auth');
 const router = express.Router();
 
-router.use(requireApiKey); // admin-only — this is a dashboard convenience, not used by the snippet
+router.use(requireAuth(['owner'])); // admin-only — this is a dashboard convenience, not used by the snippet
 
 // GET /api/goals/popular?limit=5
 router.get('/popular', async (req, res) => {
