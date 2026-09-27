@@ -1,13 +1,16 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const { computeBayesianStats } = require('../bayesian');
 const router = express.Router();
 
 router.use(requireAuth(['client']));
 
 // Every route below double-checks client_id server-side before returning
 // anything — a client's session can never be used to view another client's
-// experiment just by guessing/changing an id in the URL.
+// experiment just by guessing/changing an id in the URL. Every query also
+// explicitly filters is_demo = false — a client should only ever see their real
+// results, never synthetic show-and-tell data an owner generated for a demo.
 async function assertOwnsExperiment(clientId, experimentId) {
   const { rows } = await db.query(
     `SELECT id, name, status, url_match FROM experiments WHERE id = $1 AND client_id = $2`,
@@ -42,7 +45,7 @@ router.get('/results/:experimentId', async (req, res) => {
     const { rows } = await db.query(
       `WITH first_seen AS (
          SELECT visitor_id, MIN(created_at)::date AS first_day
-         FROM events WHERE experiment_id = $1 AND event_type = 'view'
+         FROM events WHERE experiment_id = $1 AND event_type = 'view' AND is_demo = false
          GROUP BY visitor_id
        )
        SELECT
@@ -53,7 +56,7 @@ router.get('/results/:experimentId', async (req, res) => {
          COUNT(DISTINCT e.visitor_id) FILTER (WHERE e.event_type = 'view' AND e.created_at::date > fs.first_day) AS returning_visitors,
          COUNT(*) FILTER (WHERE e.event_type = 'convert') AS conversions
        FROM variants v
-       LEFT JOIN events e ON e.variant_id = v.id
+       LEFT JOIN events e ON e.variant_id = v.id AND e.is_demo = false
        LEFT JOIN first_seen fs ON fs.visitor_id = e.visitor_id
        WHERE v.experiment_id = $1
        GROUP BY v.id, v.name
@@ -92,7 +95,7 @@ router.get('/results/:experimentId/timeseries', async (req, res) => {
          COUNT(*) FILTER (WHERE e.event_type = 'convert') AS conversions
        FROM events e
        JOIN variants v ON v.id = e.variant_id
-       WHERE e.experiment_id = $1
+       WHERE e.experiment_id = $1 AND e.is_demo = false
        GROUP BY day, v.id, v.name
        ORDER BY day`,
       [req.params.experimentId]
@@ -107,6 +110,44 @@ router.get('/results/:experimentId/timeseries', async (req, res) => {
     }));
 
     res.json({ series });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
+// GET /api/client/results/:experimentId/bayesian — short-form version of the
+// owner's Bayesian panel: same model (src/bayesian.js), used client-side to
+// generate one plain-English sentence rather than a full table.
+router.get('/results/:experimentId/bayesian', async (req, res) => {
+  try {
+    const experiment = await assertOwnsExperiment(req.session.clientId, req.params.experimentId);
+    if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
+
+    const { rows } = await db.query(
+      `SELECT
+         v.id AS variant_id,
+         v.name AS variant_name,
+         COUNT(DISTINCT e.visitor_id) FILTER (WHERE e.event_type = 'view') AS visitors,
+         COUNT(*) FILTER (WHERE e.event_type = 'convert') AS conversions
+       FROM variants v
+       LEFT JOIN events e ON e.variant_id = v.id AND e.is_demo = false
+       WHERE v.experiment_id = $1
+       GROUP BY v.id, v.name
+       ORDER BY v.name`,
+      [req.params.experimentId]
+    );
+
+    const variantData = rows.map((r) => ({
+      variant_id: r.variant_id,
+      variant_name: r.variant_name,
+      visitors: Number(r.visitors),
+      conversions: Number(r.conversions),
+    }));
+
+    const stats = computeBayesianStats(variantData);
+    const lowSample = variantData.some((v) => v.visitors < 30);
+    res.json({ low_sample_warning: lowSample, stats });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });

@@ -89,9 +89,7 @@
   .chart-wrap { max-width: 100%; margin-top: 20px; }
   .topbar {
     display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 28px; padding: 16px 24px; position: relative;
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-    box-shadow: 0 1px 2px rgba(19,23,35,0.04);
+    margin-bottom: 28px; padding: 8px 4px; position: relative;
   }
   .topbar img.logo { height: 30px; display: block; }
   .topbar-link {
@@ -118,6 +116,7 @@
   details[open] summary { border-bottom: 1px solid var(--border); }
   details .accordion-body { padding: 18px; }
   .activity-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.85em; }
+  .trend-toggle-btn.active { background: var(--indigo); color: white; }
   .activity-row:last-child { border-bottom: none; }
 </style>
 </head>
@@ -166,6 +165,7 @@
       <input id="new-client-password" type="password" placeholder="At least 8 characters">
       <button onclick="createClient()">Create client</button>
       <p id="client-result" class="hint"></p>
+      <div id="new-client-credentials"></div>
     </div>
   </details>
 
@@ -181,7 +181,7 @@
 <section>
   <h2>Create Experiment & Add Variant</h2>
 
-  <details open>
+  <details>
     <summary>1. Create Experiment</summary>
     <div class="accordion-body">
       <label>Name</label>
@@ -195,7 +195,7 @@
     </div>
   </details>
 
-  <details open>
+  <details>
     <summary>2. Add Variant</summary>
     <div class="accordion-body">
       <p id="edit-banner" class="hint" style="display:none; color:#c0392b;">Editing an existing variant — changes take effect immediately for live traffic. <button type="button" class="secondary" onclick="cancelEditVariant()" style="margin:0 0 0 8px;">Cancel edit</button></p>
@@ -208,7 +208,7 @@
     </div>
   </details>
 
-  <details open>
+  <details>
     <summary>3. Make Changes</summary>
     <div class="accordion-body">
       <div id="changes-list"></div>
@@ -241,6 +241,7 @@
   <button onclick="loadManageVariants()">Load Variants</button>
   <p id="manage-msg" class="hint"></p>
   <div id="manage-variants-list"></div>
+  <div id="manage-demo-panel" style="margin-top:12px;"></div>
 </section>
 
 <section>
@@ -262,6 +263,11 @@
   <h2>5. View Results</h2>
   <label>Experiment</label>
   <select id="results-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
+  <label>Data <span class="hint">(Demo data never mixes with real results — see "Demo Data" above)</span></label>
+  <select id="data-source-filter">
+    <option value="live">Live (real visitors)</option>
+    <option value="demo">Demo</option>
+  </select>
   <label>Visitors <span class="hint">(filters the table and rate chart below)</span></label>
   <select id="visitor-type-filter">
     <option value="">All visitors</option>
@@ -275,9 +281,14 @@
     <tbody id="results-body"></tbody>
   </table>
   <div class="chart-wrap"><canvas id="rate-chart" style="display:none"></canvas></div>
+  <div style="margin-top:16px; display:flex; gap:8px; align-items:center;">
+    <span class="hint">Trend:</span>
+    <button type="button" class="secondary trend-toggle-btn" id="trend-mode-cumulative" onclick="setTrendMode('cumulative')">Cumulative</button>
+    <button type="button" class="secondary trend-toggle-btn" id="trend-mode-daily" onclick="setTrendMode('daily')">Daily</button>
+  </div>
   <div class="chart-wrap"><canvas id="trend-chart" style="display:none"></canvas></div>
   <button type="button" class="secondary" id="refresh-results-btn" style="display:none" onclick="loadResults()">🔄 Refresh Results</button>
-  <button type="button" class="secondary" id="export-results-btn" style="display:none" onclick="exportResultsCsv(document.getElementById('results-exp-id').value)">⬇ Export CSV</button>
+  <button type="button" class="secondary" id="export-results-btn" style="display:none" onclick="exportResultsCsv(document.getElementById('results-exp-id').value, document.getElementById('data-source-filter').value)">⬇ Export CSV</button>
 
   <h3 style="margin-top:24px;">Bayesian Analysis <span class="hint">(which variant is actually winning, and how sure we can be)</span></h3>
   <p class="hint">Instead of just a raw percentage, this treats each variant's true conversion rate as uncertain and narrows that uncertainty as data comes in — so a 20% lead from 10 visitors and a 20% lead from 10,000 visitors don't look equally convincing. "Probability best" is the chance that variant is genuinely the top performer, not just ahead by chance.</p>
@@ -447,18 +458,67 @@ async function loadClients() {
   if (clientsCache.length === 0) { listEl.innerHTML = '<p class="hint">No clients yet — add one above.</p>'; return; }
 
   listEl.innerHTML = clientsCache.map((c) => `
-    <div class="variant-card">
-      <div>
-        <strong>${c.name}</strong>
-        <div class="vc-meta">username: ${c.username} · ${c.experiment_count} experiment(s) assigned</div>
+    <div class="variant-card" style="flex-direction:column; align-items:stretch;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <strong>${c.name}</strong>
+          <div class="vc-meta">username: ${c.username} · ${c.experiment_count} experiment(s) assigned</div>
+        </div>
+        <div class="vc-actions">
+          <button type="button" class="secondary" onclick="renameClient('${c.id}', '${c.name.replace(/'/g, "\\'")}')">Rename</button>
+          <button type="button" class="secondary" onclick="toggleResetPassword('${c.id}')">Reset password</button>
+          <button type="button" class="secondary" style="color:#c0392b" onclick="deleteClient('${c.id}', this)">Delete</button>
+        </div>
       </div>
-      <div class="vc-actions">
-        <button type="button" class="secondary" onclick="renameClient('${c.id}', '${c.name.replace(/'/g, "\\'")}')">Rename</button>
-        <button type="button" class="secondary" onclick="resetClientPassword('${c.id}')">Reset password</button>
-        <button type="button" class="secondary" style="color:#c0392b" onclick="deleteClient('${c.id}', this)">Delete</button>
+      <div id="reset-pw-row-${c.id}" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input type="password" id="reset-pw-input-${c.id}" placeholder="New password (min 8 characters)" style="flex:1; margin:0;">
+          <button type="button" onclick="saveClientPassword('${c.id}', '${c.username}')" style="margin:0; white-space:nowrap;">Save</button>
+          <button type="button" class="secondary" onclick="toggleResetPassword('${c.id}')" style="margin:0;">Cancel</button>
+        </div>
+        <div id="reset-pw-credentials-${c.id}" style="margin-top:8px;"></div>
       </div>
     </div>
   `).join('');
+}
+
+// Shared by client creation and password reset — a persistent, copyable box
+// instead of a transient alert()/prompt(), since a native dialog disappears the
+// moment you dismiss it and can't be copied cleanly.
+function showCredentialBox(containerId, username, password) {
+  const container = document.getElementById(containerId);
+  const escapedPw = password.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+  container.innerHTML = `
+    <div style="background:#f4f2fe; border:1px solid var(--indigo); border-radius:8px; padding:12px; margin-top:10px;">
+      <div class="hint" style="margin-bottom:6px;">Give these to your client — the password can't be shown again once you leave this page.</div>
+      <div style="font-family:'SF Mono', Menlo, monospace; font-size:0.9em;">Username: <strong>${username}</strong><br>Password: <strong>${password}</strong></div>
+      <button type="button" class="secondary" style="margin-top:8px;" onclick="copyCredentials('${username}', '${escapedPw}')">Copy both</button>
+      <span id="${containerId}-copied" class="hint"></span>
+    </div>
+  `;
+}
+
+function copyCredentials(username, password) {
+  navigator.clipboard.writeText(`Username: ${username}\nPassword: ${password}`).catch(() => {});
+}
+
+function toggleResetPassword(id) {
+  const row = document.getElementById(`reset-pw-row-${id}`);
+  const willShow = row.style.display === 'none';
+  row.style.display = willShow ? 'block' : 'none';
+  const input = document.getElementById(`reset-pw-input-${id}`);
+  document.getElementById(`reset-pw-credentials-${id}`).innerHTML = '';
+  if (willShow && input) { input.value = ''; input.focus(); }
+}
+
+async function saveClientPassword(id, username) {
+  const input = document.getElementById(`reset-pw-input-${id}`);
+  const password = input.value;
+  if (!password || password.length < 8) { alert('Password must be at least 8 characters.'); return; }
+  const result = await callApi(`/api/clients/${id}`, { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ password }) });
+  if (!result.ok) { alert(`Error: ${result.message}`); return; }
+  showCredentialBox(`reset-pw-credentials-${id}`, username, password);
+  input.value = '';
 }
 
 async function createClient() {
@@ -470,8 +530,9 @@ async function createClient() {
     method: 'POST', headers: authHeaders(), body: JSON.stringify({ name, username, password })
   });
   el.className = result.ok ? 'ok-msg' : 'error-msg';
-  el.textContent = result.ok ? `Client "${result.data.name}" created — give them the login URL above, their username, and this password.` : `Error: ${result.message}`;
+  el.textContent = result.ok ? `Client "${result.data.name}" created.` : `Error: ${result.message}`;
   if (result.ok) {
+    showCredentialBox('new-client-credentials', result.data.username, password);
     document.getElementById('new-client-name').value = '';
     document.getElementById('new-client-username').value = '';
     document.getElementById('new-client-password').value = '';
@@ -488,13 +549,6 @@ async function renameClient(id, currentName) {
   loadExperimentList();
 }
 
-async function resetClientPassword(id) {
-  const password = prompt('New password (at least 8 characters):');
-  if (!password) return;
-  const result = await callApi(`/api/clients/${id}`, { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ password }) });
-  alert(result.ok ? 'Password updated — let the client know their new password.' : `Error: ${result.message}`);
-}
-
 async function deleteClient(id, btn) {
   if (!confirm('Delete this client login? Their experiments are kept, just unassigned from any client.')) return;
   btn.disabled = true;
@@ -507,8 +561,8 @@ async function deleteClient(id, btn) {
 
 // Downloads the full raw-event CSV for an experiment. Works from any row (Your
 // Experiments list or Results section) since it just needs the id.
-async function exportResultsCsv(expId) {
-  const res = await fetch(`/api/results/${expId}/export`, { headers: authHeaders() });
+async function exportResultsCsv(expId, dataSource = 'live') {
+  const res = await fetch(`/api/results/${expId}/export?data_source=${dataSource}`, { headers: authHeaders() });
   if (res.status === 401) { window.location.href = '/login.html'; return; }
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
@@ -562,6 +616,9 @@ document.getElementById('results-exp-id').addEventListener('change', (e) => {
   if (e.target.value) loadResults();
 });
 document.getElementById('visitor-type-filter').addEventListener('change', () => {
+  if (document.getElementById('results-exp-id').value) loadResults();
+});
+document.getElementById('data-source-filter').addEventListener('change', () => {
   if (document.getElementById('results-exp-id').value) loadResults();
 });
 document.getElementById('manage-exp-id').addEventListener('change', (e) => {
@@ -926,6 +983,66 @@ async function loadManageVariants() {
     `;
     listEl.appendChild(card);
   });
+
+  renderDemoDataPanel(expId, variants);
+}
+
+// A small panel for generating/clearing synthetic show-and-tell data for this
+// experiment — kept entirely separate from real events (is_demo flag), so it
+// never affects your actual results unless you switch the Results section's
+// Live/Demo toggle to Demo.
+function renderDemoDataPanel(expId, variants) {
+  const container = document.getElementById('manage-demo-panel');
+  const rateInputs = variants.map((v) => `
+    <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
+      <span style="flex:1; font-size:0.88em;">${v.name}</span>
+      <input type="number" class="demo-rate-input" data-variant-id="${v.id}" value="5" min="0" max="100" style="width:70px;"> <span class="hint">% target rate</span>
+    </div>
+  `).join('');
+
+  container.innerHTML = `
+    <details>
+      <summary>Demo Data <span class="hint">(synthetic, for show-and-tell — never mixes with real results)</span></summary>
+      <div class="accordion-body">
+        <label>Days to simulate</label>
+        <input type="number" id="demo-days" value="14" min="1" max="90">
+        <label>Visitors per day (spread across variants by traffic split)</label>
+        <input type="number" id="demo-visitors" value="60" min="1" max="2000">
+        <label>Target conversion rate per variant</label>
+        ${rateInputs}
+        <br>
+        <button onclick="generateDemoData('${expId}')">Generate demo data</button>
+        <button type="button" class="secondary" style="color:#c0392b" onclick="clearDemoData('${expId}')">Clear demo data</button>
+        <p id="demo-result" class="hint"></p>
+      </div>
+    </details>
+  `;
+}
+
+async function generateDemoData(expId) {
+  const days = document.getElementById('demo-days').value;
+  const visitors_per_day = document.getElementById('demo-visitors').value;
+  const rates = {};
+  document.querySelectorAll('.demo-rate-input').forEach((el) => { rates[el.dataset.variantId] = parseFloat(el.value) || 0; });
+
+  const el = document.getElementById('demo-result');
+  el.className = 'hint';
+  el.textContent = 'Generating…';
+  const result = await callApi(`/api/experiments/${expId}/demo-data`, {
+    method: 'POST', headers: authHeaders(), body: JSON.stringify({ days, visitors_per_day, rates }),
+  });
+  el.className = result.ok ? 'ok-msg' : 'error-msg';
+  el.textContent = result.ok
+    ? `Generated ${result.data.generated} events across ${result.data.days} days. Switch Results below to "Demo" to view them.`
+    : `Error: ${result.message}`;
+}
+
+async function clearDemoData(expId) {
+  if (!confirm('Delete all demo data for this experiment? Real visitor data is never touched by this.')) return;
+  const el = document.getElementById('demo-result');
+  const result = await callApi(`/api/experiments/${expId}/demo-data`, { method: 'DELETE', headers: authHeaders() });
+  el.className = result.ok ? 'ok-msg' : 'error-msg';
+  el.textContent = result.ok ? `Removed ${result.data.deleted} demo events.` : `Error: ${result.message}`;
 }
 
 // Loads a variant's current data into the "Add Variant" form and switches it into
@@ -1001,6 +1118,62 @@ async function updateStatus() {
 }
 
 let rateChart, trendChart;
+let currentTrendSeries = [];
+let trendMode = 'cumulative';
+
+// Shared by both the trend-mode toggle and the initial render. Plots conversion
+// rate (not raw visitor count) so it's directly comparable to the Bayesian rate
+// estimate above it. "Cumulative" is a running rate up to that day; "Daily" is
+// that day's own rate in isolation (noisier, but shows what's happening *now*
+// rather than smoothing it into the running average).
+function computeTrendDatasets(series, mode) {
+  const days = [...new Set(series.map((r) => r.day))].sort();
+  const variantNames = [...new Set(series.map((r) => r.variant_name))];
+  const palette = ['#5635FB', '#02DEB5', '#e07a5f', '#131723', '#a3690f'];
+
+  const datasets = variantNames.map((name, i) => {
+    let cumVisitors = 0, cumConversions = 0;
+    const dataByDay = days.map((day) => {
+      const row = series.find((r) => r.day === day && r.variant_name === name);
+      const v = row ? row.visitors : 0;
+      const c = row ? row.conversions : 0;
+      if (mode === 'cumulative') {
+        cumVisitors += v; cumConversions += c;
+        return cumVisitors > 0 ? +(cumConversions / cumVisitors * 100).toFixed(2) : 0;
+      }
+      return v > 0 ? +(c / v * 100).toFixed(2) : 0;
+    });
+    return { label: name, data: dataByDay, borderColor: palette[i % palette.length], backgroundColor: palette[i % palette.length], tension: 0.2, fill: false };
+  });
+
+  return { labels: days.map((d) => new Date(d).toLocaleDateString()), datasets };
+}
+
+function renderTrendChart() {
+  const trendCanvas = document.getElementById('trend-chart');
+  document.getElementById('trend-mode-cumulative').classList.toggle('active', trendMode === 'cumulative');
+  document.getElementById('trend-mode-daily').classList.toggle('active', trendMode === 'daily');
+
+  if (trendChart) trendChart.destroy();
+  if (currentTrendSeries.length === 0) { trendCanvas.style.display = 'none'; return; }
+
+  const { labels, datasets } = computeTrendDatasets(currentTrendSeries, trendMode);
+  trendCanvas.style.display = 'block';
+  trendChart = new Chart(trendCanvas, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      plugins: { title: { display: true, text: (trendMode === 'cumulative' ? 'Cumulative' : 'Daily') + ' conversion rate over time' } },
+      scales: { y: { beginAtZero: true, ticks: { callback: (v) => v + '%' } } },
+    },
+  });
+}
+
+function setTrendMode(mode) {
+  trendMode = mode;
+  renderTrendChart();
+}
 
 async function loadResults() {
   const expId = document.getElementById('results-exp-id').value.trim();
@@ -1010,7 +1183,8 @@ async function loadResults() {
   if (!expId) { msgEl.className = 'error-msg'; msgEl.textContent = 'Select an experiment above first.'; refreshBtn.style.display = 'none'; exportBtn.style.display = 'none'; return; }
 
   const visitorType = document.getElementById('visitor-type-filter').value;
-  const qs = visitorType ? `?visitor_type=${visitorType}` : '';
+  const dataSource = document.getElementById('data-source-filter').value; // 'live' or 'demo'
+  const qs = `?data_source=${dataSource}${visitorType ? '&visitor_type=' + visitorType : ''}`;
   const result = await callApi(`/api/results/${expId}${qs}`, { headers: authHeaders() });
 
   if (!result.ok) {
@@ -1051,40 +1225,16 @@ async function loadResults() {
     });
   }
 
-  // Line chart: cumulative visitors over time per variant — the trend view.
-  const trendResult = await callApi(`/api/results/${expId}/timeseries`, { headers: authHeaders() });
-  const trendCanvas = document.getElementById('trend-chart');
-  if (trendChart) trendChart.destroy();
-  if (trendResult.ok && trendResult.data.series && trendResult.data.series.length) {
-    const series = trendResult.data.series;
-    const days = [...new Set(series.map(r => r.day))].sort();
-    const variantNames = [...new Set(series.map(r => r.variant_name))];
-    const palette = ['#5635FB', '#02DEB5', '#e07a5f', '#131723', '#a3690f'];
-
-    const datasets = variantNames.map((name, i) => {
-      let running = 0;
-      const dataByDay = days.map((day) => {
-        const row = series.find(r => r.day === day && r.variant_name === name);
-        running += row ? row.visitors : 0;
-        return running;
-      });
-      return { label: name, data: dataByDay, borderColor: palette[i % palette.length], backgroundColor: palette[i % palette.length], tension: 0.2, fill: false };
-    });
-
-    trendCanvas.style.display = 'block';
-    trendChart = new Chart(trendCanvas, {
-      type: 'line',
-      data: { labels: days.map(d => new Date(d).toLocaleDateString()), datasets },
-      options: { responsive: true, plugins: { title: { display: true, text: 'Cumulative visitors over time' } }, scales: { y: { beginAtZero: true } } }
-    });
-  } else {
-    trendCanvas.style.display = 'none';
-  }
+  // Line chart: conversion rate over time per variant, in whichever mode
+  // (cumulative running rate, or that day's own rate) is currently selected.
+  const trendResult = await callApi(`/api/results/${expId}/timeseries?data_source=${dataSource}`, { headers: authHeaders() });
+  currentTrendSeries = (trendResult.ok && trendResult.data.series) ? trendResult.data.series : [];
+  renderTrendChart();
 
   // Recent activity — raw, unaggregated events, for confirming whether anything
   // is actually arriving at all, independent of the totals above.
   const activityEl = document.getElementById('activity-log');
-  const recentResult = await callApi(`/api/results/${expId}/recent`, { headers: authHeaders() });
+  const recentResult = await callApi(`/api/results/${expId}/recent?data_source=${dataSource}`, { headers: authHeaders() });
   if (!recentResult.ok) {
     activityEl.textContent = `Error loading activity: ${recentResult.message}`;
   } else if (!recentResult.data.events || recentResult.data.events.length === 0) {
@@ -1103,7 +1253,7 @@ async function loadResults() {
   // on their own (e.g. for the CSV export workflow).
   const bayesianTable = document.getElementById('bayesian-table');
   const bayesianWarning = document.getElementById('bayesian-warning');
-  const bayesianResult = await callApi(`/api/results/${expId}/bayesian`, { headers: authHeaders() });
+  const bayesianResult = await callApi(`/api/results/${expId}/bayesian?data_source=${dataSource}`, { headers: authHeaders() });
 
   if (!bayesianResult.ok || !bayesianResult.data.stats || bayesianResult.data.stats.length === 0) {
     bayesianTable.style.display = 'none';

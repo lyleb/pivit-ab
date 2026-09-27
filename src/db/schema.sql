@@ -67,3 +67,10 @@ CREATE TABLE IF NOT EXISTS clients (
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS client_id UUID REFERENCES clients(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_experiments_client ON experiments(client_id);
 
+-- Marks synthetic events generated for show-and-tell demos, kept completely
+-- separate from real visitor data. Every results query filters on this
+-- explicitly (defaulting to real data), and it can be wiped independently
+-- with DELETE FROM events WHERE is_demo = true — never touches real events.
+ALTER TABLE events ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS idx_events_is_demo ON events(experiment_id, is_demo);
+

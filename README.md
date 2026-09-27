@@ -139,7 +139,26 @@ Below the results table and charts is a "Bayesian Analysis" panel — the answer
 - **Est. Rate (95% range)** — the likely true conversion rate and how wide the uncertainty around it still is. A wide range (e.g. 4%–64%) means "we genuinely don't know yet," not "the number is wrong."
 - **Probability Best** — the chance that variant is actually the top performer, computed by simulating the posterior distributions against each other 20,000 times (see `src/bayesian.js` for the exact method). A 🏆 marks a variant at 90%+.
 
-A low-traffic warning appears whenever any variant has under 30 visitors, since the estimate is still wide at that point and can swing a lot with the next handful of visitors. This panel loads automatically alongside the main results — no separate button.
+A low-traffic warning appears whenever any variant has under 30 visitors, since the estimate is still wide at that point and can swing a lot with the next handful of visitors. This panel loads automatically alongside the main results — no separate button. The client dashboard shows a short one-sentence version of the same model instead of the full table.
+
+## The trend chart
+
+The line chart under the bar chart plots **conversion rate over time**, not raw visitor count, with a toggle between two modes:
+
+- **Cumulative** — a running rate up to that day (smoother, shows the overall trend)
+- **Daily** — that day's own rate in isolation (noisier, but shows what's happening *right now* rather than smoothing it into the average)
+
+Same chart, same toggle, on both the admin dashboard and the client dashboard.
+
+## Demo data
+
+"Preview & Manage Variants" has a collapsible **"Demo Data"** panel per experiment for generating synthetic traffic — useful for a show-and-tell before real traffic has built up. Set how many days to simulate, roughly how many visitors per day, and a target conversion rate per variant, then "Generate demo data." It produces a realistic-looking spread (with day-to-day noise, not a flat line) rather than literally hitting the target rate exactly.
+
+Demo data is **completely separate from real data** — every event it creates is flagged `is_demo` in the database, and every results query (table, charts, Bayesian panel, CSV export) respects a **Live / Demo** dropdown in the Results section. Real visitor data is never at risk of being mixed with or overwritten by demo data. "Clear demo data" removes only the synthetic events for that experiment, instantly, whenever you're done with it. Clients never see demo data — their view is hardcoded to real data only, with no toggle.
+
+## Client credentials, on-page
+
+Creating a client or resetting their password no longer uses a browser `alert()`/`prompt()` dialog — both show a persistent, copyable box on the page itself (username + password, with a "Copy both" button), since a native dialog disappears the moment you dismiss it and can't be copied cleanly. The password itself is never stored in retrievable form — if you navigate away without copying it, you'd need to reset it again.
 
 ## Owner login
 

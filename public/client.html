@@ -42,6 +42,8 @@
   .url-group:first-child { margin-top: 0; }
   .url-group-label { font-size: 0.8em; color: var(--text-muted); font-family: "SF Mono", Menlo, monospace; margin-bottom: 6px; }
   .chart-wrap { max-width: 100%; margin-top: 20px; }
+  .trend-toggle-btn.active { background: var(--indigo); color: white; }
+  .bayesian-summary { background: #f4f2fe; border: 1px solid var(--indigo); border-radius: 8px; padding: 14px 16px; margin-top: 20px; font-size: 0.92em; }
 </style>
 </head>
 <body>
@@ -67,12 +69,20 @@
     <tbody id="results-body"></tbody>
   </table>
   <div class="chart-wrap"><canvas id="rate-chart" style="display:none"></canvas></div>
+  <div style="margin-top:16px; display:flex; gap:8px; align-items:center;">
+    <span class="hint">Trend:</span>
+    <button type="button" class="secondary trend-toggle-btn" id="trend-mode-cumulative" onclick="setTrendMode('cumulative')" style="padding:6px 12px; border:1px solid var(--border); background:#f0f0f7; border-radius:8px; cursor:pointer; font-size:0.85em;">Cumulative</button>
+    <button type="button" class="secondary trend-toggle-btn" id="trend-mode-daily" onclick="setTrendMode('daily')" style="padding:6px 12px; border:1px solid var(--border); background:#f0f0f7; border-radius:8px; cursor:pointer; font-size:0.85em;">Daily</button>
+  </div>
   <div class="chart-wrap"><canvas id="trend-chart" style="display:none"></canvas></div>
+  <div id="bayesian-summary" class="bayesian-summary" style="display:none;"></div>
 </section>
 
 <script>
 const STATUS_CLASS = { running: 'live', draft: 'draft', paused: 'paused', archived: 'archived' };
 let rateChart, trendChart;
+let currentTrendSeries = [];
+let trendMode = 'cumulative';
 
 async function logout() {
   await fetch('/api/auth/logout', { method: 'POST' });
@@ -140,6 +150,57 @@ async function init() {
   });
 }
 
+// Same model as the admin dashboard's trend chart (see index.html for the
+// identical function) — conversion rate over time, either cumulative or daily.
+function computeTrendDatasets(series, mode) {
+  const days = [...new Set(series.map((r) => r.day))].sort();
+  const variantNames = [...new Set(series.map((r) => r.variant_name))];
+  const palette = ['#5635FB', '#02DEB5', '#e07a5f', '#131723', '#a3690f'];
+
+  const datasets = variantNames.map((name, i) => {
+    let cumVisitors = 0, cumConversions = 0;
+    const dataByDay = days.map((day) => {
+      const row = series.find((r) => r.day === day && r.variant_name === name);
+      const v = row ? row.visitors : 0;
+      const c = row ? row.conversions : 0;
+      if (mode === 'cumulative') {
+        cumVisitors += v; cumConversions += c;
+        return cumVisitors > 0 ? +(cumConversions / cumVisitors * 100).toFixed(2) : 0;
+      }
+      return v > 0 ? +(c / v * 100).toFixed(2) : 0;
+    });
+    return { label: name, data: dataByDay, borderColor: palette[i % palette.length], backgroundColor: palette[i % palette.length], tension: 0.2, fill: false };
+  });
+
+  return { labels: days.map((d) => new Date(d).toLocaleDateString()), datasets };
+}
+
+function renderTrendChart() {
+  const trendCanvas = document.getElementById('trend-chart');
+  document.getElementById('trend-mode-cumulative').classList.toggle('active', trendMode === 'cumulative');
+  document.getElementById('trend-mode-daily').classList.toggle('active', trendMode === 'daily');
+
+  if (trendChart) trendChart.destroy();
+  if (currentTrendSeries.length === 0) { trendCanvas.style.display = 'none'; return; }
+
+  const { labels, datasets } = computeTrendDatasets(currentTrendSeries, trendMode);
+  trendCanvas.style.display = 'block';
+  trendChart = new Chart(trendCanvas, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      plugins: { title: { display: true, text: (trendMode === 'cumulative' ? 'Cumulative' : 'Daily') + ' conversion rate over time' } },
+      scales: { y: { beginAtZero: true, ticks: { callback: (v) => v + '%' } } },
+    },
+  });
+}
+
+function setTrendMode(mode) {
+  trendMode = mode;
+  renderTrendChart();
+}
+
 async function loadResults(expId, expName) {
   document.querySelectorAll('.experiment-row').forEach((el) => el.classList.remove('selected'));
   document.getElementById(`exp-row-${expId}`).classList.add('selected');
@@ -157,6 +218,7 @@ async function loadResults(expId, expName) {
     document.getElementById('results-table').style.display = 'none';
     document.getElementById('rate-chart').style.display = 'none';
     document.getElementById('trend-chart').style.display = 'none';
+    document.getElementById('bayesian-summary').style.display = 'none';
     return;
   }
   msgEl.textContent = '';
@@ -183,30 +245,28 @@ async function loadResults(expId, expName) {
   }
 
   const trendResult = await callApi(`/api/client/results/${expId}/timeseries`);
-  const trendCanvas = document.getElementById('trend-chart');
-  if (trendChart) trendChart.destroy();
-  if (trendResult.ok && trendResult.data.series && trendResult.data.series.length) {
-    const series = trendResult.data.series;
-    const days = [...new Set(series.map((r) => r.day))].sort();
-    const variantNames = [...new Set(series.map((r) => r.variant_name))];
-    const palette = ['#5635FB', '#02DEB5', '#e07a5f', '#131723', '#a3690f'];
-    const datasets = variantNames.map((name, i) => {
-      let running = 0;
-      const dataByDay = days.map((day) => {
-        const row = series.find((r) => r.day === day && r.variant_name === name);
-        running += row ? row.visitors : 0;
-        return running;
-      });
-      return { label: name, data: dataByDay, borderColor: palette[i % palette.length], backgroundColor: palette[i % palette.length], tension: 0.2, fill: false };
-    });
-    trendCanvas.style.display = 'block';
-    trendChart = new Chart(trendCanvas, {
-      type: 'line',
-      data: { labels: days.map((d) => new Date(d).toLocaleDateString()), datasets },
-      options: { responsive: true, plugins: { title: { display: true, text: 'Cumulative visitors over time' } }, scales: { y: { beginAtZero: true } } },
-    });
+  currentTrendSeries = (trendResult.ok && trendResult.data.series) ? trendResult.data.series : [];
+  renderTrendChart();
+
+  // Short, plain-English Bayesian summary — one sentence, not a table. Uses the
+  // same model as the admin dashboard's full Bayesian panel (src/bayesian.js).
+  const summaryEl = document.getElementById('bayesian-summary');
+  const bayesianResult = await callApi(`/api/client/results/${expId}/bayesian`);
+  if (!bayesianResult.ok || !bayesianResult.data.stats || bayesianResult.data.stats.length < 2) {
+    summaryEl.style.display = 'none';
   } else {
-    trendCanvas.style.display = 'none';
+    const stats = bayesianResult.data.stats;
+    const best = stats.reduce((a, b) => (b.probability_best > a.probability_best ? b : a));
+    let sentence;
+    if (bayesianResult.data.low_sample_warning) {
+      sentence = `Not enough traffic yet to say with confidence which variant is winning — "${best.variant_name}" is ahead so far (${best.probability_best}% probability), but this could still change.`;
+    } else if (best.probability_best >= 90) {
+      sentence = `"${best.variant_name}" is the likely winner, with a ${best.probability_best}% probability of being the best-performing variant.`;
+    } else {
+      sentence = `No clear winner yet — "${best.variant_name}" is currently ahead with a ${best.probability_best}% probability of being best, but it's not a strong enough lead to be confident.`;
+    }
+    summaryEl.style.display = 'block';
+    summaryEl.textContent = sentence;
   }
 }
 

@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { recordGoalUsage } = require('./goals');
+const { generateDemoEvents } = require('../demo-data');
 const router = express.Router();
 
 // GET /api/experiments?url=https://client-site.com/pricing[&preview=1]
@@ -276,6 +277,62 @@ router.patch('/:id/status', async (req, res) => {
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
     res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
+// POST /api/experiments/:id/demo-data  { days, visitors_per_day, rates: { variantId: ratePercent } }
+// Generates synthetic view/convert events for show-and-tell purposes, spread
+// realistically across the given number of days. Marked is_demo=true and kept
+// completely separate from real events — see DELETE below to remove them again,
+// and results.js's data_source param to view them without mixing with real data.
+router.post('/:id/demo-data', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { days, visitors_per_day, rates } = req.body;
+    const numDays = Math.min(Math.max(parseInt(days, 10) || 14, 1), 90);
+    const numVisitors = Math.min(Math.max(parseInt(visitors_per_day, 10) || 50, 1), 2000);
+
+    const { rows: variants } = await db.query(
+      `SELECT id, traffic_split FROM variants WHERE experiment_id = $1 AND enabled = true`,
+      [id]
+    );
+    if (variants.length === 0) return res.status(400).json({ error: 'this experiment has no enabled variants to generate demo data for' });
+
+    const events = generateDemoEvents(variants, rates || {}, numDays, numVisitors);
+    if (events.length === 0) return res.status(400).json({ error: 'no events were generated — check visitors_per_day and traffic splits are non-zero' });
+
+    // Bulk insert via UNNEST — one round trip instead of one query per event
+    // (a 14-day/60-visitor demo can easily be 1,000+ rows).
+    const variantIds = events.map((e) => e.variant_id);
+    const visitorIds = events.map((e) => e.visitor_id);
+    const eventTypes = events.map((e) => e.event_type);
+    const createdAts = events.map((e) => e.created_at.toISOString());
+
+    await db.query(
+      `INSERT INTO events (experiment_id, variant_id, visitor_id, event_type, created_at, is_demo)
+       SELECT $1, v, vi, et, ca::timestamptz, true
+       FROM unnest($2::uuid[], $3::text[], $4::text[], $5::text[]) AS t(v, vi, et, ca)`,
+      [id, variantIds, visitorIds, eventTypes, createdAts]
+    );
+
+    res.status(201).json({ generated: events.length, days: numDays });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
+// DELETE /api/experiments/:id/demo-data — removes only is_demo events, never real ones.
+router.delete('/:id/demo-data', async (req, res) => {
+  try {
+    const { rowCount } = await db.query(
+      `DELETE FROM events WHERE experiment_id = $1 AND is_demo = true`,
+      [req.params.id]
+    );
+    res.json({ deleted: rowCount });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });
