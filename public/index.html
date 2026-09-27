@@ -270,8 +270,9 @@
   </select>
   <button onclick="loadResults()">Load Results</button>
   <p id="results-msg" class="hint"></p>
+  <p id="primary-goal-note" class="hint" style="display:none;"></p>
   <table id="results-table" style="display:none">
-    <thead><tr><th>Variant</th><th>Visitors</th><th>New</th><th>Returning</th><th>Clicks</th><th>Conversions</th><th>Rate</th></tr></thead>
+    <thead><tr><th>Variant</th><th>Visitors</th><th>New</th><th>Returning</th><th>Clicks</th><th>Conversions</th><th>Rate</th><th>Revenue</th></tr></thead>
     <tbody id="results-body"></tbody>
   </table>
   <div class="chart-wrap"><canvas id="rate-chart" style="display:none"></canvas></div>
@@ -291,6 +292,9 @@
     <thead><tr><th>Variant</th><th>Visitors</th><th>Conversions</th><th>Est. Rate (95% range)</th><th>Probability Best</th></tr></thead>
     <tbody id="bayesian-body"></tbody>
   </table>
+
+  <h3 style="margin-top:24px;">Goals <span class="hint">(every goal, not just the primary one — conversions are unique visitors)</span></h3>
+  <div id="goals-breakdown" class="hint">Load results above to see each goal.</div>
 
   <h3 style="margin-top:24px;">Recent Activity <span class="hint">(raw events, most recent 20 — useful for confirming events are arriving at all)</span></h3>
   <div id="activity-log" class="hint">Load results above to see recent activity.</div>
@@ -765,21 +769,32 @@ function addChangeRow(prefill) {
   }
 }
 
+const GOAL_TYPES = {
+  click:   { label: 'Click on element (any selector — button, div, span, etc.)', valueLabel: 'Selector',  placeholder: '#cta-button', field: 'selector' },
+  url:     { label: 'Visited a URL (e.g. a thank-you / confirmation page)',      valueLabel: 'URL contains', placeholder: '/thank-you', field: 'url_match' },
+  form:    { label: 'Submitted a form',                                          valueLabel: 'Form selector', placeholder: '#newsletter-form', field: 'selector' },
+  custom:  { label: 'Custom event — site calls pivit.track(\'name\')',          valueLabel: 'Event name', placeholder: 'signup', field: 'event' },
+  revenue: { label: 'Revenue — site calls pivit.track(\'name\', {value: 49.99})', valueLabel: 'Event name', placeholder: 'purchase', field: 'event' },
+};
+
 function addGoalRow(prefill) {
   const list = document.getElementById('goals-list');
   const row = document.createElement('div');
   row.className = 'goal-row';
+  const typeOptions = Object.entries(GOAL_TYPES).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('');
   row.innerHTML = `
     <div>
       <label>Goal type</label>
-      <select class="g-type">
-        <option value="click">Click on element (any selector — button, div, span, etc.)</option>
-        <option value="url">Visited a URL (e.g. a thank-you / confirmation page)</option>
-      </select>
+      <select class="g-type">${typeOptions}</select>
       <label class="g-value-label">Selector</label>
       <input class="g-value" placeholder="#cta-button">
     </div>
-    <div><label>Label</label><input class="g-id" placeholder="cta_click"></div>
+    <div>
+      <label>Label</label><input class="g-id" placeholder="cta_click">
+      <label style="display:flex; gap:6px; align-items:center; margin-top:8px; font-weight:normal;">
+        <input type="checkbox" class="g-primary" style="width:auto; margin:0;"> Primary goal <span class="hint">(decides the winner)</span>
+      </label>
+    </div>
     <button type="button" class="remove-row" onclick="this.closest('.goal-row').remove()">✕</button>
   `;
   list.appendChild(row);
@@ -787,21 +802,25 @@ function addGoalRow(prefill) {
   const typeEl = row.querySelector('.g-type');
   const valueLabelEl = row.querySelector('.g-value-label');
   const valueEl = row.querySelector('.g-value');
+  const primaryEl = row.querySelector('.g-primary');
   function renderValueField() {
-    if (typeEl.value === 'url') {
-      valueLabelEl.textContent = 'URL contains';
-      valueEl.placeholder = '/thank-you';
-    } else {
-      valueLabelEl.textContent = 'Selector';
-      valueEl.placeholder = '#cta-button';
-    }
+    const cfg = GOAL_TYPES[typeEl.value] || GOAL_TYPES.click;
+    valueLabelEl.textContent = cfg.valueLabel;
+    valueEl.placeholder = cfg.placeholder;
   }
   typeEl.addEventListener('change', renderValueField);
+  // Only one primary goal at a time — ticking one unticks the rest.
+  primaryEl.addEventListener('change', () => {
+    if (!primaryEl.checked) return;
+    document.querySelectorAll('#goals-list .g-primary').forEach((cb) => { if (cb !== primaryEl) cb.checked = false; });
+  });
 
   if (prefill) {
-    typeEl.value = prefill.type || 'click';
+    const type = GOAL_TYPES[prefill.type] ? prefill.type : 'click';
+    typeEl.value = type;
     row.querySelector('.g-id').value = prefill.id || '';
-    valueEl.value = prefill.type === 'url' ? (prefill.url_match || '') : (prefill.selector || '');
+    valueEl.value = prefill[GOAL_TYPES[type].field] || '';
+    primaryEl.checked = !!prefill.primary;
   }
   renderValueField();
 }
@@ -846,8 +865,11 @@ function collectGoals() {
     const type = row.querySelector('.g-type').value;
     const value = row.querySelector('.g-value').value.trim();
     const id = row.querySelector('.g-id').value.trim();
-    return type === 'url' ? { type: 'url', url_match: value, id } : { type: 'click', selector: value, id };
-  }).filter((g) => (g.type === 'url' ? g.url_match : g.selector));
+    const primary = row.querySelector('.g-primary').checked;
+    const goal = { type, id, [GOAL_TYPES[type].field]: value };
+    if (primary) goal.primary = true;
+    return goal;
+  }).filter((g) => g[GOAL_TYPES[g.type].field]);
 }
 
 // Seed one example row of each on load so the form isn't empty.
@@ -865,7 +887,8 @@ async function loadPopularGoals() {
 
   popularGoalsCache = result.data.goals;
   const chips = popularGoalsCache.map((g, i) => {
-    const display = g.type === 'url' ? `Visited "${g.value}"` : `Click "${g.value}"`;
+    const verbs = { url: 'Visited', form: 'Submit', custom: 'Event', revenue: 'Revenue', click: 'Click' };
+    const display = `${verbs[g.type] || 'Click'} "${g.value}"`;
     const labelPart = g.label ? ` (${g.label})` : '';
     return `<button type="button" class="secondary" style="margin:4px 4px 0 0; font-size:0.8em;" onclick="usePopularGoal(${i})">${display}${labelPart}</button>`;
   }).join('');
@@ -875,12 +898,8 @@ async function loadPopularGoals() {
 function usePopularGoal(i) {
   const g = popularGoalsCache[i];
   if (!g) return;
-  addGoalRow({
-    type: g.type,
-    selector: g.type === 'click' ? g.value : undefined,
-    url_match: g.type === 'url' ? g.value : undefined,
-    id: g.label,
-  });
+  const type = GOAL_TYPES[g.type] ? g.type : 'click';
+  addGoalRow({ type, id: g.label, [GOAL_TYPES[type].field]: g.value });
 }
 
 async function saveVariant() {
@@ -1135,10 +1154,17 @@ async function loadResults() {
   tbody.innerHTML = '';
   results.forEach(r => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${r.variant_name}</td><td>${r.visitors}</td><td>${r.new_visitors}</td><td>${r.returning_visitors}</td><td>${r.clicks}</td><td>${r.conversions}</td><td>${r.conversion_rate}%</td>`;
+    tr.innerHTML = `<td>${r.variant_name}</td><td>${r.visitors}</td><td>${r.new_visitors}</td><td>${r.returning_visitors}</td><td>${r.clicks}</td><td>${r.conversions}</td><td>${r.conversion_rate}%</td><td>${r.revenue ? '£' + r.revenue.toFixed(2) : '—'}</td>`;
     tbody.appendChild(tr);
   });
   document.getElementById('results-table').style.display = 'table';
+  const primaryNote = document.getElementById('primary-goal-note');
+  primaryNote.style.display = 'block';
+  primaryNote.textContent = result.data.primary_goal
+    ? `Conversions = unique visitors who hit the primary goal "${result.data.primary_goal}".`
+    : 'Conversions = unique visitors who hit any goal. Tick "Primary goal" on one goal to make it decide the winner.';
+
+  loadGoalBreakdown(`/api/results/${expId}/goals`, 'goals-breakdown', { headers: authHeaders() });
 
   // Bar chart: conversion rate per variant — the headline "which one's winning" view.
   const rateCanvas = document.getElementById('rate-chart');
@@ -1212,6 +1238,39 @@ async function loadResults() {
     }).join('');
     bayesianTable.style.display = 'table';
   }
+}
+
+// Per-goal breakdown table. Shared shape with client.html.
+function escapeHtml(str) {
+  return String(str ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+async function loadGoalBreakdown(url, containerId, opts) {
+  const el = document.getElementById(containerId);
+  const res = await callApi(url, opts || {});
+  if (!res.ok) { el.textContent = `Error loading goals: ${res.message}`; return; }
+  const goals = res.data.goals || [];
+  if (!goals.length) { el.textContent = 'No goals set on this experiment yet.'; return; }
+  el.innerHTML = goals.map((g) => {
+    const isRevenue = g.type === 'revenue';
+    const rows = g.variants.map((v) => `
+      <tr>
+        <td>${escapeHtml(v.variant_name)}</td>
+        <td>${v.visitors}</td>
+        <td>${v.conversions}</td>
+        <td>${v.conversion_rate}%</td>
+        ${isRevenue ? `<td>£${v.revenue.toFixed(2)}</td><td>£${v.revenue_per_visitor.toFixed(2)}</td><td>£${v.average_order_value.toFixed(2)}</td>` : ''}
+        <td>${v.probability_best === null ? '—' : v.probability_best + '%'}</td>
+      </tr>`).join('');
+    return `
+      <div style="margin-top:14px;">
+        <strong style="color:var(--ink,#111);">${escapeHtml(g.label)}</strong>
+        <span class="hint"> · ${g.type}${g.primary ? ' · <strong>primary</strong>' : ''}</span>
+        <table style="margin-top:6px;">
+          <thead><tr><th>Variant</th><th>Visitors</th><th>Converted</th><th>Rate</th>${isRevenue ? '<th>Revenue</th><th>Per visitor</th><th>Avg order</th>' : ''}<th>Prob. best</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }).join('');
 }
 
 // --- Selector picker bookmarklet ---

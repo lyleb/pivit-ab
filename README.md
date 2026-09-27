@@ -70,12 +70,37 @@ This is a standalone tool (`snippet/picker-bookmarklet.js`) — it's not part of
 
 ## Goals (conversion tracking, optional per variant)
 
-The dashboard has a "Goals" section alongside "Changes" when adding a variant, with two goal types:
+The dashboard's "Goals" section (when adding a variant) supports five goal types:
 
-- **Click on element** — fires when the visitor clicks anything matching the selector. Works on any element, not just `<button>` — a `div`, `span`, link, whatever you point it at.
-- **Visited a URL** — fires when the visitor later loads any page whose URL contains the text you give (e.g. `/thank-you`). This works even though that page is completely different from the one the experiment's changes run on — the snippet checks every page load against every experiment you've ever been assigned to, not just the one currently "running" there. Each goal only ever counts once per visitor.
+- **Click on element**: fires when the visitor clicks anything matching the selector (including elements added after page load).
+- **Visited a URL**: fires when the visitor later loads any page whose URL contains the text you give (e.g. `/thank-you`), even a different page from the one the experiment runs on.
+- **Submitted a form**: fires when a form matching the selector is submitted.
+- **Custom event**: fires when the site's own code calls `pivit.track('signup')`.
+- **Revenue**: fires when the site calls `pivit.track('purchase', { value: 49.99 })`. Every purchase is recorded, so revenue per visitor and average order value are shown.
 
-Any goal firing sends a `convert` event back to the API (distinct from the automatic `view` event). The results table counts these under "conversions" and calculates the rate as conversions ÷ visitors.
+Tick **Primary goal** on one goal to make it decide the winner (headline conversions, trend chart and Bayesian panel). With no primary goal, any goal counts. The **Goals** table under results shows every goal separately, with its own probability of being best.
+
+Conversions are **unique visitors**, so clicking a goal button three times counts once.
+
+### Calling pivit.track() from the site
+
+Once the snippet has loaded:
+
+```js
+pivit.track('signup');
+pivit.track('purchase', { value: 49.99 }); // plain number, same currency for every experiment
+```
+
+If the site might call it before the snippet loads (e.g. inline on an order-confirmation page), use the queue form. It's picked up as soon as the snippet runs:
+
+```html
+<script>
+  window.pivit = window.pivit || [];
+  pivit.push(['track', 'purchase', { value: 49.99 }]);
+</script>
+```
+
+Calls are ignored for visitors who aren't in an experiment with a matching goal, and in preview mode.
 
 ## Reducing flicker
 

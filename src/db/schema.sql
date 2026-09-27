@@ -42,7 +42,7 @@ ALTER TABLE variants ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT t
 -- one-click quick-picks instead of retyping the same selector every time.
 CREATE TABLE IF NOT EXISTS goal_templates (
   id BIGSERIAL PRIMARY KEY,
-  type TEXT NOT NULL,        -- 'click' or 'url'
+  type TEXT NOT NULL,        -- click | url | form | custom | revenue
   value TEXT NOT NULL,       -- the selector (click) or url_match text (url)
   label TEXT NOT NULL DEFAULT '', -- the goal's "id"/label field, e.g. "cta_click"
   usage_count INTEGER NOT NULL DEFAULT 1,
@@ -67,3 +67,9 @@ CREATE TABLE IF NOT EXISTS clients (
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS client_id UUID REFERENCES clients(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_experiments_client ON experiments(client_id);
 
+
+-- Goals & events (v2): revenue value on conversion events, and an index for
+-- the per-goal breakdown. Goal types now: click | url | form | custom | revenue,
+-- and one goal per experiment can be flagged "primary": true (see src/metrics.js).
+ALTER TABLE events ADD COLUMN IF NOT EXISTS value NUMERIC;
+CREATE INDEX IF NOT EXISTS idx_events_experiment_goal ON events(experiment_id, event_type, goal_id);
