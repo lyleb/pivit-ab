@@ -8,9 +8,7 @@ router.use(requireAuth(['client']));
 
 // Every route below double-checks client_id server-side before returning
 // anything — a client's session can never be used to view another client's
-// experiment just by guessing/changing an id in the URL. Every query also
-// explicitly filters is_demo = false — a client should only ever see their real
-// results, never synthetic show-and-tell data an owner generated for a demo.
+// experiment just by guessing/changing an id in the URL.
 async function assertOwnsExperiment(clientId, experimentId) {
   const { rows } = await db.query(
     `SELECT id, name, status, url_match FROM experiments WHERE id = $1 AND client_id = $2`,
@@ -45,7 +43,7 @@ router.get('/results/:experimentId', async (req, res) => {
     const { rows } = await db.query(
       `WITH first_seen AS (
          SELECT visitor_id, MIN(created_at)::date AS first_day
-         FROM events WHERE experiment_id = $1 AND event_type = 'view' AND is_demo = false
+         FROM events WHERE experiment_id = $1 AND event_type = 'view'
          GROUP BY visitor_id
        )
        SELECT
@@ -56,7 +54,7 @@ router.get('/results/:experimentId', async (req, res) => {
          COUNT(DISTINCT e.visitor_id) FILTER (WHERE e.event_type = 'view' AND e.created_at::date > fs.first_day) AS returning_visitors,
          COUNT(*) FILTER (WHERE e.event_type = 'convert') AS conversions
        FROM variants v
-       LEFT JOIN events e ON e.variant_id = v.id AND e.is_demo = false
+       LEFT JOIN events e ON e.variant_id = v.id
        LEFT JOIN first_seen fs ON fs.visitor_id = e.visitor_id
        WHERE v.experiment_id = $1
        GROUP BY v.id, v.name
@@ -95,7 +93,7 @@ router.get('/results/:experimentId/timeseries', async (req, res) => {
          COUNT(*) FILTER (WHERE e.event_type = 'convert') AS conversions
        FROM events e
        JOIN variants v ON v.id = e.variant_id
-       WHERE e.experiment_id = $1 AND e.is_demo = false
+       WHERE e.experiment_id = $1
        GROUP BY day, v.id, v.name
        ORDER BY day`,
       [req.params.experimentId]
@@ -131,7 +129,7 @@ router.get('/results/:experimentId/bayesian', async (req, res) => {
          COUNT(DISTINCT e.visitor_id) FILTER (WHERE e.event_type = 'view') AS visitors,
          COUNT(*) FILTER (WHERE e.event_type = 'convert') AS conversions
        FROM variants v
-       LEFT JOIN events e ON e.variant_id = v.id AND e.is_demo = false
+       LEFT JOIN events e ON e.variant_id = v.id
        WHERE v.experiment_id = $1
        GROUP BY v.id, v.name
        ORDER BY v.name`,

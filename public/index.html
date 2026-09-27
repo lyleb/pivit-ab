@@ -241,7 +241,6 @@
   <button onclick="loadManageVariants()">Load Variants</button>
   <p id="manage-msg" class="hint"></p>
   <div id="manage-variants-list"></div>
-  <div id="manage-demo-panel" style="margin-top:12px;"></div>
 </section>
 
 <section>
@@ -263,11 +262,6 @@
   <h2>5. View Results</h2>
   <label>Experiment</label>
   <select id="results-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
-  <label>Data <span class="hint">(Demo data never mixes with real results — see "Demo Data" above)</span></label>
-  <select id="data-source-filter">
-    <option value="live">Live (real visitors)</option>
-    <option value="demo">Demo</option>
-  </select>
   <label>Visitors <span class="hint">(filters the table and rate chart below)</span></label>
   <select id="visitor-type-filter">
     <option value="">All visitors</option>
@@ -288,7 +282,7 @@
   </div>
   <div class="chart-wrap"><canvas id="trend-chart" style="display:none"></canvas></div>
   <button type="button" class="secondary" id="refresh-results-btn" style="display:none" onclick="loadResults()">🔄 Refresh Results</button>
-  <button type="button" class="secondary" id="export-results-btn" style="display:none" onclick="exportResultsCsv(document.getElementById('results-exp-id').value, document.getElementById('data-source-filter').value)">⬇ Export CSV</button>
+  <button type="button" class="secondary" id="export-results-btn" style="display:none" onclick="exportResultsCsv(document.getElementById('results-exp-id').value)">⬇ Export CSV</button>
 
   <h3 style="margin-top:24px;">Bayesian Analysis <span class="hint">(which variant is actually winning, and how sure we can be)</span></h3>
   <p class="hint">Instead of just a raw percentage, this treats each variant's true conversion rate as uncertain and narrows that uncertainty as data comes in — so a 20% lead from 10 visitors and a 20% lead from 10,000 visitors don't look equally convincing. "Probability best" is the chance that variant is genuinely the top performer, not just ahead by chance.</p>
@@ -561,8 +555,8 @@ async function deleteClient(id, btn) {
 
 // Downloads the full raw-event CSV for an experiment. Works from any row (Your
 // Experiments list or Results section) since it just needs the id.
-async function exportResultsCsv(expId, dataSource = 'live') {
-  const res = await fetch(`/api/results/${expId}/export?data_source=${dataSource}`, { headers: authHeaders() });
+async function exportResultsCsv(expId) {
+  const res = await fetch(`/api/results/${expId}/export`, { headers: authHeaders() });
   if (res.status === 401) { window.location.href = '/login.html'; return; }
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
@@ -616,9 +610,6 @@ document.getElementById('results-exp-id').addEventListener('change', (e) => {
   if (e.target.value) loadResults();
 });
 document.getElementById('visitor-type-filter').addEventListener('change', () => {
-  if (document.getElementById('results-exp-id').value) loadResults();
-});
-document.getElementById('data-source-filter').addEventListener('change', () => {
   if (document.getElementById('results-exp-id').value) loadResults();
 });
 document.getElementById('manage-exp-id').addEventListener('change', (e) => {
@@ -983,66 +974,6 @@ async function loadManageVariants() {
     `;
     listEl.appendChild(card);
   });
-
-  renderDemoDataPanel(expId, variants);
-}
-
-// A small panel for generating/clearing synthetic show-and-tell data for this
-// experiment — kept entirely separate from real events (is_demo flag), so it
-// never affects your actual results unless you switch the Results section's
-// Live/Demo toggle to Demo.
-function renderDemoDataPanel(expId, variants) {
-  const container = document.getElementById('manage-demo-panel');
-  const rateInputs = variants.map((v) => `
-    <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
-      <span style="flex:1; font-size:0.88em;">${v.name}</span>
-      <input type="number" class="demo-rate-input" data-variant-id="${v.id}" value="5" min="0" max="100" style="width:70px;"> <span class="hint">% target rate</span>
-    </div>
-  `).join('');
-
-  container.innerHTML = `
-    <details>
-      <summary>Demo Data <span class="hint">(synthetic, for show-and-tell — never mixes with real results)</span></summary>
-      <div class="accordion-body">
-        <label>Days to simulate</label>
-        <input type="number" id="demo-days" value="14" min="1" max="90">
-        <label>Visitors per day (spread across variants by traffic split)</label>
-        <input type="number" id="demo-visitors" value="60" min="1" max="2000">
-        <label>Target conversion rate per variant</label>
-        ${rateInputs}
-        <br>
-        <button onclick="generateDemoData('${expId}')">Generate demo data</button>
-        <button type="button" class="secondary" style="color:#c0392b" onclick="clearDemoData('${expId}')">Clear demo data</button>
-        <p id="demo-result" class="hint"></p>
-      </div>
-    </details>
-  `;
-}
-
-async function generateDemoData(expId) {
-  const days = document.getElementById('demo-days').value;
-  const visitors_per_day = document.getElementById('demo-visitors').value;
-  const rates = {};
-  document.querySelectorAll('.demo-rate-input').forEach((el) => { rates[el.dataset.variantId] = parseFloat(el.value) || 0; });
-
-  const el = document.getElementById('demo-result');
-  el.className = 'hint';
-  el.textContent = 'Generating…';
-  const result = await callApi(`/api/experiments/${expId}/demo-data`, {
-    method: 'POST', headers: authHeaders(), body: JSON.stringify({ days, visitors_per_day, rates }),
-  });
-  el.className = result.ok ? 'ok-msg' : 'error-msg';
-  el.textContent = result.ok
-    ? `Generated ${result.data.generated} events across ${result.data.days} days. Switch Results below to "Demo" to view them.`
-    : `Error: ${result.message}`;
-}
-
-async function clearDemoData(expId) {
-  if (!confirm('Delete all demo data for this experiment? Real visitor data is never touched by this.')) return;
-  const el = document.getElementById('demo-result');
-  const result = await callApi(`/api/experiments/${expId}/demo-data`, { method: 'DELETE', headers: authHeaders() });
-  el.className = result.ok ? 'ok-msg' : 'error-msg';
-  el.textContent = result.ok ? `Removed ${result.data.deleted} demo events.` : `Error: ${result.message}`;
 }
 
 // Loads a variant's current data into the "Add Variant" form and switches it into
@@ -1183,8 +1114,7 @@ async function loadResults() {
   if (!expId) { msgEl.className = 'error-msg'; msgEl.textContent = 'Select an experiment above first.'; refreshBtn.style.display = 'none'; exportBtn.style.display = 'none'; return; }
 
   const visitorType = document.getElementById('visitor-type-filter').value;
-  const dataSource = document.getElementById('data-source-filter').value; // 'live' or 'demo'
-  const qs = `?data_source=${dataSource}${visitorType ? '&visitor_type=' + visitorType : ''}`;
+  const qs = visitorType ? `?visitor_type=${visitorType}` : '';
   const result = await callApi(`/api/results/${expId}${qs}`, { headers: authHeaders() });
 
   if (!result.ok) {
@@ -1227,14 +1157,14 @@ async function loadResults() {
 
   // Line chart: conversion rate over time per variant, in whichever mode
   // (cumulative running rate, or that day's own rate) is currently selected.
-  const trendResult = await callApi(`/api/results/${expId}/timeseries?data_source=${dataSource}`, { headers: authHeaders() });
+  const trendResult = await callApi(`/api/results/${expId}/timeseries`, { headers: authHeaders() });
   currentTrendSeries = (trendResult.ok && trendResult.data.series) ? trendResult.data.series : [];
   renderTrendChart();
 
   // Recent activity — raw, unaggregated events, for confirming whether anything
   // is actually arriving at all, independent of the totals above.
   const activityEl = document.getElementById('activity-log');
-  const recentResult = await callApi(`/api/results/${expId}/recent?data_source=${dataSource}`, { headers: authHeaders() });
+  const recentResult = await callApi(`/api/results/${expId}/recent`, { headers: authHeaders() });
   if (!recentResult.ok) {
     activityEl.textContent = `Error loading activity: ${recentResult.message}`;
   } else if (!recentResult.data.events || recentResult.data.events.length === 0) {
@@ -1253,7 +1183,7 @@ async function loadResults() {
   // on their own (e.g. for the CSV export workflow).
   const bayesianTable = document.getElementById('bayesian-table');
   const bayesianWarning = document.getElementById('bayesian-warning');
-  const bayesianResult = await callApi(`/api/results/${expId}/bayesian?data_source=${dataSource}`, { headers: authHeaders() });
+  const bayesianResult = await callApi(`/api/results/${expId}/bayesian`, { headers: authHeaders() });
 
   if (!bayesianResult.ok || !bayesianResult.data.stats || bayesianResult.data.stats.length === 0) {
     bayesianTable.style.display = 'none';

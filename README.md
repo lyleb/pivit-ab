@@ -150,12 +150,6 @@ The line chart under the bar chart plots **conversion rate over time**, not raw 
 
 Same chart, same toggle, on both the admin dashboard and the client dashboard.
 
-## Demo data
-
-"Preview & Manage Variants" has a collapsible **"Demo Data"** panel per experiment for generating synthetic traffic — useful for a show-and-tell before real traffic has built up. Set how many days to simulate, roughly how many visitors per day, and a target conversion rate per variant, then "Generate demo data." It produces a realistic-looking spread (with day-to-day noise, not a flat line) rather than literally hitting the target rate exactly.
-
-Demo data is **completely separate from real data** — every event it creates is flagged `is_demo` in the database, and every results query (table, charts, Bayesian panel, CSV export) respects a **Live / Demo** dropdown in the Results section. Real visitor data is never at risk of being mixed with or overwritten by demo data. "Clear demo data" removes only the synthetic events for that experiment, instantly, whenever you're done with it. Clients never see demo data — their view is hardcoded to real data only, with no toggle.
-
 ## Client credentials, on-page
 
 Creating a client or resetting their password no longer uses a browser `alert()`/`prompt()` dialog — both show a persistent, copyable box on the page itself (username + password, with a "Copy both" button), since a native dialog disappears the moment you dismiss it and can't be copied cleanly. The password itself is never stored in retrievable form — if you navigate away without copying it, you'd need to reset it again.
@@ -196,3 +190,4 @@ The public snippet endpoints (`GET /api/experiments`, `POST /api/event`, `GET /a
 - Support for multiple goals per variant with individual conversion rates
 - Per-teammate owner logins if you ever bring someone else onto the admin side
 - A visual click-to-configure variant editor, once the current form-based one has been stress-tested on a genuinely complex experiment
+- Synthetic demo data for show-and-tell purposes on low-traffic sites — scoped out for now to keep things simpler, worth revisiting later
