@@ -18,7 +18,8 @@
   h3 { font-size: 0.9em; margin: 20px 0 8px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
   section { margin-bottom: 24px; padding: 24px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 1px 2px rgba(19,23,35,0.04); }
   .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; padding: 16px 24px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
-  .topbar img.logo { height: 30px; display: block; }
+  .topbar img.logo { height: 31px; display: block; }
+  .tagline { font-size: 0.78em; color: var(--text-muted); font-weight: 600; margin-top: 4px; font-style: italic; }
   .topbar-link { color: var(--ink); font-weight: 600; text-decoration: none; font-size: 0.88em; cursor: pointer; padding: 8px 14px; border-radius: 8px; background: #f0f0f7; }
   .topbar-link:hover { background: #e6e6f2; }
   .welcome { font-size: 0.85em; color: var(--text-muted); }
@@ -42,13 +43,17 @@
   .url-group:first-child { margin-top: 0; }
   .url-group-label { font-size: 0.8em; color: var(--text-muted); font-family: "SF Mono", Menlo, monospace; margin-bottom: 6px; }
   .chart-wrap { max-width: 100%; margin-top: 20px; }
+  .chart-wrap.trend-wrap { height: 340px; }
   .trend-toggle-btn.active { background: var(--indigo); color: white; }
   .bayesian-summary { background: #f4f2fe; border: 1px solid var(--indigo); border-radius: 8px; padding: 14px 16px; margin-top: 20px; font-size: 0.92em; }
 </style>
 </head>
 <body>
 <div class="topbar">
-  <img src="/assets/logo.png" alt="Pivit" class="logo">
+  <div>
+    <img src="/assets/logo.png" alt="Pivit" class="logo">
+    <div class="tagline">Put your money where your data is</div>
+  </div>
   <div>
     <span class="welcome" id="welcome-msg"></span>
     <a class="topbar-link" onclick="logout()" style="margin-left:12px;">🚪 Log out</a>
@@ -74,10 +79,8 @@
     <button type="button" class="secondary trend-toggle-btn" id="trend-mode-cumulative" onclick="setTrendMode('cumulative')" style="padding:6px 12px; border:1px solid var(--border); background:#f0f0f7; border-radius:8px; cursor:pointer; font-size:0.85em;">Cumulative</button>
     <button type="button" class="secondary trend-toggle-btn" id="trend-mode-daily" onclick="setTrendMode('daily')" style="padding:6px 12px; border:1px solid var(--border); background:#f0f0f7; border-radius:8px; cursor:pointer; font-size:0.85em;">Daily</button>
   </div>
-  <div class="chart-wrap"><canvas id="trend-chart" style="display:none"></canvas></div>
+  <div class="chart-wrap trend-wrap"><canvas id="trend-chart" style="display:none"></canvas></div>
   <div id="bayesian-summary" class="bayesian-summary" style="display:none;"></div>
-  <h3 style="margin-top:24px;">Goals</h3>
-  <div id="goals-breakdown" class="hint"></div>
 </section>
 
 <script>
@@ -192,8 +195,12 @@ function renderTrendChart() {
     data: { labels, datasets },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       plugins: { title: { display: true, text: (trendMode === 'cumulative' ? 'Cumulative' : 'Daily') + ' conversion rate over time' } },
-      scales: { y: { beginAtZero: true, ticks: { callback: (v) => v + '%' } } },
+      scales: {
+        x: { title: { display: true, text: 'Time (days)' } },
+        y: { beginAtZero: true, title: { display: true, text: 'Conversion Rate (%)' }, ticks: { callback: (v) => v + '%' } },
+      },
     },
   });
 }
@@ -246,8 +253,6 @@ async function loadResults(expId, expName) {
     });
   }
 
-  loadGoalBreakdown(`/api/client/results/${expId}/goals`, 'goals-breakdown');
-
   const trendResult = await callApi(`/api/client/results/${expId}/timeseries`);
   currentTrendSeries = (trendResult.ok && trendResult.data.series) ? trendResult.data.series : [];
   renderTrendChart();
@@ -272,39 +277,6 @@ async function loadResults(expId, expName) {
     summaryEl.style.display = 'block';
     summaryEl.textContent = sentence;
   }
-}
-
-// Per-goal breakdown table. Shared shape with client.html.
-function escapeHtml(str) {
-  return String(str ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-async function loadGoalBreakdown(url, containerId, opts) {
-  const el = document.getElementById(containerId);
-  const res = await callApi(url, opts || {});
-  if (!res.ok) { el.textContent = `Error loading goals: ${res.message}`; return; }
-  const goals = res.data.goals || [];
-  if (!goals.length) { el.textContent = 'No goals set on this experiment yet.'; return; }
-  el.innerHTML = goals.map((g) => {
-    const isRevenue = g.type === 'revenue';
-    const rows = g.variants.map((v) => `
-      <tr>
-        <td>${escapeHtml(v.variant_name)}</td>
-        <td>${v.visitors}</td>
-        <td>${v.conversions}</td>
-        <td>${v.conversion_rate}%</td>
-        ${isRevenue ? `<td>£${v.revenue.toFixed(2)}</td><td>£${v.revenue_per_visitor.toFixed(2)}</td><td>£${v.average_order_value.toFixed(2)}</td>` : ''}
-        <td>${v.probability_best === null ? '—' : v.probability_best + '%'}</td>
-      </tr>`).join('');
-    return `
-      <div style="margin-top:14px;">
-        <strong style="color:var(--ink,#111);">${escapeHtml(g.label)}</strong>
-        <span class="hint"> · ${g.type}${g.primary ? ' · <strong>primary</strong>' : ''}</span>
-        <table style="margin-top:6px;">
-          <thead><tr><th>Variant</th><th>Visitors</th><th>Converted</th><th>Rate</th>${isRevenue ? '<th>Revenue</th><th>Per visitor</th><th>Avg order</th>' : ''}<th>Prob. best</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>`;
-  }).join('');
 }
 
 init();

@@ -27,9 +27,7 @@ router.get('/popular', async (req, res) => {
 async function recordGoalUsage(goals) {
   for (const goal of goals || []) {
     const type = goal.type || 'click';
-    const value = type === 'url' ? (goal.url_match || '')
-      : (type === 'custom' || type === 'revenue') ? (goal.event || '')
-      : (goal.selector || '');
+    const value = type === 'url' ? (goal.url_match || '') : (goal.selector || '');
     const label = goal.id || '';
     if (!value) continue;
     try {
