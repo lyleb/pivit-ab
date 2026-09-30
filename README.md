@@ -88,6 +88,18 @@ Why two: true flicker prevention requires hiding the page before first paint, wh
 
 The trade-off: instead of a flash of the *original* content before it swaps to the variant, visitors see a brief blank page. That's the standard approach (Optimizely and Google Optimize both work the same way) — there's no way to show the final content instantly, since which variant to show depends on an API call that takes some non-zero time.
 
+## Cookie / consent handling
+
+The snippet writes to `localStorage` to recognize a visitor, which generally isn't "strictly necessary" for a site to function — it exists to support the A/B test — so under UK PECR and UK/EU GDPR it typically needs consent first, the same rule that governs analytics tools like GA4. This is worth checking with a lawyer or the client's DPO for a definitive answer on any given site; the general shape of the requirement is well-established, but I'm not able to certify compliance.
+
+Before doing anything, the snippet checks for consent in this order:
+1. A manual `window.pivitConsent = true/false` — set this yourself if a site uses a consent tool not covered below, or a custom banner
+2. **Cookiebot** — checks `window.Cookiebot.consent.statistics`
+3. **OneTrust** — checks `window.OnetrustActiveGroups` for the `C0002` (Performance Cookies) category, OneTrust's standard default template ID. A custom OneTrust template with different category IDs won't be caught by this — use the manual override instead
+4. **CookieYes** — checks the `cookieyes-consent` cookie for `analytics:yes`
+
+If **none** of the above are present at all, the snippet runs as it always has (unchanged behavior) — there's no consent signal to gate on, and whether that's appropriate is a call for whoever runs the site. If consent is denied (or not yet decided, for a CMP that's installed but hasn't recorded an answer), the snippet does nothing at all for that visitor — no localStorage write, no experiments fetched, no DOM changes applied, no events sent. They simply see the page as if the snippet weren't there. Preview mode (`?ab_preview=`) bypasses this check entirely, since no real tracking happens during a preview regardless.
+
 ## Running experiments across multiple sites
 
 One deployment of this app can run experiments on as many different domains as you like at once. `url_match` is just a substring check against whatever page the snippet loads on — it has nothing to do with which site it's running on. Install the same snippet tag (see "Your Snippet" at the top of the dashboard) once per site, and the server figures out which experiments apply based on the current page's URL every time it loads. No per-site configuration needed beyond pasting the tag in.

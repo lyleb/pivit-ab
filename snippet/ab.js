@@ -1,5 +1,5 @@
 /**
- * AB Platform snippet — v0.3
+ * AB Platform snippet — v0.4
  *
  * Usage on client site:
  *   <script src="https://your-api.example.com/snippet/ab.js"
@@ -21,6 +21,17 @@
  * waiting for anything else (e.g. goal-checking) to finish. The anti-flicker
  * snippet has its own 3-second timeout as a safety net, so this file doesn't
  * need one — if you skip installing it, this call is just a harmless no-op.
+ *
+ * Cookie/consent handling: this snippet writes to localStorage to recognize
+ * a visitor, which generally requires consent under UK/EU rules (PECR, GDPR)
+ * unless it's covered by a legitimate "strictly necessary" exemption — talk to
+ * a lawyer or the client's DPO for a definitive answer on a given site. Before
+ * doing anything, hasTrackingConsent() below checks, in order: (1) a manual
+ * window.pivitConsent boolean, if the site owner has set one explicitly; (2)
+ * Cookiebot; (3) OneTrust; (4) CookieYes. If none of those are present at all,
+ * it defaults to running as before (unchanged behavior) — there's no CMP to
+ * take a signal from, and whether that's fine is a call for whoever runs the
+ * site. If a site uses a different CMP, wire up window.pivitConsent manually.
  */
 (function () {
   const scriptTag = document.currentScript;
@@ -30,6 +41,40 @@
 
   function revealPage() {
     document.documentElement.classList.remove('ab-hide');
+  }
+
+  // Checks known consent-management platforms for analytics/statistics/
+  // performance consent — the category tracking tools like this fall under.
+  // Returns true/false once a definite signal is found, or true if no CMP is
+  // detected at all (nothing to gate on, so behavior is unchanged).
+  function hasTrackingConsent() {
+    // 1. Manual override always wins, if a site owner has set one explicitly —
+    // e.g. for a custom banner not covered by the auto-detection below.
+    if (typeof window.pivitConsent === 'boolean') return window.pivitConsent;
+
+    // 2. Cookiebot — window.Cookiebot.consent.{necessary,preferences,statistics,marketing}
+    if (window.Cookiebot && window.Cookiebot.consent) {
+      return !!window.Cookiebot.consent.statistics;
+    }
+
+    // 3. OneTrust — window.OnetrustActiveGroups is a string like ",C0001,C0002,"
+    // listing active category IDs. C0002 ("Performance Cookies") is OneTrust's
+    // standard default template ID for analytics-type cookies; accounts on a
+    // custom template may use different IDs, in which case this won't catch it
+    // — use the manual override (1) instead for those.
+    if (typeof window.OnetrustActiveGroups === 'string') {
+      return window.OnetrustActiveGroups.indexOf('C0002') !== -1;
+    }
+
+    // 4. CookieYes — stores a `cookieyes-consent` cookie with comma-separated
+    // key:value pairs, e.g. "...,analytics:yes,..." once a choice is made.
+    const ckyCookie = document.cookie.split('; ').find((row) => row.indexOf('cookieyes-consent=') === 0);
+    if (ckyCookie) {
+      return ckyCookie.indexOf('analytics:yes') !== -1;
+    }
+
+    // No known CMP detected at all — nothing to gate on, so run as normal.
+    return true;
   }
 
   function getVisitorId() {
@@ -174,13 +219,22 @@
   }
 
   async function init() {
-    const visitorId = getVisitorId();
-    const url = encodeURIComponent(window.location.href);
-
     // Preview mode: ?ab_preview=<variant_id> forces that exact variant, works even
     // for a draft/paused experiment or a paused variant, and never logs events —
-    // so previewing never pollutes your real results.
+    // so previewing never pollutes your real results. It also bypasses the
+    // consent check below, since no tracking happens during a preview anyway.
     const previewVariantId = new URLSearchParams(window.location.search).get('ab_preview');
+
+    if (!previewVariantId && !hasTrackingConsent()) {
+      // No consent yet (and this isn't a preview) — don't write to localStorage,
+      // don't fetch experiments, don't apply changes, don't send anything. The
+      // visitor just sees the page exactly as if this snippet weren't there.
+      revealPage();
+      return;
+    }
+
+    const visitorId = getVisitorId();
+    const url = encodeURIComponent(window.location.href);
     const previewQuery = previewVariantId ? '&preview=1' : '';
 
     try {
