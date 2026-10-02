@@ -1,5 +1,6 @@
 const express = require('express');
 const db = require('../db');
+const { isLikelyBot, isRateLimited } = require('../bot-filter');
 const router = express.Router();
 
 // POST /api/event
@@ -12,6 +13,14 @@ router.post('/', async (req, res) => {
   }
   if (!['view', 'click', 'convert'].includes(event_type)) {
     return res.status(400).json({ error: 'event_type must be view, click, or convert' });
+  }
+
+  // Basic bot/abuse filtering — dropped silently (still 204) rather than
+  // erroring, since a sendBeacon caller never looks at the response anyway and
+  // there's no reason to reveal to a bot that it was filtered. See
+  // src/bot-filter.js for what's actually being checked and why.
+  if (isLikelyBot(req.get('user-agent')) || isRateLimited(req.ip)) {
+    return res.status(204).end();
   }
 
   try {

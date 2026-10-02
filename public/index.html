@@ -119,6 +119,8 @@
   .activity-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.85em; }
   .trend-toggle-btn.active { background: var(--indigo); color: white; }
   .activity-row:last-child { border-bottom: none; }
+  .srm-ok { background: rgba(2,222,181,0.1); border: 1px solid var(--mint-dark); border-radius: 8px; padding: 14px 16px; font-size: 0.92em; }
+  .srm-warning { background: #fdeaea; border: 1px solid var(--danger); border-radius: 8px; padding: 14px 16px; font-size: 0.92em; color: #8a2d2d; }
 </style>
 </head>
 <body>
@@ -287,6 +289,9 @@
   <div class="chart-wrap trend-wrap"><canvas id="trend-chart" style="display:none"></canvas></div>
   <button type="button" class="secondary" id="refresh-results-btn" style="display:none" onclick="loadResults()">🔄 Refresh Results</button>
   <button type="button" class="secondary" id="export-results-btn" style="display:none" onclick="exportResultsCsv(document.getElementById('results-exp-id').value)">⬇ Export CSV</button>
+
+  <h3 style="margin-top:24px;">Sample Ratio Check <span class="hint">(is traffic actually split the way it's configured?)</span></h3>
+  <div id="srm-panel" style="display:none;"></div>
 
   <h3 style="margin-top:24px;">Bayesian Analysis <span class="hint">(which variant is actually winning, and how sure we can be)</span></h3>
   <p class="hint">Instead of just a raw percentage, this treats each variant's true conversion rate as uncertain and narrows that uncertainty as data comes in — so a 20% lead from 10 visitors and a 20% lead from 10,000 visitors don't look equally convincing. "Probability best" is the chance that variant is genuinely the top performer, not just ahead by chance.</p>
@@ -968,11 +973,22 @@ async function loadManageVariants() {
   if (variants.length === 0) { msgEl.className = 'hint'; msgEl.textContent = 'No variants yet on this experiment.'; return; }
 
   msgEl.className = 'hint';
-  const enabledCount = variants.filter((v) => v.enabled).length;
+  const enabledVariants = variants.filter((v) => v.enabled);
+  const enabledCount = enabledVariants.length;
+  const splitSum = enabledVariants.reduce((sum, v) => sum + (v.traffic_split || 0), 0);
+
+  let warning = '';
   if (enabledCount === 1) {
+    warning = '⚠ Only one active variant — 100% of matched traffic will see its changes, with no unmodified original shown to compare against. Add a "Control" variant with no changes if you want a real A/B split.';
+  } else if (enabledCount > 1 && splitSum !== 100) {
+    const effective = enabledVariants.map((v) => `${v.name}: ${((v.traffic_split / splitSum) * 100).toFixed(1)}%`).join(', ');
+    warning = `⚠ Active variants' traffic splits add up to ${splitSum}%, not 100%. Every visitor still gets assigned to one of them — the splits are used as relative weights, not literal percentages — but the actual effective split is ${effective}, which may not be what the numbers suggest at a glance.`;
+  }
+
+  if (warning) {
     msgEl.style.color = '#a3690f';
     msgEl.style.fontWeight = '600';
-    msgEl.textContent = '⚠ Only one active variant — 100% of matched traffic will see its changes, with no unmodified original shown to compare against. Add a "Control" variant with no changes if you want a real A/B split.';
+    msgEl.textContent = warning;
   } else {
     msgEl.style.color = '';
     msgEl.style.fontWeight = '';
@@ -1205,6 +1221,27 @@ async function loadResults() {
         <span class="hint">${new Date(ev.created_at).toLocaleString()}</span>
       </div>
     `).join('');
+  }
+
+  // Sample Ratio Mismatch check — see src/srm.js for the method. Deliberately
+  // rendered above the Bayesian panel: if the split itself looks broken, the
+  // conversion-rate comparison below it isn't trustworthy regardless of what
+  // it shows, so this is the first thing worth checking.
+  const srmPanel = document.getElementById('srm-panel');
+  const srmResult = await callApi(`/api/results/${expId}/srm`, { headers: authHeaders() });
+  if (!srmResult.ok || !srmResult.data.applicable) {
+    srmPanel.style.display = 'none';
+  } else {
+    const srm = srmResult.data;
+    srmPanel.style.display = 'block';
+    if (srm.srm_detected) {
+      srmPanel.className = 'srm-warning';
+      const splits = srmResult.data.variants.map((v) => `${v.name}: ${v.visitors} visitors (configured ${v.traffic_split}%)`).join(' · ');
+      srmPanel.innerHTML = `<strong>⚠ Sample Ratio Mismatch detected</strong> (p = ${srm.p_value < 0.0001 ? '<0.0001' : srm.p_value.toFixed(4)}). Actual traffic doesn't match the configured split closely enough to be normal random variance — this usually means a bug in assignment, bot/bias contamination, or a caching issue, not a real behavioral difference. <strong>Treat the results below with caution until this is understood.</strong><br><span class="hint" style="color:inherit;">${splits}</span>`;
+    } else {
+      srmPanel.className = 'srm-ok';
+      srmPanel.innerHTML = `✓ Traffic split looks healthy (p = ${srm.p_value.toFixed(3)}) — no sign of a mismatch between configured and actual traffic.`;
+    }
   }
 
   // Bayesian analysis — see src/bayesian.js for the model. Renders alongside the

@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { computeBayesianStats } = require('../bayesian');
+const { detectSRM } = require('../srm');
 const router = express.Router();
 
 router.use(requireAuth(['owner'])); // results are for your eyes only, not the public snippet
@@ -201,6 +202,41 @@ router.get('/:experimentId/bayesian', async (req, res) => {
     const lowSample = variantData.some((v) => v.visitors < 30);
 
     res.json({ experiment_id: experimentId, total_visitors: totalVisitors, low_sample_warning: lowSample, stats });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
+// GET /api/results/:experimentId/srm
+// Sample Ratio Mismatch check: does actual traffic match each variant's
+// configured traffic_split, or does the split look broken/biased? See
+// src/srm.js for the statistical method and why this matters.
+router.get('/:experimentId/srm', async (req, res) => {
+  const { experimentId } = req.params;
+  try {
+    const { rows } = await db.query(
+      `SELECT
+         v.id AS variant_id,
+         v.name AS variant_name,
+         v.traffic_split,
+         COUNT(DISTINCT e.visitor_id) FILTER (WHERE e.event_type = 'view') AS visitors
+       FROM variants v
+       LEFT JOIN events e ON e.variant_id = v.id
+       WHERE v.experiment_id = $1 AND v.enabled = true
+       GROUP BY v.id, v.name, v.traffic_split
+       ORDER BY v.name`,
+      [experimentId]
+    );
+
+    const variantData = rows.map((r) => ({
+      name: r.variant_name,
+      visitors: Number(r.visitors),
+      traffic_split: r.traffic_split,
+    }));
+
+    const srm = detectSRM(variantData);
+    res.json({ experiment_id: experimentId, variants: variantData, ...srm });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });

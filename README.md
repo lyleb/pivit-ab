@@ -150,6 +150,23 @@ A visitor counts as **new** on the calendar day of their first-ever view of an e
 
 The "View Results" section now draws two charts alongside the table: a bar chart of conversion rate per variant, and a line chart of cumulative visitors over time per variant, so you can see a trend rather than just a single snapshot.
 
+## Sample Ratio Mismatch (SRM) check
+
+Above the Bayesian panel in "View Results" is a Sample Ratio Check — a chi-square goodness-of-fit test comparing actual visitor counts per variant against what each variant's configured `traffic_split` would predict. If a 50/50 split is coming in at, say, 65/35, that's usually not normal random variance — it's a sign something is actually wrong (a bug in assignment, bot contamination skewing one variant, a caching or redirect issue), and it can fully explain an apparent "winner" on its own. When this fires, the message says so explicitly: treat the Bayesian numbers below it with caution until the mismatch is understood, regardless of how convincing they look.
+
+The threshold (p < 0.001) is deliberately strict — much stricter than the usual 0.05 — specifically so this only fires on something clearly broken, not ordinary noise. See `src/srm.js` for the statistical method (tested against known textbook chi-square critical values before being wired in).
+
+If active variants' traffic splits don't sum to 100%, "Preview & Manage Variants" also shows a separate warning — not because anything breaks (every visitor still gets assigned to one of them; splits are used as relative weights, not literal percentages), but because the actual effective split then differs from what the raw numbers suggest at a glance. The warning shows you the real effective percentages.
+
+## Basic bot / abuse filtering
+
+`POST /api/event` — the endpoint every visitor's browser calls to log a view/conversion — now filters out obvious bots and scripted floods before anything reaches the database:
+
+- **Known bot/crawler User-Agents** (Googlebot, AhrefsBot, SemrushBot, UptimeRobot, Pingdom, and similar) are silently ignored
+- **A per-IP rate limit** (60 events/minute) catches a scripted flood using a spoofed or generic User-Agent that the pattern list alone wouldn't catch
+
+Filtered requests still get a normal `204` response — nothing about what the caller sees reveals that filtering happened. This is heuristic protection, not a complete bot-detection system (nothing simple is), but it stops the obvious cases from quietly skewing results. See `src/bot-filter.js`.
+
 ## Bayesian analysis
 
 Below the results table and charts is a "Bayesian Analysis" panel — the answer to "is this difference real, or just noise?" It models each variant's true (unknown) conversion rate as a distribution rather than a single number, using a standard Beta-Binomial approach, and shows:
