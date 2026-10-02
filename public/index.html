@@ -67,7 +67,7 @@
     margin-top: 10px; background: #fafafe; border: 1px solid var(--border); border-radius: 8px; position: relative;
   }
   .goal-row { grid-template-columns: 1.3fr 1fr auto; align-items: center; }
-  .change-row .full-width { grid-column: 1 / -1; }
+  .change-row .full-width, .goal-row .full-width { grid-column: 1 / -1; }
   .picker-link {
     display: inline-block; padding: 10px 20px; background: var(--ink); color: white;
     border-radius: 8px; text-decoration: none; font-weight: 600; cursor: grab; font-size: 0.9em;
@@ -682,7 +682,7 @@ async function createExperiment() {
   });
   el.className = result.ok ? 'ok-msg' : 'error-msg';
   if (result.ok) {
-    el.textContent = `Created. Experiment ID: ${result.data.id}. Make sure the snippet above is installed on the target page.`;
+    el.textContent = `Created, with a "Control" variant (no changes, 50% traffic) already set up automatically. Just add your test variant(s) next — make sure the snippet above is installed on the target page.`;
     // Refresh the dropdowns FIRST so the new experiment's <option> actually exists
     // before we try to select it — otherwise the assignment below is silently ignored.
     await loadExperimentList();
@@ -774,17 +774,24 @@ function addGoalRow(prefill) {
   const row = document.createElement('div');
   row.className = 'goal-row';
   row.innerHTML = `
-    <div>
+    <div class="full-width">
       <label>Goal type</label>
       <select class="g-type">
         <option value="click">Click on element (any selector — button, div, span, etc.)</option>
         <option value="url">Visited a URL (e.g. a thank-you / confirmation page)</option>
       </select>
+    </div>
+    <div>
       <label class="g-value-label">Selector</label>
       <input class="g-value" placeholder="#cta-button">
     </div>
-    <div><label>Label</label><input class="g-id" placeholder="cta_click"></div>
-    <button type="button" class="remove-row" onclick="this.closest('.goal-row').remove()">✕</button>
+    <div>
+      <label>Label</label>
+      <input class="g-id" placeholder="cta_click">
+    </div>
+    <div class="full-width" style="text-align:right;">
+      <button type="button" class="remove-row" onclick="this.closest('.goal-row').remove()">✕</button>
+    </div>
   `;
   list.appendChild(row);
 

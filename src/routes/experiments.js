@@ -121,20 +121,43 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// Creating an experiment also creates a "Control" variant automatically — no
+// changes, 50% traffic — so every new experiment starts with an unmodified
+// baseline to compare against. You only ever need to add the variant(s) you're
+// actually testing; Control already exists, and can be edited/paused/deleted
+// afterward like any other variant if a given test genuinely doesn't need one
+// (e.g. a 100%-rollout). Both inserts happen in one transaction, so a failure
+// partway through never leaves an experiment with no Control at all.
 router.post('/', async (req, res) => {
-  try {
-    const { name, url_match, client_id } = req.body;
-    if (!name || !url_match) return res.status(400).json({ error: 'name and url_match are required' });
+  const { name, url_match, client_id } = req.body;
+  if (!name || !url_match) return res.status(400).json({ error: 'name and url_match are required' });
 
-    const { rows } = await db.query(
+  let client;
+  try {
+    client = await db.pool.connect(); // inside the try too — a connection failure must produce a clean error, not an unhandled rejection
+    await client.query('BEGIN');
+
+    const { rows: expRows } = await client.query(
       `INSERT INTO experiments (name, url_match, client_id) VALUES ($1, $2, $3) RETURNING *`,
       [name, url_match, client_id || null]
     );
-    res.status(201).json(rows[0]);
+    const experiment = expRows[0];
+
+    const { rows: variantRows } = await client.query(
+      `INSERT INTO variants (experiment_id, name, traffic_split, changes, goals)
+       VALUES ($1, 'Control', 50, '[]', '[]') RETURNING *`,
+      [experiment.id]
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json({ ...experiment, control_variant: variantRows[0] });
   } catch (err) {
+    if (client) await client.query('ROLLBACK').catch((rollbackErr) => console.error('Rollback failed:', rollbackErr));
     console.error(err);
     if (err.code === '23503') return res.status(400).json({ error: 'no client found with that id' });
     res.status(500).json({ error: 'internal error', detail: err.message });
+  } finally {
+    if (client) client.release();
   }
 });
 

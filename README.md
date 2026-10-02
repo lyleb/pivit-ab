@@ -104,6 +104,12 @@ If **none** of the above are present at all, the snippet runs as it always has (
 
 One deployment of this app can run experiments on as many different domains as you like at once. `url_match` is just a substring check against whatever page the snippet loads on — it has nothing to do with which site it's running on. Install the same snippet tag (see "Your Snippet" at the top of the dashboard) once per site, and the server figures out which experiments apply based on the current page's URL every time it loads. No per-site configuration needed beyond pasting the tag in.
 
+## The automatic Control variant
+
+Creating an experiment also creates a **"Control"** variant automatically — no changes, 50% traffic — in the same atomic step (both inserts happen in one database transaction, so you never end up with an experiment and no Control if something goes wrong partway through). This means a single variant you add yourself is never your *only* variant; it's compared against an unmodified baseline by default, without having to remember to set one up.
+
+If a given test genuinely doesn't need a Control (e.g. a 100%-traffic rollout), Control is just a variant like any other — pause, edit, or delete it from "Preview & Manage Variants" same as you would any variant.
+
 ## Previewing a variant
 
 Use the **"Preview & Manage Variants"** section: enter the Experiment ID and the actual page URL you're testing on, click Load, then hit **Preview** on any variant. It opens that variant in a new tab via `?ab_preview=<variant_id>` appended to the URL. This works even for a draft/paused experiment or a paused variant, and it never logs a view/conversion event — previewing never touches your real results.
