@@ -34,8 +34,29 @@
  * site. If a site uses a different CMP, wire up window.pivitConsent manually.
  */
 (function () {
-  const scriptTag = document.currentScript;
-  const API_BASE = scriptTag.getAttribute('data-api') || '';
+  // document.currentScript can be unreliable when a script is injected
+  // dynamically by a tag manager (GTM, etc.) rather than parsed directly from
+  // the page's HTML — fall back to finding it by its own src if needed.
+  const scriptTag = document.currentScript || document.querySelector('script[src*="/snippet/ab.js"]');
+
+  // API_BASE prefers an explicit data-api attribute, but falls back to the
+  // script's own origin if that's missing — the snippet and the API are always
+  // served from the same host, so this works even if data-api got dropped
+  // somewhere (an easy mistake when copy-pasting into a tag manager, since
+  // it's a separate attribute from src and simple to miss).
+  let API_BASE = '';
+  if (scriptTag) {
+    const explicitApiBase = scriptTag.getAttribute('data-api');
+    if (explicitApiBase) {
+      API_BASE = explicitApiBase;
+    } else if (scriptTag.src) {
+      try {
+        API_BASE = new URL(scriptTag.src, document.baseURI).origin;
+      } catch (e) {
+        API_BASE = '';
+      }
+    }
+  }
   const VISITOR_KEY = '_ab_visitor_id';
   const ASSIGNMENT_PREFIX = '_ab_assign_';
 
