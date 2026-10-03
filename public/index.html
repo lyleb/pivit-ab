@@ -28,9 +28,8 @@
     background: var(--card); border: 1px solid var(--border); border-radius: 12px;
     padding: 16px 10px; display: flex; flex-direction: column; gap: 2px;
   }
-  .sidebar .logo-area { padding: 6px 10px 16px; }
-  .sidebar .logo-area img.logo { height: 40px; display: block; }
-  .sidebar .logo-area .tagline { margin-top: 6px; }
+  .topbar-brand img.logo { height: 56px; display: block; }
+  .topbar-brand .tagline { margin-top: 8px; font-size: 0.85em; }
   .nav-item {
     display: flex; align-items: center; gap: 10px; padding: 10px 12px;
     border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.88em;
@@ -119,8 +118,8 @@
   .chart-wrap { max-width: 100%; margin-top: 20px; }
   .chart-wrap.trend-wrap { height: 0; overflow: hidden; } /* JS sets this to 340px only while an actual chart is rendered */
   .topbar {
-    display: flex; justify-content: flex-end; align-items: center;
-    margin-bottom: 20px; padding: 4px; position: relative;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    margin-bottom: 24px; padding: 8px 4px 20px; position: relative;
   }
   .tagline { font-size: 0.78em; color: var(--text-muted); font-weight: 600; font-style: italic; }
   .topbar-link {
@@ -156,10 +155,6 @@
 <body>
 <div class="app-shell">
   <div class="sidebar">
-    <div class="logo-area">
-      <img src="/assets/logo.png" alt="Pivit" class="logo">
-      <div class="tagline">Put your money where your data is</div>
-    </div>
     <div class="nav-item active" id="nav-page-home" onclick="showPage('page-home')">🏠 Home</div>
     <div class="nav-item" id="nav-page-create" onclick="showPage('page-create')">➕ Create experiment</div>
     <div class="nav-item" id="nav-page-preview" onclick="showPage('page-preview')">👁 Preview &amp; manage</div>
@@ -168,9 +163,15 @@
 
   <div class="main-area">
     <div class="topbar">
-      <a class="topbar-link" onclick="openClientsModal()">👥 Clients</a>
-      <a class="topbar-link" onclick="toggleSnippetPopover(event)" style="margin-left:8px;">📋 Copy Snippet</a>
-      <a class="topbar-link" onclick="logout()" style="margin-left:8px;">🚪 Log out</a>
+      <div class="topbar-brand">
+        <img src="/assets/logo.png" alt="Pivit" class="logo">
+        <div class="tagline">Put your money where your data is</div>
+      </div>
+      <div>
+        <a class="topbar-link" onclick="openClientsModal()">👥 Clients</a>
+        <a class="topbar-link" onclick="toggleSnippetPopover(event)" style="margin-left:8px;">📋 Copy Snippet</a>
+        <a class="topbar-link" onclick="logout()" style="margin-left:8px;">🚪 Log out</a>
+      </div>
       <div id="snippet-popover" class="snippet-popover">
         <p class="hint" style="margin-top:0; font-weight:600; color:var(--ink);">1. Add to &lt;head&gt; <span class="hint" style="font-weight:400;">(prevents flicker — optional but recommended)</span></p>
         <pre id="antiflicker-code"></pre>

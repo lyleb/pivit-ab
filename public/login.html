@@ -9,6 +9,8 @@
     --ink: #131723;
     --indigo: #5635FB;
     --indigo-dark: #4527d6;
+    --mint-dark: #02b895;
+    --mint-darker: #029478;
     --bg: #f5f6fb;
     --card: #ffffff;
     --border: #e6e7f0;
@@ -42,12 +44,23 @@
   button:hover { background: var(--indigo-dark); }
   button:disabled { background: #c9cadb; cursor: not-allowed; }
   .error-msg { color: var(--danger); font-size: 0.85em; margin-top: 14px; min-height: 1.2em; }
-  .toggle-link {
-    display: block; text-align: center; margin-top: 20px; font-size: 0.85em;
+  .toggle-button {
+    display: block; width: 100%; text-align: center; margin-top: 20px; padding: 12px;
+    background: var(--mint-dark); color: white; border: none; border-radius: 8px;
+    cursor: pointer; font-weight: 600; font-size: 0.95em; transition: background 0.15s ease;
+  }
+  .toggle-button:hover { background: var(--mint-darker); }
+  .forgot-link {
+    display: block; text-align: center; margin-top: 14px; font-size: 0.82em;
     color: var(--text-muted); cursor: pointer; text-decoration: underline;
   }
-  .toggle-link:hover { color: var(--indigo); }
+  .forgot-link:hover { color: var(--indigo); }
+  .forgot-note {
+    display: none; background: #f4f2fe; border: 1px solid var(--indigo); border-radius: 8px;
+    padding: 12px 14px; font-size: 0.85em; margin-top: 12px; line-height: 1.5;
+  }
   #client-form { display: none; }
+  #owner-forgot-note { display: none; }
 </style>
 </head>
 <body>
@@ -59,6 +72,8 @@
     <label for="password">Password</label>
     <input id="password" type="password" placeholder="Enter your password" autofocus required>
     <button id="owner-btn" type="submit">Log in</button>
+    <a class="forgot-link" onclick="toggleForgotNote('owner-forgot-note')">Forgot password?</a>
+    <div id="owner-forgot-note" class="forgot-note">There's one owner password, set as the <code>ADMIN_API_KEY</code> environment variable on the server. Update it there (e.g. in Railway) to change it — there's no in-app reset for this one, since it's the single credential controlling the whole admin side.</div>
   </form>
 
   <form id="client-form">
@@ -67,10 +82,12 @@
     <label for="client-password">Password</label>
     <input id="client-password" type="password" placeholder="Enter your password" required>
     <button id="client-btn" type="submit">Log in</button>
+    <a class="forgot-link" onclick="toggleForgotNote('client-forgot-note')">Forgot password?</a>
+    <div id="client-forgot-note" class="forgot-note">Contact the person who gave you access — they can reset your password for you from their dashboard.</div>
   </form>
 
   <p id="login-error" class="error-msg"></p>
-  <a class="toggle-link" id="toggle-link" onclick="toggleForm()">Client login</a>
+  <button type="button" class="toggle-button" id="toggle-link" onclick="toggleForm()">Client login</button>
 </div>
 
 <script>
@@ -82,6 +99,15 @@ function toggleForm() {
   document.getElementById('client-form').style.display = mode === 'client' ? 'block' : 'none';
   document.getElementById('toggle-link').textContent = mode === 'owner' ? 'Client login' : 'Owner login';
   document.getElementById('login-error').textContent = '';
+  // Collapse both "forgot password" notes whenever the form switches, so a
+  // note left open on one side doesn't linger after switching to the other.
+  document.getElementById('owner-forgot-note').style.display = 'none';
+  document.getElementById('client-forgot-note').style.display = 'none';
+}
+
+function toggleForgotNote(id) {
+  const el = document.getElementById(id);
+  el.style.display = el.style.display === 'block' ? 'none' : 'block';
 }
 
 async function submitLogin(path, body, btn) {
