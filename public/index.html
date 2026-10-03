@@ -21,7 +21,38 @@
     font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   * { box-sizing: border-box; }
-  body { max-width: 980px; margin: 0 auto; padding: 32px 20px 80px; background: var(--bg); color: var(--ink); line-height: 1.5; }
+  body { max-width: 1280px; margin: 0 auto; padding: 0 20px 80px; background: var(--bg); color: var(--ink); line-height: 1.5; }
+  .app-shell { display: flex; gap: 24px; align-items: flex-start; }
+  .sidebar {
+    width: 210px; flex-shrink: 0; position: sticky; top: 20px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 10px; display: flex; flex-direction: column; gap: 2px;
+  }
+  .sidebar .logo-area { padding: 6px 10px 16px; }
+  .sidebar .logo-area img.logo { height: 40px; display: block; }
+  .sidebar .logo-area .tagline { margin-top: 6px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.88em;
+    color: var(--text-muted); transition: background 0.15s ease, color 0.15s ease;
+  }
+  .nav-item:hover { background: #f0f0f7; color: var(--ink); }
+  .nav-item.active { background: #f4f2fe; color: var(--indigo); }
+  .main-area { flex: 1; min-width: 0; }
+  .page { display: none; }
+  .page.active { display: block; }
+  .modal-backdrop {
+    display: none; position: fixed; inset: 0; background: rgba(19,23,35,0.45);
+    z-index: 100; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 40px 20px;
+  }
+  .modal-backdrop.active { display: flex; }
+  .modal-box {
+    background: var(--card); border-radius: 12px; padding: 28px; width: 560px; max-width: 100%;
+    box-shadow: 0 12px 40px rgba(19,23,35,0.2);
+  }
+  .modal-box-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .modal-close-btn { background: none; border: none; color: var(--text-muted); font-size: 1.3em; cursor: pointer; margin: 0; padding: 4px 8px; }
+  .modal-close-btn:hover { background: #f0f0f7; border-radius: 6px; }
   h1, h2, h3 { color: var(--ink); font-weight: 700; letter-spacing: -0.01em; }
   h2 { font-size: 1.05em; margin: 0 0 4px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
   h3 { font-size: 0.95em; margin: 20px 0 8px; color: var(--ink); }
@@ -86,13 +117,12 @@
   .badge.draft { background: #fff4e0; color: #a3690f; }
   .badge.archived { background: #eceef5; color: #5a5d70; }
   .chart-wrap { max-width: 100%; margin-top: 20px; }
-  .chart-wrap.trend-wrap { height: 340px; }
+  .chart-wrap.trend-wrap { height: 0; overflow: hidden; } /* JS sets this to 340px only while an actual chart is rendered */
   .topbar {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 28px; padding: 8px 4px; position: relative;
+    display: flex; justify-content: flex-end; align-items: center;
+    margin-bottom: 20px; padding: 4px; position: relative;
   }
-  .topbar img.logo { height: 62px; display: block; }
-  .tagline { font-size: 0.78em; color: var(--text-muted); font-weight: 600; margin-top: 4px; font-style: italic; }
+  .tagline { font-size: 0.78em; color: var(--text-muted); font-weight: 600; font-style: italic; }
   .topbar-link {
     color: var(--ink); font-weight: 600; text-decoration: none; font-size: 0.88em;
     cursor: pointer; padding: 8px 14px; border-radius: 8px; background: #f0f0f7;
@@ -124,186 +154,204 @@
 </style>
 </head>
 <body>
-<div class="topbar">
-  <div>
-    <img src="/assets/logo.png" alt="Pivit" class="logo">
-    <div class="tagline">Put your money where your data is</div>
+<div class="app-shell">
+  <div class="sidebar">
+    <div class="logo-area">
+      <img src="/assets/logo.png" alt="Pivit" class="logo">
+      <div class="tagline">Put your money where your data is</div>
+    </div>
+    <div class="nav-item active" id="nav-page-home" onclick="showPage('page-home')">🏠 Home</div>
+    <div class="nav-item" id="nav-page-create" onclick="showPage('page-create')">➕ Create experiment</div>
+    <div class="nav-item" id="nav-page-preview" onclick="showPage('page-preview')">👁 Preview &amp; manage</div>
+    <div class="nav-item" id="nav-page-status" onclick="showPage('page-status')">⏯ Start &amp; pause</div>
   </div>
-  <div>
-    <a class="topbar-link" onclick="toggleSnippetPopover(event)">📋 Copy Snippet</a>
-    <a class="topbar-link" onclick="logout()" style="margin-left:8px;">🚪 Log out</a>
-    <div id="snippet-popover" class="snippet-popover">
-      <p class="hint" style="margin-top:0; font-weight:600; color:var(--ink);">1. Add to &lt;head&gt; <span class="hint" style="font-weight:400;">(prevents flicker — optional but recommended)</span></p>
-      <pre id="antiflicker-code"></pre>
-      <button type="button" class="secondary" onclick="copyAntiflicker()">Copy</button>
-      <span id="antiflicker-copied" class="hint"></span>
 
-      <p class="hint" style="margin-top:16px; font-weight:600; color:var(--ink);">2. Add just before &lt;/body&gt;</p>
-      <pre id="snippet-code"></pre>
-      <button type="button" class="secondary" onclick="copySnippet()">Copy</button>
-      <span id="snippet-copied" class="hint"></span>
+  <div class="main-area">
+    <div class="topbar">
+      <a class="topbar-link" onclick="openClientsModal()">👥 Clients</a>
+      <a class="topbar-link" onclick="toggleSnippetPopover(event)" style="margin-left:8px;">📋 Copy Snippet</a>
+      <a class="topbar-link" onclick="logout()" style="margin-left:8px;">🚪 Log out</a>
+      <div id="snippet-popover" class="snippet-popover">
+        <p class="hint" style="margin-top:0; font-weight:600; color:var(--ink);">1. Add to &lt;head&gt; <span class="hint" style="font-weight:400;">(prevents flicker — optional but recommended)</span></p>
+        <pre id="antiflicker-code"></pre>
+        <button type="button" class="secondary" onclick="copyAntiflicker()">Copy</button>
+        <span id="antiflicker-copied" class="hint"></span>
+
+        <p class="hint" style="margin-top:16px; font-weight:600; color:var(--ink);">2. Add just before &lt;/body&gt;</p>
+        <pre id="snippet-code"></pre>
+        <button type="button" class="secondary" onclick="copySnippet()">Copy</button>
+        <span id="snippet-copied" class="hint"></span>
+      </div>
+    </div>
+
+    <div id="page-home" class="page active">
+      <section>
+        <h2>Your Experiments</h2>
+        <button type="button" class="secondary" onclick="refreshAll()">🔄 Refresh</button>
+        <p id="exp-list-msg" class="hint"></p>
+        <table id="exp-list-table" style="display:none">
+          <thead><tr><th>Name</th><th>Status</th><th>URL match</th><th>Client</th><th>Variants</th><th>Created</th><th></th></tr></thead>
+          <tbody id="exp-list-body"></tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Results</h2>
+        <label>Experiment <span class="hint">(or click a row above)</span></label>
+        <select id="results-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
+        <label>Visitors <span class="hint">(filters the table and rate chart below)</span></label>
+        <select id="visitor-type-filter">
+          <option value="">All visitors</option>
+          <option value="new">New only</option>
+          <option value="returning">Returning only</option>
+        </select>
+        <button onclick="loadResults()">Load Results</button>
+        <p id="results-msg" class="hint"></p>
+        <table id="results-table" style="display:none">
+          <thead><tr><th>Variant</th><th>Visitors</th><th>New</th><th>Returning</th><th>Clicks</th><th>Conversions</th><th>Rate</th></tr></thead>
+          <tbody id="results-body"></tbody>
+        </table>
+        <div class="chart-wrap"><canvas id="rate-chart" style="display:none"></canvas></div>
+        <div style="margin-top:16px; display:flex; gap:8px; align-items:center;">
+          <span class="hint">Trend:</span>
+          <button type="button" class="secondary trend-toggle-btn" id="trend-mode-cumulative" onclick="setTrendMode('cumulative')">Cumulative</button>
+          <button type="button" class="secondary trend-toggle-btn" id="trend-mode-daily" onclick="setTrendMode('daily')">Daily</button>
+        </div>
+        <div class="chart-wrap trend-wrap"><canvas id="trend-chart" style="display:none"></canvas></div>
+        <button type="button" class="secondary" id="refresh-results-btn" style="display:none" onclick="loadResults()">🔄 Refresh Results</button>
+        <button type="button" class="secondary" id="export-results-btn" style="display:none" onclick="exportResultsCsv(document.getElementById('results-exp-id').value)">⬇ Export CSV</button>
+
+        <h3 style="margin-top:24px;">Sample Ratio Check <span class="hint">(is traffic actually split the way it's configured?)</span></h3>
+        <div id="srm-panel" style="display:none;"></div>
+
+        <h3 style="margin-top:24px;">Bayesian Analysis <span class="hint">(which variant is actually winning, and how sure we can be)</span></h3>
+        <p class="hint">Instead of just a raw percentage, this treats each variant's true conversion rate as uncertain and narrows that uncertainty as data comes in — so a 20% lead from 10 visitors and a 20% lead from 10,000 visitors don't look equally convincing. "Probability best" is the chance that variant is genuinely the top performer, not just ahead by chance.</p>
+        <div id="bayesian-warning" class="hint" style="display:none; color:#a3690f; font-weight:600;"></div>
+        <table id="bayesian-table" style="display:none">
+          <thead><tr><th>Variant</th><th>Visitors</th><th>Conversions</th><th>Est. Rate (95% range)</th><th>Probability Best</th></tr></thead>
+          <tbody id="bayesian-body"></tbody>
+        </table>
+
+        <h3 style="margin-top:24px;">Recent Activity <span class="hint">(raw events, most recent 20 — useful for confirming events are arriving at all)</span></h3>
+        <div id="activity-log" class="hint">Load results above to see recent activity.</div>
+      </section>
+    </div>
+
+    <div id="page-create" class="page">
+      <section>
+        <h2>Create Experiment &amp; Add Variant</h2>
+
+        <details>
+          <summary>1. Create Experiment</summary>
+          <div class="accordion-body">
+            <label>Name</label>
+            <input id="exp-name" placeholder="Homepage CTA button copy">
+            <label>URL match <span class="hint">(substring the page URL must contain — this is just stored for later, it doesn't check anything right now)</span></label>
+            <input id="exp-url" placeholder="/pricing">
+            <label>Client <span class="hint">(optional — only assigned clients can see this experiment's results)</span></label>
+            <select id="exp-client-id"><option value="">— internal only, no client —</option></select>
+            <button onclick="createExperiment()">Create</button>
+            <p id="exp-result" class="hint"></p>
+          </div>
+        </details>
+
+        <details>
+          <summary>2. Add Variant</summary>
+          <div class="accordion-body">
+            <p id="edit-banner" class="hint" style="display:none; color:#c0392b;">Editing an existing variant — changes take effect immediately for live traffic. <button type="button" class="secondary" onclick="cancelEditVariant()" style="margin:0 0 0 8px;">Cancel edit</button></p>
+            <label>Experiment</label>
+            <select id="var-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
+            <label>Variant Name</label>
+            <input id="var-name" placeholder="control / variant-b">
+            <label>Traffic Split (%)</label>
+            <input id="var-split" type="number" value="50">
+          </div>
+        </details>
+
+        <details>
+          <summary>3. Make Changes</summary>
+          <div class="accordion-body">
+            <p class="hint" style="margin-top:0;">Need a selector? <a class="picker-link" id="picker-bookmarklet" href="#" style="padding:4px 10px; font-size:0.85em; margin-left:4px;">🎯 Selector Picker</a> — drag to your bookmarks bar once, then click it on the live page and click any element to copy its selector.</p>
+            <div id="changes-list"></div>
+            <button type="button" class="secondary" onclick="addChangeRow()">+ Add another change</button>
+          </div>
+        </details>
+
+        <details>
+          <summary>4. Add Goals <span class="hint">(optional)</span></summary>
+          <div class="accordion-body">
+            <div id="popular-goals"></div>
+            <div id="goals-list"></div>
+            <button type="button" class="secondary" onclick="addGoalRow()">+ Add another goal</button>
+          </div>
+        </details>
+
+        <input type="hidden" id="editing-variant-id" value="">
+        <button id="save-variant-btn" onclick="saveVariant()">Save Variant</button>
+        <p id="var-result" class="hint"></p>
+
+        <div id="saved-variant-summary"></div>
+      </section>
+    </div>
+
+    <div id="page-preview" class="page">
+      <section>
+        <h2>Preview &amp; Manage Variants</h2>
+        <label>Experiment</label>
+        <select id="manage-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
+        <label>Page URL to preview on <span class="hint">(the actual page, e.g. https://cantsaythat.co.uk/shop)</span></label>
+        <input id="manage-page-url" placeholder="https://cantsaythat.co.uk/shop">
+        <button onclick="loadManageVariants()">Load Variants</button>
+        <p id="manage-msg" class="hint"></p>
+        <div id="manage-variants-list"></div>
+      </section>
+    </div>
+
+    <div id="page-status" class="page">
+      <section>
+        <h2>Start / Pause Experiment</h2>
+        <label>Experiment</label>
+        <select id="status-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
+        <label>Status</label>
+        <select id="status-value">
+          <option value="running">running</option>
+          <option value="paused">paused</option>
+          <option value="draft">draft</option>
+          <option value="archived">archived</option>
+        </select>
+        <button onclick="updateStatus()">Update</button>
+        <p id="status-result" class="hint"></p>
+      </section>
     </div>
   </div>
 </div>
 
-<section>
-  <h2>Your Experiments</h2>
-  <button type="button" class="secondary" onclick="refreshAll()">🔄 Refresh</button>
-  <p id="exp-list-msg" class="hint"></p>
-  <table id="exp-list-table" style="display:none">
-    <thead><tr><th>Name</th><th>Status</th><th>URL match</th><th>Client</th><th>Variants</th><th>Created</th><th></th></tr></thead>
-    <tbody id="exp-list-body"></tbody>
-  </table>
-</section>
-
-<section>
-  <h2>Clients</h2>
-  <p class="hint">Create a login for a client here, then assign them to experiments above (or reassign anytime from the "Your Experiments" table) so they can see just their own results at <code id="client-login-url"></code>.</p>
-
-  <details>
-    <summary>Add a client</summary>
-    <div class="accordion-body">
-      <label>Display name</label>
-      <input id="new-client-name" placeholder="Can't Say That?">
-      <label>Username</label>
-      <input id="new-client-username" placeholder="cantsaythat">
-      <label>Password</label>
-      <input id="new-client-password" type="password" placeholder="At least 8 characters">
-      <button onclick="createClient()">Create client</button>
-      <p id="client-result" class="hint"></p>
-      <div id="new-client-credentials"></div>
+<div id="clients-modal" class="modal-backdrop">
+  <div class="modal-box">
+    <div class="modal-box-header">
+      <h2 style="border:none; padding:0; margin:0;">Clients</h2>
+      <button type="button" class="modal-close-btn" onclick="closeClientsModal()">✕</button>
     </div>
-  </details>
+    <p class="hint">Create a login for a client here, then assign them to experiments on the Home page (or reassign anytime from the experiments table) so they can see just their own results at <code id="client-login-url"></code>.</p>
 
-  <div id="clients-list" style="margin-top:12px;"></div>
-</section>
+    <details>
+      <summary>Add a client</summary>
+      <div class="accordion-body">
+        <label>Display name</label>
+        <input id="new-client-name" placeholder="Can't Say That?">
+        <label>Username</label>
+        <input id="new-client-username" placeholder="cantsaythat">
+        <label>Password</label>
+        <input id="new-client-password" type="password" placeholder="At least 8 characters">
+        <button onclick="createClient()">Create client</button>
+        <p id="client-result" class="hint"></p>
+        <div id="new-client-credentials"></div>
+      </div>
+    </details>
 
-<section>
-  <h2>Find a selector on the page</h2>
-  <p class="hint">Drag this to your bookmarks bar. Then, while on the actual client page (e.g. cantsaythat.co.uk/shop), click the bookmark, then click any element — its selector gets copied to your clipboard so you can paste it below.</p>
-  <a class="picker-link" id="picker-bookmarklet" href="#">🎯 AB Selector Picker</a>
-</section>
-
-<section>
-  <h2>Create Experiment & Add Variant</h2>
-
-  <details>
-    <summary>1. Create Experiment</summary>
-    <div class="accordion-body">
-      <label>Name</label>
-      <input id="exp-name" placeholder="Homepage CTA button copy">
-      <label>URL match <span class="hint">(substring the page URL must contain — this is just stored for later, it doesn't check anything right now)</span></label>
-      <input id="exp-url" placeholder="/pricing">
-      <label>Client <span class="hint">(optional — only assigned clients can see this experiment's results)</span></label>
-      <select id="exp-client-id"><option value="">— internal only, no client —</option></select>
-      <button onclick="createExperiment()">Create</button>
-      <p id="exp-result" class="hint"></p>
-    </div>
-  </details>
-
-  <details>
-    <summary>2. Add Variant</summary>
-    <div class="accordion-body">
-      <p id="edit-banner" class="hint" style="display:none; color:#c0392b;">Editing an existing variant — changes take effect immediately for live traffic. <button type="button" class="secondary" onclick="cancelEditVariant()" style="margin:0 0 0 8px;">Cancel edit</button></p>
-      <label>Experiment</label>
-      <select id="var-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
-      <label>Variant Name</label>
-      <input id="var-name" placeholder="control / variant-b">
-      <label>Traffic Split (%)</label>
-      <input id="var-split" type="number" value="50">
-    </div>
-  </details>
-
-  <details>
-    <summary>3. Make Changes</summary>
-    <div class="accordion-body">
-      <div id="changes-list"></div>
-      <button type="button" class="secondary" onclick="addChangeRow()">+ Add another change</button>
-    </div>
-  </details>
-
-  <details>
-    <summary>4. Add Goals <span class="hint">(optional)</span></summary>
-    <div class="accordion-body">
-      <div id="popular-goals"></div>
-      <div id="goals-list"></div>
-      <button type="button" class="secondary" onclick="addGoalRow()">+ Add another goal</button>
-    </div>
-  </details>
-
-  <input type="hidden" id="editing-variant-id" value="">
-  <button id="save-variant-btn" onclick="saveVariant()">Save Variant</button>
-  <p id="var-result" class="hint"></p>
-
-  <div id="saved-variant-summary"></div>
-</section>
-
-<section>
-  <h2>3. Preview & Manage Variants</h2>
-  <label>Experiment</label>
-  <select id="manage-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
-  <label>Page URL to preview on <span class="hint">(the actual page, e.g. https://cantsaythat.co.uk/shop)</span></label>
-  <input id="manage-page-url" placeholder="https://cantsaythat.co.uk/shop">
-  <button onclick="loadManageVariants()">Load Variants</button>
-  <p id="manage-msg" class="hint"></p>
-  <div id="manage-variants-list"></div>
-</section>
-
-<section>
-  <h2>4. Start / Pause Experiment</h2>
-  <label>Experiment</label>
-  <select id="status-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
-  <label>Status</label>
-  <select id="status-value">
-    <option value="running">running</option>
-    <option value="paused">paused</option>
-    <option value="draft">draft</option>
-    <option value="archived">archived</option>
-  </select>
-  <button onclick="updateStatus()">Update</button>
-  <p id="status-result" class="hint"></p>
-</section>
-
-<section>
-  <h2>5. View Results</h2>
-  <label>Experiment</label>
-  <select id="results-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
-  <label>Visitors <span class="hint">(filters the table and rate chart below)</span></label>
-  <select id="visitor-type-filter">
-    <option value="">All visitors</option>
-    <option value="new">New only</option>
-    <option value="returning">Returning only</option>
-  </select>
-  <button onclick="loadResults()">Load Results</button>
-  <p id="results-msg" class="hint"></p>
-  <table id="results-table" style="display:none">
-    <thead><tr><th>Variant</th><th>Visitors</th><th>New</th><th>Returning</th><th>Clicks</th><th>Conversions</th><th>Rate</th></tr></thead>
-    <tbody id="results-body"></tbody>
-  </table>
-  <div class="chart-wrap"><canvas id="rate-chart" style="display:none"></canvas></div>
-  <div style="margin-top:16px; display:flex; gap:8px; align-items:center;">
-    <span class="hint">Trend:</span>
-    <button type="button" class="secondary trend-toggle-btn" id="trend-mode-cumulative" onclick="setTrendMode('cumulative')">Cumulative</button>
-    <button type="button" class="secondary trend-toggle-btn" id="trend-mode-daily" onclick="setTrendMode('daily')">Daily</button>
+    <div id="clients-list" style="margin-top:12px;"></div>
   </div>
-  <div class="chart-wrap trend-wrap"><canvas id="trend-chart" style="display:none"></canvas></div>
-  <button type="button" class="secondary" id="refresh-results-btn" style="display:none" onclick="loadResults()">🔄 Refresh Results</button>
-  <button type="button" class="secondary" id="export-results-btn" style="display:none" onclick="exportResultsCsv(document.getElementById('results-exp-id').value)">⬇ Export CSV</button>
-
-  <h3 style="margin-top:24px;">Sample Ratio Check <span class="hint">(is traffic actually split the way it's configured?)</span></h3>
-  <div id="srm-panel" style="display:none;"></div>
-
-  <h3 style="margin-top:24px;">Bayesian Analysis <span class="hint">(which variant is actually winning, and how sure we can be)</span></h3>
-  <p class="hint">Instead of just a raw percentage, this treats each variant's true conversion rate as uncertain and narrows that uncertainty as data comes in — so a 20% lead from 10 visitors and a 20% lead from 10,000 visitors don't look equally convincing. "Probability best" is the chance that variant is genuinely the top performer, not just ahead by chance.</p>
-  <div id="bayesian-warning" class="hint" style="display:none; color:#a3690f; font-weight:600;"></div>
-  <table id="bayesian-table" style="display:none">
-    <thead><tr><th>Variant</th><th>Visitors</th><th>Conversions</th><th>Est. Rate (95% range)</th><th>Probability Best</th></tr></thead>
-    <tbody id="bayesian-body"></tbody>
-  </table>
-
-  <h3 style="margin-top:24px;">Recent Activity <span class="hint">(raw events, most recent 20 — useful for confirming events are arriving at all)</span></h3>
-  <div id="activity-log" class="hint">Load results above to see recent activity.</div>
-</section>
+</div>
 
 <script>
 const API = '';
@@ -371,6 +419,32 @@ async function logout() {
   window.location.href = '/login.html';
 }
 
+// --- Left-nav page switching ---
+
+const PAGE_IDS = ['page-home', 'page-create', 'page-preview', 'page-status'];
+
+function showPage(pageId) {
+  PAGE_IDS.forEach((id) => {
+    document.getElementById(id).classList.toggle('active', id === pageId);
+    document.getElementById('nav-' + id).classList.toggle('active', id === pageId);
+  });
+  try { localStorage.setItem('pivit_last_page', pageId); } catch (e) {}
+}
+
+// --- Clients modal ---
+
+function openClientsModal() {
+  document.getElementById('clients-modal').classList.add('active');
+  loadClients();
+}
+function closeClientsModal() {
+  document.getElementById('clients-modal').classList.remove('active');
+}
+// Click outside the modal box (on the dark backdrop) closes it, same as the X button.
+document.getElementById('clients-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'clients-modal') closeClientsModal();
+});
+
 // --- Experiments list ---
 
 const STATUS_COLORS = { running: 'live', draft: 'draft', paused: 'paused', archived: 'archived' };
@@ -421,11 +495,22 @@ async function loadExperimentList() {
       <td>${clientSelect}</td>
       <td>${exp.variant_count}</td>
       <td class="hint">${created}</td>
-      <td><button type="button" class="secondary" onclick="useExperiment('${exp.id}', '${(exp.url_match || '').replace(/'/g, "\\'")}')">Use ↓</button> ${archivedActions}</td>
+      <td>
+        <button type="button" onclick="viewResultsFor('${exp.id}')">View Results</button>
+        <button type="button" class="secondary" onclick="useExperiment('${exp.id}', '${(exp.url_match || '').replace(/'/g, "\\'")}')">Use ↓</button> ${archivedActions}
+      </td>
     `;
     tbody.appendChild(tr);
   });
   table.style.display = 'table';
+}
+
+// Selects this experiment in the Home page's Results section and loads it
+// straight away — the "click an experiment, see its results" flow.
+function viewResultsFor(expId) {
+  document.getElementById('results-exp-id').value = expId;
+  loadResults();
+  document.getElementById('results-exp-id').closest('section').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // Reassigns (or un-assigns with an empty value) which client can see an experiment.
@@ -1127,10 +1212,13 @@ function renderTrendChart() {
   document.getElementById('trend-mode-daily').classList.toggle('active', trendMode === 'daily');
 
   if (trendChart) trendChart.destroy();
-  if (currentTrendSeries.length === 0) { trendCanvas.style.display = 'none'; return; }
+  // The wrapper's fixed height is only needed while an actual chart is shown —
+  // otherwise it just reserves an empty-looking gap on the page.
+  if (currentTrendSeries.length === 0) { trendCanvas.style.display = 'none'; trendCanvas.parentElement.style.height = '0'; return; }
 
   const { labels, datasets } = computeTrendDatasets(currentTrendSeries, trendMode);
   trendCanvas.style.display = 'block';
+  trendCanvas.parentElement.style.height = '340px';
   trendChart = new Chart(trendCanvas, {
     type: 'line',
     data: { labels, datasets },
@@ -1289,7 +1377,12 @@ fetch('/snippet/picker-bookmarklet.js').then(r => r.text()).then(src => {
 // Gate the whole page on an active owner session before loading anything else.
 (async () => {
   const ok = await requireOwnerSession();
-  if (ok) refreshAll();
+  if (ok) {
+    refreshAll();
+    let lastPage = 'page-home';
+    try { lastPage = localStorage.getItem('pivit_last_page') || 'page-home'; } catch (e) {}
+    if (PAGE_IDS.includes(lastPage)) showPage(lastPage);
+  }
 })();
 </script>
 </body>
