@@ -104,7 +104,7 @@ If **none** of the above are present at all, the snippet runs as it always has (
 
 One deployment of this app can run experiments on as many different domains as you like at once. `url_match` is just a substring check against whatever page the snippet loads on — it has nothing to do with which site it's running on. Install the same snippet tag (see "Your Snippet" at the top of the dashboard) once per site, and the server figures out which experiments apply based on the current page's URL every time it loads. No per-site configuration needed beyond pasting the tag in.
 
-## Visual editor (stage 1: Remove, Duplicate, Add above/below)
+## Visual editor (Remove, Duplicate, Add above/below, plus a Changes list)
 
 "Preview & Manage Variants" has a **🎯 Make Edits** button per variant (needs the page URL filled in, same as Preview). Clicking it opens the real live page in a new tab with an in-page editing overlay active:
 
@@ -112,13 +112,17 @@ One deployment of this app can run experiments on as many different domains as y
 - A quick-actions menu appears: **Duplicate**, **Add above**, **Add below**, **Remove**
 - Add above/below opens a small HTML input — whatever you enter gets inserted immediately so you see the result live
 - **💾 Save** persists everything to that variant's `changes`, same data model the dashboard's own "Make Changes" step produces — this is a different way to author the same thing, not a separate system
+- **Changes (N)** expands a list of every change on the variant, saved earlier or made this session, each described in plain English ("Duplicate #cta-button", "Insert HTML below #headline"). **Remove** is on every entry; **Edit** appears on the insert-HTML entries (the only type with a simple editable value so far) and reopens the HTML panel pre-filled
+- The toolbar shows **● Unsaved changes** or **✓ All changes saved**, based on a comparison with what's actually on the server
 - **Desktop / Tablet / Mobile** buttons open the live preview (`?ab_preview=`) in appropriately-sized new windows, reflecting the last *saved* state — not unsaved edits still sitting in the current tab
+
+**Why editing or removing an existing change reloads the page**: there's no generic way to reverse an arbitrary DOM mutation (an innerHTML overwrite or a removed node can't be reliably restored in place). So Edit/Remove on an existing entry updates the change list, reloads onto a clean copy of the page, and replays the updated list. The working list is kept in `sessionStorage` (per variant) across that reload, so unsaved work isn't lost; it's cleared on a successful Save, after which the editor loads from the server again. Adding a *new* change doesn't need a reload and applies live.
 
 **Why a new tab, not an embedded frame**: the browser's same-origin policy blocks reading or modifying a cross-origin iframe's DOM entirely. Opening the real page directly means the tracking snippet already running there (`ab.js`) can hand off to the editor with full same-origin access — the same approach tools like Optimizely and VWO use.
 
 **Authentication**: the new tab lives on the client's own domain, not `pivit.click`, so your normal login session (deliberately never sent cross-site) can't travel with it. Clicking "Make Edits" instead mints a signed, time-limited token scoped to that one variant (`src/edit-token.js`) — good for about an hour, useless for anything except saving changes to that specific variant. This is also what makes a future restricted client-side version of this feature straightforward: same mechanism, issued to a client instead of the owner.
 
-**What's not in this stage yet**: "Replace/change element" (the fuller HTML/CSS/JS editing panel, pre-filled with the element's current markup) is next — it needs a richer multi-field panel than the simple single-textarea insert used for Add above/below here. Owner-only for now; client-side rollout comes later, reusing the same token mechanism.
+**What's not here yet**: "Replace/change element" (the fuller HTML/CSS/JS editing panel, pre-filled with the element's current markup) is next. It slots into the Changes list above: once it exists, Edit will work on those entries too. Owner-only for now; client-side rollout comes later, reusing the same token mechanism.
 
 ## The automatic Control variant
 

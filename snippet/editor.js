@@ -1,5 +1,6 @@
 /**
- * Pivit visual editor — v0.1 (stage 1: Remove, Duplicate, Add above/below)
+ * Pivit visual editor — v0.2 (stage 1: Remove, Duplicate, Add above/below,
+ * plus a Changes list with Edit/Remove on each entry)
  *
  * Loaded by ab.js only when it sees ?ab_edit=<variant_id>&token=<token> in the
  * URL — never downloaded by a real visitor. Runs entirely on the client's own
@@ -9,7 +10,14 @@
  *
  * "Replace/change element" (full HTML/CSS/JS editing) is deliberately not in
  * this version — it needs a richer panel pre-filled with the element's current
- * markup, coming in the next stage.
+ * markup, coming next, built on top of the Changes list added here.
+ *
+ * Editing or removing an EXISTING change reloads the page and replays the
+ * updated change list from a clean DOM, rather than trying to reverse an
+ * arbitrary DOM mutation in place (which isn't reliably possible — there's no
+ * generic "undo" for an innerHTML overwrite or a node removal). The working
+ * change list survives the reload via sessionStorage, keyed per variant, so
+ * unsaved edits aren't lost either.
  */
 (function () {
   const scriptTag = document.currentScript || document.querySelector('script[src*="/snippet/editor.js"]');
@@ -19,13 +27,15 @@
 
   const Z = 2147483647; // max safe z-index — stays above whatever the host page uses
   const COLORS = { indigo: '#5635FB', indigoDark: '#4527d6', mint: '#02DEB5', ink: '#131723', danger: '#d64545', border: '#e6e7f0' };
+  const STORAGE_KEY = `pivit_editor_changes_${VARIANT_ID}`;
 
-  let existingChanges = [];
-  let pendingChanges = [];
+  let allChanges = [];       // the full working set — both already-saved and new-this-session
+  let savedSnapshot = '[]';  // JSON of what's actually saved on the server, for the dirty check
   let experimentName = '';
   let variantName = '';
   let pickingActive = false;
   let hoveredEl = null;
+  let changesListOpen = false;
 
   // --- DOM mutation primitives (same semantics as snippet/ab.js's applyChange,
   // kept as its own copy so this file has no runtime dependency on ab.js). ---
@@ -51,6 +61,32 @@
         case 'insert_after': el.insertAdjacentHTML('afterend', change.value); break;
       }
     });
+  }
+
+  // Plain-English description of a change, for the Changes list.
+  function describeChange(change) {
+    const sel = change.selector;
+    switch (change.type) {
+      case 'text': return `Change text on ${sel}`;
+      case 'html': return `Replace HTML on ${sel}`;
+      case 'hide': return `Hide ${sel}`;
+      case 'show': return `Show ${sel}`;
+      case 'style': return `Custom CSS on ${sel}`;
+      case 'attr': return `Set ${change.attr || 'attribute'} on ${sel}`;
+      case 'js': return `Custom JS on ${sel}`;
+      case 'remove': return `Remove ${sel}`;
+      case 'duplicate': return `Duplicate ${sel}`;
+      case 'insert_before': return `Insert HTML above ${sel}`;
+      case 'insert_after': return `Insert HTML below ${sel}`;
+      default: return `${change.type} on ${sel}`;
+    }
+  }
+
+  // Only insert_before/insert_after have a simple single-value editor right
+  // now — html/style/js get real "Edit" support once the full Replace/Change
+  // panel exists. duplicate/remove/hide/show have no content to edit at all.
+  function isEditable(change) {
+    return change.type === 'insert_before' || change.type === 'insert_after';
   }
 
   // --- Selector computation (same approach as snippet/picker-bookmarklet.js) ---
@@ -84,19 +120,45 @@
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
     return res.json();
   }
-  async function saveChanges(allChanges) {
+  async function saveChanges(changes) {
     const res = await fetch(`${API_BASE}/api/editor/variants/${VARIANT_ID}?token=${encodeURIComponent(TOKEN)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ changes: allChanges }),
+      body: JSON.stringify({ changes }),
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
     return res.json();
   }
 
+  // --- Working-set persistence across a reload ---
+  function persistWorkingSet() {
+    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(allChanges)); } catch (e) { /* ignore quota/privacy-mode errors */ }
+  }
+  function readPersistedWorkingSet() {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+  function clearPersistedWorkingSet() {
+    try { sessionStorage.removeItem(STORAGE_KEY); } catch (e) { /* ignore */ }
+  }
+
+  // Edit or remove on an EXISTING change can't reliably be undone in place —
+  // there's no generic way to reverse an arbitrary DOM mutation. Instead:
+  // persist the updated array, then reload onto a clean DOM and replay it.
+  function reloadAndReplay() {
+    persistWorkingSet();
+    window.location.reload();
+  }
+
+  function isDirty() {
+    return JSON.stringify(allChanges) !== savedSnapshot;
+  }
+
   // --- UI: a single floating root element, all children styled inline to stay
   // insulated from whatever CSS the host page already has. ---
-  let root, toolbar, statusEl, countEl, actionPopup, panelEl, highlightBox;
+  let root, toolbar, statusEl, countEl, actionPopup, panelEl, changesListEl;
 
   // Deliberately NOT `style.all = 'initial'` — that resets `display` to CSS's
   // initial value (inline), not a div's normal block default, which silently
@@ -125,8 +187,8 @@
     styleReset(toolbar);
     Object.assign(toolbar.style, {
       background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: '12px',
-      boxShadow: '0 8px 28px rgba(19,23,35,0.18)', padding: '14px', width: '280px',
-      fontSize: '13px', color: COLORS.ink,
+      boxShadow: '0 8px 28px rgba(19,23,35,0.18)', padding: '14px', width: '300px',
+      fontSize: '13px', color: COLORS.ink, maxHeight: '80vh', overflowY: 'auto',
     });
     root.appendChild(toolbar);
 
@@ -148,6 +210,19 @@
     pickBtn.style.width = '100%';
     pickBtn.id = 'pivit-pick-btn';
     toolbar.appendChild(pickBtn);
+
+    // --- Changes list (collapsible) ---
+    const listToggle = makeButton('Changes (0)', '#f0f0f7', toggleChangesList);
+    listToggle.style.width = '100%';
+    listToggle.style.color = COLORS.ink;
+    listToggle.id = 'pivit-changes-toggle';
+    toolbar.appendChild(listToggle);
+
+    changesListEl = document.createElement('div');
+    styleReset(changesListEl);
+    changesListEl.style.display = 'none';
+    changesListEl.style.marginTop = '6px';
+    toolbar.appendChild(changesListEl);
 
     countEl = document.createElement('div');
     styleReset(countEl);
@@ -185,7 +260,7 @@
     hint.textContent = 'Preview reflects the last save, not unsaved edits.';
     toolbar.appendChild(hint);
 
-    updateCount();
+    refreshToolbarState();
   }
 
   function makeButton(label, bg, onClick) {
@@ -200,8 +275,82 @@
     return btn;
   }
 
-  function updateCount() {
-    countEl.textContent = `${pendingChanges.length} unsaved change${pendingChanges.length === 1 ? '' : 's'}`;
+  function toggleChangesList() {
+    changesListOpen = !changesListOpen;
+    renderChangesList();
+  }
+
+  function renderChangesList() {
+    const toggleBtn = document.getElementById('pivit-changes-toggle');
+    if (toggleBtn) toggleBtn.textContent = `Changes (${allChanges.length}) ${changesListOpen ? '▲' : '▼'}`;
+    changesListEl.style.display = changesListOpen ? 'block' : 'none';
+    changesListEl.innerHTML = '';
+
+    if (allChanges.length === 0) {
+      const empty = document.createElement('div');
+      styleReset(empty);
+      empty.style.fontSize = '12px';
+      empty.style.color = '#6b6f83';
+      empty.style.padding = '6px 2px';
+      empty.textContent = 'No changes yet — select an element to start.';
+      changesListEl.appendChild(empty);
+      return;
+    }
+
+    allChanges.forEach((change, idx) => {
+      const row = document.createElement('div');
+      styleReset(row);
+      Object.assign(row.style, {
+        padding: '8px', marginTop: '6px', background: '#fafafe', border: `1px solid ${COLORS.border}`,
+        borderRadius: '8px', fontSize: '12px',
+      });
+
+      const desc = document.createElement('div');
+      styleReset(desc);
+      desc.style.marginBottom = '6px';
+      desc.style.color = COLORS.ink;
+      desc.style.wordBreak = 'break-word';
+      desc.textContent = describeChange(change);
+      row.appendChild(desc);
+
+      const btnRow = document.createElement('div');
+      styleReset(btnRow);
+      btnRow.style.display = 'flex';
+      btnRow.style.gap = '6px';
+
+      if (isEditable(change)) {
+        const editBtn = makeButton('Edit', '#f0f0f7', () => editChangeAtIndex(idx));
+        editBtn.style.color = COLORS.ink;
+        editBtn.style.fontSize = '11px';
+        editBtn.style.padding = '5px 10px';
+        btnRow.appendChild(editBtn);
+      }
+      const removeBtn = makeButton('Remove', '#fdeaea', () => removeChangeAtIndex(idx));
+      removeBtn.style.color = COLORS.danger;
+      removeBtn.style.fontSize = '11px';
+      removeBtn.style.padding = '5px 10px';
+      btnRow.appendChild(removeBtn);
+
+      row.appendChild(btnRow);
+      changesListEl.appendChild(row);
+    });
+  }
+
+  function removeChangeAtIndex(idx) {
+    const change = allChanges[idx];
+    if (!confirm(`Remove this change?\n\n${describeChange(change)}\n\nThe page will reload to show the result.`)) return;
+    allChanges.splice(idx, 1);
+    reloadAndReplay();
+  }
+
+  function editChangeAtIndex(idx) {
+    const change = allChanges[idx];
+    showContentPanel(change.selector, change.type, change.value, idx);
+  }
+
+  function refreshToolbarState() {
+    countEl.textContent = isDirty() ? '● Unsaved changes' : '✓ All changes saved';
+    renderChangesList();
   }
 
   function openPreview(width, height) {
@@ -280,8 +429,8 @@
     document.body.appendChild(actionPopup);
 
     const actions = [
-      ['✏ Add above', () => showContentPanel(el, selector, 'insert_before')],
-      ['✏ Add below', () => showContentPanel(el, selector, 'insert_after')],
+      ['✏ Add above', () => showContentPanel(selector, 'insert_before', '', null)],
+      ['✏ Add below', () => showContentPanel(selector, 'insert_after', '', null)],
       ['⧉ Duplicate', () => { recordAndApply({ selector, type: 'duplicate' }); closeActionPopup(); }],
       ['🗑 Remove', () => { recordAndApply({ selector, type: 'remove' }); closeActionPopup(); }],
     ];
@@ -304,16 +453,20 @@
     actionPopup.appendChild(cancel);
   }
 
+  // Records a NEW change (from a quick action, not from editing an existing
+  // list entry) — applies directly to the live DOM, no reload needed, since
+  // adding something new doesn't require reversing anything.
   function recordAndApply(change) {
     applyChange(change);
-    pendingChanges.push(change);
-    updateCount();
+    allChanges.push(change);
+    persistWorkingSet();
+    refreshToolbarState();
   }
 
-  // --- "Add above/below" content panel — a single HTML textarea for now;
-  // the full multi-field HTML/CSS/JS editor is the next stage, used for
-  // "Replace/change" once that's built. ---
-  function showContentPanel(el, selector, insertType) {
+  // --- Content panel: used both for new Add-above/below actions (editIndex
+  // is null) and for editing an existing insert_before/insert_after entry
+  // from the Changes list (editIndex is that entry's index). ---
+  function showContentPanel(selector, changeType, initialValue, editIndex) {
     closeActionPopup();
     panelEl = document.createElement('div');
     styleReset(panelEl);
@@ -329,7 +482,7 @@
     label.style.fontWeight = '700';
     label.style.marginBottom = '8px';
     label.style.color = COLORS.ink;
-    label.textContent = insertType === 'insert_before' ? 'HTML to add above this element' : 'HTML to add below this element';
+    label.textContent = changeType === 'insert_before' ? 'HTML to add above this element' : 'HTML to add below this element';
     panelEl.appendChild(label);
 
     const textarea = document.createElement('textarea');
@@ -339,6 +492,7 @@
       fontFamily: 'Menlo, monospace', fontSize: '12px', color: COLORS.ink,
     });
     textarea.placeholder = '<div>New content…</div>';
+    textarea.value = initialValue || '';
     panelEl.appendChild(textarea);
 
     const row = document.createElement('div');
@@ -346,11 +500,16 @@
     row.style.display = 'flex';
     row.style.gap = '8px';
     row.style.marginTop = '12px';
-    const applyBtn = makeButton('Apply', COLORS.indigo, () => {
+    const applyBtn = makeButton(editIndex === null ? 'Apply' : 'Save change', COLORS.indigo, () => {
       const value = textarea.value.trim();
       if (!value) { textarea.style.border = `1px solid ${COLORS.danger}`; return; }
-      recordAndApply({ selector, type: insertType, value });
       panelEl.remove();
+      if (editIndex === null) {
+        recordAndApply({ selector, type: changeType, value });
+      } else {
+        allChanges[editIndex] = { ...allChanges[editIndex], value };
+        reloadAndReplay();
+      }
     });
     applyBtn.style.flex = '1';
     const cancelBtn = makeButton('Cancel', '#f0f0f7', () => panelEl.remove());
@@ -363,13 +522,12 @@
 
   // --- Save ---
   async function onSave() {
-    const merged = existingChanges.concat(pendingChanges);
     statusEl.textContent = 'Saving…';
     try {
-      await saveChanges(merged);
-      existingChanges = merged;
-      pendingChanges = [];
-      updateCount();
+      await saveChanges(allChanges);
+      savedSnapshot = JSON.stringify(allChanges);
+      clearPersistedWorkingSet();
+      refreshToolbarState();
       statusEl.textContent = 'Saved ✓';
       setTimeout(() => { statusEl.textContent = `${experimentName} — ${variantName}`; }, 2000);
     } catch (err) {
@@ -387,11 +545,19 @@
       const variant = await fetchVariant();
       experimentName = variant.experiment_name || '';
       variantName = variant.name || '';
-      existingChanges = Array.isArray(variant.changes) ? variant.changes : [];
-      existingChanges.forEach(applyChange);
+      const serverChanges = Array.isArray(variant.changes) ? variant.changes : [];
+      savedSnapshot = JSON.stringify(serverChanges);
+
+      // A working set left over from a reload-and-replay (an in-progress,
+      // not-yet-saved edit) takes precedence over what's on the server.
+      const persisted = readPersistedWorkingSet();
+      allChanges = persisted !== null ? persisted : serverChanges;
+
+      allChanges.forEach(applyChange);
 
       buildToolbar();
       statusEl.textContent = `${experimentName} — ${variantName}`;
+      refreshToolbarState();
     } catch (err) {
       const banner = document.createElement('div');
       styleReset(banner);
