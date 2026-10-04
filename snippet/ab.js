@@ -134,6 +134,18 @@
   }
 
   function applyChange(change) {
+    // Raw CSS isn't tied to a matched element — it's injected as its own <style>
+    // tag (one per change, so a typo in one block can't break the others) and
+    // handled before any selector lookup. Supports everything a stylesheet does
+    // that inline styles can't: !important, :hover, media queries, etc.
+    if (change.type === 'stylesheet') {
+      const styleEl = document.createElement('style');
+      styleEl.setAttribute('data-pivit-css', '');
+      styleEl.textContent = change.value || '';
+      document.head.appendChild(styleEl);
+      return;
+    }
+
     const els = document.querySelectorAll(change.selector);
     els.forEach((el) => {
       switch (change.type) {
@@ -182,6 +194,11 @@
           break;
         case 'insert_after':
           el.insertAdjacentHTML('afterend', change.value);
+          break;
+        case 'replace':
+          // Swap the whole element (not just its contents, which is what 'html' does).
+          el.insertAdjacentHTML('afterend', change.value);
+          el.remove();
           break;
         default:
           console.warn('[ab] unknown change type:', change.type);

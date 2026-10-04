@@ -41,7 +41,7 @@ The dashboard's **"Your Experiments"** section (right at the top, under the API 
 
 ## Change format (`changes` field on a variant)
 
-The dashboard's "Add Variant" section now builds this for you via a form (selector + dropdown + value) — you shouldn't need to hand-write this JSON anymore. Documented here for reference / if you ever call the API directly:
+Changes are authored in the visual editor (Preview & manage → 🎯 Make Edits) — you shouldn't need to hand-write this JSON. Documented here for reference / if you ever call the API directly:
 
 ```json
 [
@@ -49,22 +49,29 @@ The dashboard's "Add Variant" section now builds this for you via a form (select
   { "selector": ".old-banner", "type": "hide" },
   { "selector": ".cta", "type": "style", "value": { "backgroundColor": "#1AB7C8" } },
   { "selector": "a.buy", "type": "attr", "attr": "href", "value": "/checkout-v2" },
-  { "selector": "#signup-form", "type": "js", "value": "el.addEventListener('submit', () => console.log('tracked'));" }
+  { "selector": "#signup-form", "type": "js", "value": "el.addEventListener('submit', () => console.log('tracked'));" },
+  { "selector": "#hero", "type": "stylesheet", "value": "#hero { z-index: 999 !important; } #hero:hover { opacity: .8 !important; }" },
+  { "selector": "#cta", "type": "replace", "value": "<a id=\"cta\" href=\"/buy\">Buy now</a>" },
+  { "selector": "#price", "type": "insert_after", "value": "<p>Free shipping</p>" }
 ]
 ```
 
-Supported `type` values: `text`, `html`, `hide`, `show`, `style`, `attr`, `js`.
+Supported `type` values: `text`, `html`, `hide`, `show`, `style`, `attr`, `js`, `remove`, `duplicate`, `insert_before`, `insert_after`, `replace`, `stylesheet`.
 
-**On `js`**: this runs exactly what you type, against the matched element, on the client's live page. There's no sandboxing — treat it like writing to the client's site directly, because that's what it is. Since only you (holder of `ADMIN_API_KEY`) can create variants, the risk is the same as any other code you'd deploy to that site; there's no path for a client's visitors to inject their own JS through this. Use it for genuinely custom behaviour the other types can't cover — most banner/button tests won't need it.
+- `html` replaces what's *inside* the element; `replace` swaps the *whole* element.
+- `style` sets inline styles from an object. `stylesheet` is raw CSS text injected as its own `<style>` tag — it isn't tied to the matched element (the `selector` is kept for the Changes list's description), so it supports `!important`, `:hover`, media queries, and anything else a stylesheet does. Each `stylesheet` change gets its own tag, so a typo in one block can't break the others. (Named `stylesheet`, not `css`, deliberately: the old form used "css" as a UI label for inline styles.)
+- `remove` deletes the element from the DOM (unlike `hide`, which only sets `display:none`).
 
-## Finding a selector on the client's page
+**On `js`** (and `html`, `replace`, `insert_*`, which can carry inline handlers): this runs exactly what you type, against the matched element, on the client's live page. There's no sandboxing — treat it like writing to the client's site directly, because that's what it is. Since only you (holder of `ADMIN_API_KEY`) can create variants, the risk is the same as any other code you'd deploy to that site; there's no path for a client's visitors to inject their own JS through this. Use it for genuinely custom behaviour the other types can't cover — most banner/button tests won't need it.
 
-Hand-picking CSS selectors via devtools is tedious, especially on sites with auto-generated IDs (Wix, Squarespace, etc. often produce these). The dashboard has an **"AB Selector Picker"** link — drag it to your bookmarks bar once. Then, on the actual client page:
+## Finding a selector for a click goal
+
+The visual editor picks elements for you, so changes never need a typed selector. **Click goals** still do — Add Goals has a **"Selector Picker"** link: drag it to your bookmarks bar once. Then, on the actual client page:
 
 1. Click the bookmark
 2. Click the element you want to target
 3. Its selector is copied to your clipboard (and shown in a prompt as a fallback if clipboard access is blocked)
-4. Paste it into the Selector field on the dashboard
+4. Paste it into the goal's Selector field on the dashboard
 
 This is a standalone tool (`snippet/picker-bookmarklet.js`) — it's not part of the tracking snippet and doesn't get deployed to client sites.
 
@@ -104,13 +111,14 @@ If **none** of the above are present at all, the snippet runs as it always has (
 
 One deployment of this app can run experiments on as many different domains as you like at once. `url_match` is just a substring check against whatever page the snippet loads on — it has nothing to do with which site it's running on. Install the same snippet tag (see "Your Snippet" at the top of the dashboard) once per site, and the server figures out which experiments apply based on the current page's URL every time it loads. No per-site configuration needed beyond pasting the tag in.
 
-## Visual editor (Remove, Duplicate, Add above/below, plus a Changes list)
+## Visual editor
 
 "Preview & Manage Variants" has a **🎯 Make Edits** button per variant (needs the page URL filled in, same as Preview). Clicking it opens the real live page in a new tab with an in-page editing overlay active:
 
 - Click **🎯 Select element**, then click anything on the page to select it
-- A quick-actions menu appears: **Duplicate**, **Add above**, **Add below**, **Remove**
-- Add above/below opens a small HTML input — whatever you enter gets inserted immediately so you see the result live
+- A quick-actions menu appears: **Edit element**, **Add above**, **Add below**, **Duplicate**, **Remove**
+- **Edit element** opens a panel with **HTML / CSS / JS** tabs. HTML is pre-filled with the element's current markup (edit it, or paste new markup to replace it); CSS is pre-filled with a ready-made rule for the element; JS runs once with `el` set to the element. Only the parts you actually change are saved, each as its own entry (`replace`, `stylesheet`, `js`), applied in that order so your CSS and JS see the new markup. The CSS is plain page-wide CSS — add `!important` to override the site's own styles (this is the fix for "my inserted element is hidden behind something": set a `z-index`).
+- **Add above / Add below** open a small HTML input — whatever you enter is inserted immediately so you see the result live
 - **💾 Save** persists everything to that variant's `changes`, same data model the dashboard's own "Make Changes" step produces — this is a different way to author the same thing, not a separate system
 - **Changes (N)** expands a list of every change on the variant, saved earlier or made this session, each described in plain English ("Duplicate #cta-button", "Insert HTML below #headline"). **Remove** is on every entry; **Edit** appears on the insert-HTML entries (the only type with a simple editable value so far) and reopens the HTML panel pre-filled
 - The toolbar shows **● Unsaved changes** or **✓ All changes saved**, based on a comparison with what's actually on the server
@@ -122,7 +130,11 @@ One deployment of this app can run experiments on as many different domains as y
 
 **Authentication**: the new tab lives on the client's own domain, not `pivit.click`, so your normal login session (deliberately never sent cross-site) can't travel with it. Clicking "Make Edits" instead mints a signed, time-limited token scoped to that one variant (`src/edit-token.js`) — good for about an hour, useless for anything except saving changes to that specific variant. This is also what makes a future restricted client-side version of this feature straightforward: same mechanism, issued to a client instead of the owner.
 
-**What's not here yet**: "Replace/change element" (the fuller HTML/CSS/JS editing panel, pre-filled with the element's current markup) is next. It slots into the Changes list above: once it exists, Edit will work on those entries too. Owner-only for now; client-side rollout comes later, reusing the same token mechanism.
+**Edit on the Changes list** works for `text`, `html`, `replace`, `insert_before`, `insert_after`, `stylesheet` and `js` entries (a single-field panel pre-filled with the stored value). `remove`, `duplicate`, `hide`, `show` have no content to edit, and the older `style` / `attr` types don't fit a single text box — those are Remove-only (remove, then re-add the effect with CSS or JS).
+
+**Things to know about the JS box**: it runs once per element matching the selector, with no sandboxing, on the real site — the same trust level as any code you'd deploy there. If you change an element's HTML so its id/classes no longer match the selector, the CSS and JS that target that selector won't find it; update the selector in the CSS, or keep the id.
+
+**Owner-only for now**; client-side rollout comes later, reusing the same token mechanism. One thing to settle before that: an edit link can save CSS/JS/HTML that runs for every real visitor of the site, so a client-facing token should probably be restricted to a safer subset (e.g. text and CSS only) rather than carry the full power the owner's does.
 
 ## The automatic Control variant
 
@@ -142,7 +154,7 @@ Same section as above:
 
 ## Editing a variant
 
-Same section: **Edit** loads that variant's name, traffic split, changes, and goals back into the "Add Variant" form above and switches it into edit mode (a red banner confirms this). Saving updates the existing variant instead of creating a new one — including for a variant that's currently live, so changes take effect for visitors immediately. There's no staged/draft version; if you want to test a change safely first, use Preview before saving, or pause the variant while you edit it. "Cancel edit" resets the form back to create-new mode.
+In Preview & manage, **Edit** takes you to the Create experiment page with that variant's name, traffic split and goals loaded into the "Add Variant" form, in edit mode (a red banner confirms this). It deliberately does **not** load or touch the variant's changes — those belong to the visual editor (🎯 Make Edits), and the server leaves a variant's changes alone when a save from this form omits them. (Earlier versions let this form edit changes too; it couldn't represent the visual editor's newer change types, so saving from it could silently corrupt or drop them.) Saving updates the existing variant instead of creating a new one — including for a variant that's currently live, so it takes effect for visitors immediately. There's no staged/draft version; if you want to test a change safely first, use Preview before saving, or pause the variant while you edit it. "Cancel edit" resets the form back to create-new mode.
 
 ## Reusing goals
 
@@ -244,7 +256,8 @@ The public snippet endpoints (`GET /api/experiments`, `POST /api/event`, `GET /a
 
 - Support for multiple goals per variant with individual conversion rates
 - Per-teammate owner logins if you ever bring someone else onto the admin side
-- "Replace/change element" in the visual editor — the fuller HTML/CSS/JS panel, pre-filled with the selected element's current markup
-- A real code editor (e.g. CodeMirror) in place of the plain textarea used for the visual editor's HTML input
+- Picking click-goal elements inside the visual editor (a "set as goal" action), which would retire the selector-picker bookmarklet entirely
+- A real code editor (e.g. CodeMirror) in place of the plain textareas in the visual editor's panel
+- Edit support in the Changes list for the older `style` / `attr` types (Remove-only today)
 - A restricted, client-facing version of the visual editor, using the same scoped edit-token mechanism
 - Synthetic demo data for show-and-tell purposes on low-traffic sites — scoped out for now to keep things simpler, worth revisiting later

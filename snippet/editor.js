@@ -1,6 +1,6 @@
 /**
- * Pivit visual editor — v0.2 (stage 1: Remove, Duplicate, Add above/below,
- * plus a Changes list with Edit/Remove on each entry)
+ * Pivit visual editor — v0.3 (Edit element with HTML/CSS/JS, Remove, Duplicate,
+ * Add above/below, plus a Changes list with Edit/Remove on each entry)
  *
  * Loaded by ab.js only when it sees ?ab_edit=<variant_id>&token=<token> in the
  * URL — never downloaded by a real visitor. Runs entirely on the client's own
@@ -8,9 +8,9 @@
  * scoped, short-lived token instead of a session cookie (see src/edit-token.js
  * for why: normal session cookies are deliberately never sent cross-site).
  *
- * "Replace/change element" (full HTML/CSS/JS editing) is deliberately not in
- * this version — it needs a richer panel pre-filled with the element's current
- * markup, coming next, built on top of the Changes list added here.
+ * "Edit element" opens a panel with HTML / CSS / JS tabs. Each part becomes its
+ * own entry in the Changes list ('replace', 'stylesheet', 'js'), so it can be
+ * edited or removed independently later.
  *
  * Editing or removing an EXISTING change reloads the page and replays the
  * updated change list from a clean DOM, rather than trying to reverse an
@@ -40,6 +40,15 @@
   // --- DOM mutation primitives (same semantics as snippet/ab.js's applyChange,
   // kept as its own copy so this file has no runtime dependency on ab.js). ---
   function applyChange(change) {
+    // Raw CSS isn't tied to a matched element — own <style> tag per change, so a
+    // typo in one block can't break the others (mirrors snippet/ab.js).
+    if (change.type === 'stylesheet') {
+      const styleEl = document.createElement('style');
+      styleEl.setAttribute('data-pivit-css', '');
+      styleEl.textContent = change.value || '';
+      document.head.appendChild(styleEl);
+      return;
+    }
     const els = document.querySelectorAll(change.selector);
     els.forEach((el) => {
       switch (change.type) {
@@ -59,6 +68,7 @@
         }
         case 'insert_before': el.insertAdjacentHTML('beforebegin', change.value); break;
         case 'insert_after': el.insertAdjacentHTML('afterend', change.value); break;
+        case 'replace': el.insertAdjacentHTML('afterend', change.value); el.remove(); break;
       }
     });
   }
@@ -71,7 +81,9 @@
       case 'html': return `Replace HTML on ${sel}`;
       case 'hide': return `Hide ${sel}`;
       case 'show': return `Show ${sel}`;
-      case 'style': return `Custom CSS on ${sel}`;
+      case 'style': return `Inline styles on ${sel}`;
+      case 'stylesheet': return sel ? `Add CSS rules (for ${sel})` : 'Add CSS rules';
+      case 'replace': return `Replace element ${sel}`;
       case 'attr': return `Set ${change.attr || 'attribute'} on ${sel}`;
       case 'js': return `Custom JS on ${sel}`;
       case 'remove': return `Remove ${sel}`;
@@ -82,11 +94,21 @@
     }
   }
 
-  // Only insert_before/insert_after have a simple single-value editor right
-  // now — html/style/js get real "Edit" support once the full Replace/Change
-  // panel exists. duplicate/remove/hide/show have no content to edit at all.
+  // What each editable change type's value is, for the single-field edit panel.
+  // Not listed (so Remove-only): duplicate/remove/hide/show have no content to
+  // edit, and 'style' (inline-style object) / 'attr' (attr + value) predate the
+  // visual editor and don't fit one text box — remove and re-add via CSS/JS.
+  const EDIT_META = {
+    text: { label: 'Text', hint: "Plain text — replaces the element's text content." },
+    html: { label: 'HTML', hint: 'Replaces everything inside the element.' },
+    replace: { label: 'HTML', hint: 'Replaces the whole element.' },
+    insert_before: { label: 'HTML', hint: 'Inserted directly above the element.' },
+    insert_after: { label: 'HTML', hint: 'Inserted directly below the element.' },
+    stylesheet: { label: 'CSS', hint: 'Plain CSS, applied to the whole page. Use !important to override the site.' },
+    js: { label: 'JavaScript', hint: '"el" is the selected element.' },
+  };
   function isEditable(change) {
-    return change.type === 'insert_before' || change.type === 'insert_after';
+    return !!EDIT_META[change.type];
   }
 
   // --- Selector computation (same approach as snippet/picker-bookmarklet.js) ---
@@ -345,7 +367,18 @@
 
   function editChangeAtIndex(idx) {
     const change = allChanges[idx];
-    showContentPanel(change.selector, change.type, change.value, idx);
+    const meta = EDIT_META[change.type];
+    showEditorPanel({
+      title: describeChange(change),
+      fields: [{ key: 'v', label: meta.label, value: typeof change.value === 'string' ? change.value : '', hint: meta.hint }],
+      applyLabel: 'Save change',
+      onApply: (v) => {
+        const value = v.v.trim();
+        if (!value) return { error: "This can't be empty — use Remove on the list entry to delete the change." };
+        allChanges[idx] = { ...allChanges[idx], value };
+        reloadAndReplay(); // see reloadAndReplay(): edits to an existing change replay on a clean page
+      },
+    });
   }
 
   function refreshToolbarState() {
@@ -422,15 +455,16 @@
     actionPopup = document.createElement('div');
     styleReset(actionPopup);
     Object.assign(actionPopup.style, {
-      position: 'fixed', left: Math.min(x, window.innerWidth - 200) + 'px', top: Math.min(y, window.innerHeight - 220) + 'px',
+      position: 'fixed', left: Math.min(x, window.innerWidth - 200) + 'px', top: Math.min(y, window.innerHeight - 270) + 'px',
       zIndex: String(Z), background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: '10px',
       boxShadow: '0 8px 28px rgba(19,23,35,0.2)', padding: '8px', width: '190px', fontSize: '13px',
     });
     document.body.appendChild(actionPopup);
 
     const actions = [
-      ['✏ Add above', () => showContentPanel(selector, 'insert_before', '', null)],
-      ['✏ Add below', () => showContentPanel(selector, 'insert_after', '', null)],
+      ['✎ Edit element', () => openEditElementPanel(el, selector)],
+      ['⬆ Add above', () => openInsertPanel(selector, 'insert_before')],
+      ['⬇ Add below', () => openInsertPanel(selector, 'insert_after')],
       ['⧉ Duplicate', () => { recordAndApply({ selector, type: 'duplicate' }); closeActionPopup(); }],
       ['🗑 Remove', () => { recordAndApply({ selector, type: 'remove' }); closeActionPopup(); }],
     ];
@@ -463,61 +497,181 @@
     refreshToolbarState();
   }
 
-  // --- Content panel: used both for new Add-above/below actions (editIndex
-  // is null) and for editing an existing insert_before/insert_after entry
-  // from the Changes list (editIndex is that entry's index). ---
-  function showContentPanel(selector, changeType, initialValue, editIndex) {
+  // --- Editor panel: one generic panel used everywhere. With several fields it
+  // shows tabs (Edit element: HTML / CSS / JS); with one it's a plain textarea
+  // (Add above/below, and Edit on a Changes-list entry). onApply(values) may
+  // return { error } to keep the panel open with a message. ---
+  function showEditorPanel(opts) {
     closeActionPopup();
+    if (panelEl) panelEl.remove();
+    const fields = opts.fields;
+
     panelEl = document.createElement('div');
     styleReset(panelEl);
     Object.assign(panelEl.style, {
       position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
       zIndex: String(Z), background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: '12px',
-      boxShadow: '0 12px 40px rgba(19,23,35,0.25)', padding: '20px', width: '480px', maxWidth: '90vw',
+      boxShadow: '0 12px 40px rgba(19,23,35,0.25)', padding: '20px', width: '560px', maxWidth: '92vw',
+      maxHeight: '90vh', overflowY: 'auto', color: COLORS.ink, fontSize: '13px',
     });
+    // Keep keystrokes typed into our panel away from the host page's own
+    // keyboard shortcuts (many sites bind single keys like "/" or "s").
+    ['keydown', 'keyup', 'keypress'].forEach((evt) => panelEl.addEventListener(evt, (e) => e.stopPropagation()));
     document.body.appendChild(panelEl);
 
-    const label = document.createElement('div');
-    styleReset(label);
-    label.style.fontWeight = '700';
-    label.style.marginBottom = '8px';
-    label.style.color = COLORS.ink;
-    label.textContent = changeType === 'insert_before' ? 'HTML to add above this element' : 'HTML to add below this element';
-    panelEl.appendChild(label);
+    const title = document.createElement('div');
+    styleReset(title);
+    title.style.fontWeight = '700';
+    title.style.fontSize = '14px';
+    title.style.wordBreak = 'break-word';
+    title.textContent = opts.title;
+    panelEl.appendChild(title);
 
-    const textarea = document.createElement('textarea');
-    styleReset(textarea);
-    Object.assign(textarea.style, {
-      width: '100%', height: '140px', padding: '10px', border: `1px solid ${COLORS.border}`, borderRadius: '8px',
-      fontFamily: 'Menlo, monospace', fontSize: '12px', color: COLORS.ink,
+    if (opts.subtitle) {
+      const sub = document.createElement('div');
+      styleReset(sub);
+      Object.assign(sub.style, { fontSize: '11px', color: '#6b6f83', marginTop: '2px', wordBreak: 'break-all', fontFamily: 'Menlo, monospace' });
+      sub.textContent = opts.subtitle;
+      panelEl.appendChild(sub);
+    }
+
+    const areas = {}, hints = {}, tabBtns = {};
+    const multi = fields.length > 1;
+
+    if (multi) {
+      const tabRow = document.createElement('div');
+      styleReset(tabRow);
+      Object.assign(tabRow.style, { display: 'flex', gap: '6px', margin: '12px 0 8px' });
+      fields.forEach((f) => {
+        const t = makeButton(f.label, '#f0f0f7', () => selectTab(f.key));
+        t.style.padding = '6px 16px';
+        t.style.fontSize = '12px';
+        tabBtns[f.key] = t;
+        tabRow.appendChild(t);
+      });
+      panelEl.appendChild(tabRow);
+    } else {
+      const spacer = document.createElement('div');
+      styleReset(spacer);
+      spacer.style.height = '10px';
+      panelEl.appendChild(spacer);
+    }
+
+    fields.forEach((f) => {
+      const ta = document.createElement('textarea');
+      styleReset(ta);
+      Object.assign(ta.style, {
+        display: 'block', width: '100%', height: multi ? '240px' : '170px', padding: '10px',
+        border: `1px solid ${COLORS.border}`, borderRadius: '8px', fontFamily: 'Menlo, Consolas, monospace',
+        fontSize: '12px', color: COLORS.ink, background: '#fff', resize: 'vertical',
+      });
+      ta.setAttribute('spellcheck', 'false');
+      ta.placeholder = f.placeholder || '';
+      ta.value = f.value || '';
+      areas[f.key] = ta;
+      panelEl.appendChild(ta);
+
+      const hint = document.createElement('div');
+      styleReset(hint);
+      Object.assign(hint.style, { fontSize: '11px', color: '#6b6f83', marginTop: '6px', lineHeight: '1.4' });
+      hint.textContent = f.hint || '';
+      hints[f.key] = hint;
+      panelEl.appendChild(hint);
     });
-    textarea.placeholder = '<div>New content…</div>';
-    textarea.value = initialValue || '';
-    panelEl.appendChild(textarea);
+
+    function selectTab(key) {
+      fields.forEach((f) => {
+        const on = f.key === key;
+        areas[f.key].style.display = on ? 'block' : 'none';
+        hints[f.key].style.display = on ? 'block' : 'none';
+        if (multi) {
+          tabBtns[f.key].style.background = on ? COLORS.indigo : '#f0f0f7';
+          tabBtns[f.key].style.color = on ? '#fff' : COLORS.ink;
+        }
+      });
+      areas[key].focus();
+    }
+
+    const errEl = document.createElement('div');
+    styleReset(errEl);
+    Object.assign(errEl.style, { color: COLORS.danger, fontSize: '12px', marginTop: '8px', minHeight: '0' });
+    panelEl.appendChild(errEl);
 
     const row = document.createElement('div');
     styleReset(row);
-    row.style.display = 'flex';
-    row.style.gap = '8px';
-    row.style.marginTop = '12px';
-    const applyBtn = makeButton(editIndex === null ? 'Apply' : 'Save change', COLORS.indigo, () => {
-      const value = textarea.value.trim();
-      if (!value) { textarea.style.border = `1px solid ${COLORS.danger}`; return; }
-      panelEl.remove();
-      if (editIndex === null) {
-        recordAndApply({ selector, type: changeType, value });
-      } else {
-        allChanges[editIndex] = { ...allChanges[editIndex], value };
-        reloadAndReplay();
-      }
+    Object.assign(row.style, { display: 'flex', gap: '8px', marginTop: '12px' });
+    const applyBtn = makeButton(opts.applyLabel || 'Apply', COLORS.indigo, () => {
+      const values = {};
+      fields.forEach((f) => { values[f.key] = areas[f.key].value; });
+      const result = opts.onApply(values);
+      if (result && result.error) { errEl.textContent = result.error; return; }
+      if (panelEl) { panelEl.remove(); panelEl = null; }
     });
     applyBtn.style.flex = '1';
-    const cancelBtn = makeButton('Cancel', '#f0f0f7', () => panelEl.remove());
+    const cancelBtn = makeButton('Cancel', '#f0f0f7', () => { panelEl.remove(); panelEl = null; });
     cancelBtn.style.flex = '1';
     cancelBtn.style.color = COLORS.ink;
     row.appendChild(applyBtn);
     row.appendChild(cancelBtn);
     panelEl.appendChild(row);
+
+    selectTab(fields[0].key);
+  }
+
+  // The element's current markup, minus the empty style="" attributes our own
+  // hover highlight leaves behind on elements the pointer passed over.
+  function cleanOuterHTML(el) {
+    const clone = el.cloneNode(true);
+    [clone].concat(Array.from(clone.querySelectorAll('[style]'))).forEach((n) => {
+      if (n.getAttribute('style') === '') n.removeAttribute('style');
+    });
+    return clone.outerHTML;
+  }
+
+  const collapse = (str) => str.replace(/\s+/g, ' ').trim();
+
+  // "Edit element": HTML / CSS / JS in one panel. Each part that has actually
+  // been changed becomes its own entry — 'replace', 'stylesheet', 'js' — applied
+  // in that order, so the CSS and JS see the new markup.
+  function openEditElementPanel(el, selector) {
+    const originalHtml = cleanOuterHTML(el);
+    const cssSkeleton = `${selector} {\n  \n}`;
+    showEditorPanel({
+      title: 'Edit element',
+      subtitle: selector,
+      fields: [
+        { key: 'html', label: 'HTML', value: originalHtml,
+          hint: "The element's current markup. Edit it, or paste new HTML to replace it. Leave it unchanged to keep the element as it is." },
+        { key: 'css', label: 'CSS', value: cssSkeleton,
+          hint: "Plain CSS applied to the whole page, pre-filled with a rule for this element. Add !important to beat the site's own styles — z-index, colours, :hover and media queries all work. If you change the element's id or classes above, update the selector here too." },
+        { key: 'js', label: 'JS', value: '', placeholder: "el.addEventListener('click', () => console.log('clicked'));",
+          hint: 'Runs once for the selected element — "el" is that element. Applied after the HTML and CSS above.' },
+      ],
+      applyLabel: 'Apply',
+      onApply: (v) => {
+        const out = [];
+        const html = v.html.trim();
+        if (html && collapse(html) !== collapse(originalHtml)) out.push({ selector, type: 'replace', value: html });
+        if (v.css.trim() && collapse(v.css) !== collapse(cssSkeleton)) out.push({ selector, type: 'stylesheet', value: v.css.trim() });
+        if (v.js.trim()) out.push({ selector, type: 'js', value: v.js.trim() });
+        if (!out.length) return { error: 'Nothing to apply yet — change the HTML, add some CSS, or add some JS.' };
+        out.forEach(recordAndApply);
+      },
+    });
+  }
+
+  function openInsertPanel(selector, insertType) {
+    showEditorPanel({
+      title: insertType === 'insert_before' ? 'Add HTML above this element' : 'Add HTML below this element',
+      subtitle: selector,
+      fields: [{ key: 'html', label: 'HTML', value: '', placeholder: '<div>New content…</div>' }],
+      applyLabel: 'Apply',
+      onApply: (v) => {
+        const value = v.html.trim();
+        if (!value) return { error: 'Enter some HTML to insert.' };
+        recordAndApply({ selector, type: insertType, value });
+      },
+    });
   }
 
   // --- Save ---

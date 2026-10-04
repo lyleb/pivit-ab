@@ -212,10 +212,16 @@ router.patch('/:id/variants/:variantId', async (req, res) => {
     const { name, traffic_split, changes, goals } = req.body;
     if (!name) return res.status(400).json({ error: 'name is required' });
 
+    // `changes` is only written when the request actually includes it. The
+    // dashboard form edits name/split/goals only — what a variant *does* is
+    // authored in the visual editor — so a save from the form must leave the
+    // variant's changes untouched rather than resetting them to [].
+    const changesParam = changes === undefined ? null : JSON.stringify(Array.isArray(changes) ? changes : []);
+
     const { rows } = await db.query(
-      `UPDATE variants SET name = $1, traffic_split = $2, changes = $3, goals = $4
+      `UPDATE variants SET name = $1, traffic_split = $2, changes = COALESCE($3::jsonb, changes), goals = $4
        WHERE id = $5 AND experiment_id = $6 RETURNING *`,
-      [name, traffic_split ?? 50, JSON.stringify(changes ?? []), JSON.stringify(goals ?? []), variantId, id]
+      [name, traffic_split ?? 50, changesParam, JSON.stringify(goals ?? []), variantId, id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id on that experiment' });
     await recordGoalUsage(goals);

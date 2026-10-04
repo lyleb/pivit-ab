@@ -259,7 +259,7 @@
         <details>
           <summary>2. Add Variant</summary>
           <div class="accordion-body">
-            <p id="edit-banner" class="hint" style="display:none; color:#c0392b;">Editing an existing variant — changes take effect immediately for live traffic. <button type="button" class="secondary" onclick="cancelEditVariant()" style="margin:0 0 0 8px;">Cancel edit</button></p>
+            <p id="edit-banner" class="hint" style="display:none; color:#c0392b;">Editing an existing variant's name, traffic split and goals — takes effect immediately for live traffic. To change what it does on the page, use 🎯 Make Edits. <button type="button" class="secondary" onclick="cancelEditVariant()" style="margin:0 0 0 8px;">Cancel edit</button></p>
             <label>Experiment</label>
             <select id="var-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
             <label>Variant Name</label>
@@ -270,17 +270,9 @@
         </details>
 
         <details>
-          <summary>3. Make Changes</summary>
+          <summary>3. Add Goals <span class="hint">(optional)</span></summary>
           <div class="accordion-body">
-            <p class="hint" style="margin-top:0;">Need a selector? <a class="picker-link" id="picker-bookmarklet" href="#" style="padding:4px 10px; font-size:0.85em; margin-left:4px;">🎯 Selector Picker</a> — drag to your bookmarks bar once, then click it on the live page and click any element to copy its selector.</p>
-            <div id="changes-list"></div>
-            <button type="button" class="secondary" onclick="addChangeRow()">+ Add another change</button>
-          </div>
-        </details>
-
-        <details>
-          <summary>4. Add Goals <span class="hint">(optional)</span></summary>
-          <div class="accordion-body">
+            <p class="hint" style="margin-top:0;">Need a selector for a click goal? <a class="picker-link" id="picker-bookmarklet" href="#" style="padding:4px 10px; font-size:0.85em; margin-left:4px;">🎯 Selector Picker</a> — drag to your bookmarks bar once, then click it on the live page and click any element to copy its selector.</p>
             <div id="popular-goals"></div>
             <div id="goals-list"></div>
             <button type="button" class="secondary" onclick="addGoalRow()">+ Add another goal</button>
@@ -688,7 +680,9 @@ function useExperiment(id, urlMatch) {
     document.getElementById(fieldId).value = id;
   });
   if (/^https?:\/\//.test(urlMatch)) document.getElementById('manage-page-url').value = urlMatch;
-  document.getElementById('manage-exp-id').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // The experiment dropdowns are shared across pages, so selecting it above applies everywhere;
+  // jump to Preview & manage, since that's where "use this experiment" usually leads next.
+  showPage('page-preview');
 }
 
 // Refresh the list (and dropdowns, and popular goals) — called once the owner
@@ -787,78 +781,9 @@ async function createExperiment() {
   }
 }
 
-// --- Change / Goal row builder (replaces hand-written JSON) ---
-
-const CHANGE_TYPES = {
-  text:  { label: 'Change text',        valueLabel: 'New text',              placeholder: 'Get Started Free', multiline: false },
-  html:  { label: 'Replace HTML',       valueLabel: 'New HTML',              placeholder: '<strong>New content</strong>', multiline: true },
-  hide:  { label: 'Hide element',       valueLabel: null },
-  show:  { label: 'Show element',       valueLabel: null },
-  css:   { label: 'Custom CSS',         valueLabel: 'CSS declarations',      placeholder: 'background: #1AB7C8; padding: 12px; border-radius: 6px;', multiline: true },
-  attr:  { label: 'Change attribute',   valueLabel: 'attr=value (e.g. href=/checkout-v2)', placeholder: 'href=/checkout-v2', multiline: false },
-  js:    { label: 'Custom JS (advanced)', valueLabel: 'JS to run — "el" is the matched element', placeholder: 'el.addEventListener("click", () => console.log("clicked"));', multiline: true },
-};
-
-function addChangeRow(prefill) {
-  const list = document.getElementById('changes-list');
-  const row = document.createElement('div');
-  row.className = 'change-row';
-  const typeOptions = Object.entries(CHANGE_TYPES).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('');
-  row.innerHTML = `
-    <div>
-      <label>Selector</label>
-      <input class="c-selector" placeholder="#cta-button">
-      <label>Change type</label>
-      <select class="c-type">${typeOptions}</select>
-    </div>
-    <div class="c-value-wrap">
-      <label class="c-value-label">Value</label>
-      <input class="c-value">
-    </div>
-    <div class="full-width" style="text-align:right;">
-      <button type="button" class="remove-row" onclick="this.closest('.change-row').remove()">✕ remove</button>
-    </div>
-  `;
-  list.appendChild(row);
-
-  const selectEl = row.querySelector('.c-type');
-  const valueWrap = row.querySelector('.c-value-wrap');
-  function renderValueField() {
-    const cfg = CHANGE_TYPES[selectEl.value];
-    if (!cfg.valueLabel) { valueWrap.style.display = 'none'; return; }
-    valueWrap.style.display = '';
-    const tag = cfg.multiline ? 'textarea' : 'input';
-    valueWrap.innerHTML = `<label class="c-value-label">${cfg.valueLabel}</label><${tag} class="c-value" placeholder="${cfg.placeholder || ''}"></${tag}>`;
-  }
-  selectEl.addEventListener('change', renderValueField);
-
-  if (prefill) {
-    row.querySelector('.c-selector').value = prefill.selector || '';
-    let uiType = prefill.type || 'text';
-    let uiValueStr = '';
-
-    if (uiType === 'style') {
-      // Stored as {property: value} JS-style object — rebuild as editable "prop: value;" CSS text.
-      uiType = 'css';
-      uiValueStr = Object.entries(prefill.value || {}).map(([k, v]) => {
-        const kebab = k.replace(/([A-Z])/g, '-$1').toLowerCase();
-        return `${kebab}: ${v};`;
-      }).join(' ');
-    } else if (uiType === 'attr') {
-      // Stored as separate {attr, value} fields — rebuild as the editable "attr=value" text.
-      uiValueStr = `${prefill.attr || ''}=${prefill.value || ''}`;
-    } else if (prefill.value !== undefined) {
-      uiValueStr = typeof prefill.value === 'string' ? prefill.value : JSON.stringify(prefill.value);
-    }
-
-    selectEl.value = uiType;
-    renderValueField();
-    const valueInput = row.querySelector('.c-value');
-    if (valueInput) valueInput.value = uiValueStr;
-  } else {
-    renderValueField();
-  }
-}
+// --- Goal row builder ---
+// (What a variant *does* on the page is authored in the visual editor — Preview &
+// manage -> 🎯 Make Edits — not here. This form covers name, traffic split and goals.)
 
 function addGoalRow(prefill) {
   const list = document.getElementById('goals-list');
@@ -908,41 +833,6 @@ function addGoalRow(prefill) {
   renderValueField();
 }
 
-// Parses "attr=value" into { attr, value } for the attribute change type.
-function parseAttrValue(str) {
-  const idx = str.indexOf('=');
-  if (idx === -1) return { attr: str.trim(), value: '' };
-  return { attr: str.slice(0, idx).trim(), value: str.slice(idx + 1).trim() };
-}
-
-function collectChanges() {
-  return Array.from(document.querySelectorAll('#changes-list .change-row')).map((row) => {
-    const selector = row.querySelector('.c-selector').value.trim();
-    const type = row.querySelector('.c-type').value;
-    const valueField = row.querySelector('.c-value');
-    const raw = valueField ? valueField.value : '';
-
-    if (type === 'hide' || type === 'show') return { selector, type };
-    if (type === 'attr') {
-      const { attr, value } = parseAttrValue(raw);
-      return { selector, type, attr, value };
-    }
-    if (type === 'css') {
-      // Turn "background: red; padding: 10px;" into the {property: value} object the snippet applies via el.style.
-      const style = {};
-      raw.split(';').forEach((decl) => {
-        const [prop, val] = decl.split(':');
-        if (prop && val) {
-          const camel = prop.trim().replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-          style[camel] = val.trim();
-        }
-      });
-      return { selector, type: 'style', value: style };
-    }
-    return { selector, type, value: raw };
-  }).filter((c) => c.selector);
-}
-
 function collectGoals() {
   return Array.from(document.querySelectorAll('#goals-list .goal-row')).map((row) => {
     const type = row.querySelector('.g-type').value;
@@ -952,8 +842,7 @@ function collectGoals() {
   }).filter((g) => (g.type === 'url' ? g.url_match : g.selector));
 }
 
-// Seed one example row of each on load so the form isn't empty.
-addChangeRow({ selector: '#cta-button', type: 'text', value: 'Get Started Free' });
+// Seed one example goal row on load so the form isn't empty.
 addGoalRow({ type: 'click', selector: '#cta-button', id: 'cta_click' });
 
 // --- Popular goals (reuse across variants) ---
@@ -996,17 +885,16 @@ async function saveVariant() {
 
   const name = document.getElementById('var-name').value;
   const traffic_split = parseInt(document.getElementById('var-split').value, 10);
-  const changes = collectChanges();
   const goals = collectGoals();
   const editingId = document.getElementById('editing-variant-id').value;
 
   const path = editingId ? `/api/experiments/${expId}/variants/${editingId}` : `/api/experiments/${expId}/variants`;
   const result = await callApi(path, {
-    method: editingId ? 'PATCH' : 'POST', headers: authHeaders(), body: JSON.stringify({ name, traffic_split, changes, goals })
+    method: editingId ? 'PATCH' : 'POST', headers: authHeaders(), body: JSON.stringify({ name, traffic_split, goals }) // no `changes` on purpose: the server leaves a variant's changes untouched when they're omitted
   });
   el.className = result.ok ? 'ok-msg' : 'error-msg';
   if (result.ok) {
-    el.textContent = editingId ? 'Variant updated.' : `Variant created. ID: ${result.data.id}`;
+    el.textContent = editingId ? 'Variant updated.' : 'Variant created. Next: open Preview & manage and click 🎯 Make Edits to change what it does on the page.';
     const expSelect = document.getElementById('var-exp-id');
     const expLabel = expSelect.selectedOptions[0] ? expSelect.selectedOptions[0].text : '';
     renderSavedVariantSummary(result.data, expLabel);
@@ -1135,10 +1023,6 @@ function editVariant(index) {
   document.getElementById('var-name').value = v.name;
   document.getElementById('var-split').value = v.traffic_split;
 
-  const changesList = document.getElementById('changes-list');
-  changesList.innerHTML = '';
-  if (v.changes && v.changes.length) v.changes.forEach((c) => addChangeRow(c)); else addChangeRow();
-
   const goalsList = document.getElementById('goals-list');
   goalsList.innerHTML = '';
   if (v.goals && v.goals.length) v.goals.forEach((g) => addGoalRow(g));
@@ -1147,7 +1031,16 @@ function editVariant(index) {
   document.getElementById('edit-banner').style.display = 'block';
   document.getElementById('save-variant-btn').textContent = `Save Changes to "${v.name}"`;
   document.getElementById('var-result').textContent = '';
-  document.getElementById('var-name').closest('section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // The edit form lives on the Create experiment page — go there (scrolling alone does
+  // nothing while that page is hidden) and open the accordions holding what's being edited.
+  showPage('page-create');
+  const nameDetails = document.getElementById('var-name').closest('details');
+  if (nameDetails) nameDetails.open = true;
+  if (v.goals && v.goals.length) {
+    const goalsDetails = document.getElementById('goals-list').closest('details');
+    if (goalsDetails) goalsDetails.open = true;
+  }
+  document.getElementById('var-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 function cancelEditVariant() {
@@ -1156,9 +1049,7 @@ function cancelEditVariant() {
   document.getElementById('save-variant-btn').textContent = 'Add Variant';
   document.getElementById('var-name').value = '';
   document.getElementById('var-split').value = 50;
-  document.getElementById('changes-list').innerHTML = '';
   document.getElementById('goals-list').innerHTML = '';
-  addChangeRow({ selector: '#cta-button', type: 'text', value: 'Get Started Free' });
   addGoalRow({ type: 'click', selector: '#cta-button', id: 'cta_click' });
 }
 
