@@ -13,6 +13,7 @@ const { router: goalsRouter } = require('./routes/goals');
 const authRouter = require('./routes/auth');
 const clientsRouter = require('./routes/clients');
 const clientRouter = require('./routes/client');
+const editorRouter = require('./routes/editor');
 
 const app = express();
 // Railway (like most hosts) sits behind a reverse proxy. Without this, Express
@@ -42,6 +43,7 @@ app.use('/api/results', resultsRouter);
 app.use('/api/goals', goalsRouter);
 app.use('/api/clients', clientsRouter);
 app.use('/api/client', clientRouter);
+app.use('/api/editor', editorRouter);
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 

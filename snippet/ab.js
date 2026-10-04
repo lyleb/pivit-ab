@@ -165,6 +165,24 @@
             console.warn('[ab] custom JS change failed:', err);
           }
           break;
+        case 'remove':
+          // Genuine removal from the DOM — distinct from 'hide', which just sets
+          // display:none and leaves the element (and any layout space it still
+          // claims, depending on CSS) in place.
+          el.remove();
+          break;
+        case 'duplicate': {
+          const clone = el.cloneNode(true);
+          clone.removeAttribute('id'); // avoid a duplicate-id collision with the original
+          el.insertAdjacentElement('afterend', clone);
+          break;
+        }
+        case 'insert_before':
+          el.insertAdjacentHTML('beforebegin', change.value);
+          break;
+        case 'insert_after':
+          el.insertAdjacentHTML('afterend', change.value);
+          break;
         default:
           console.warn('[ab] unknown change type:', change.type);
       }
@@ -240,6 +258,22 @@
   }
 
   async function init() {
+    // Edit mode: ?ab_edit=<variant_id>&token=<token> hands off entirely to a
+    // separate editor script, loaded only now (not for every real visitor) —
+    // keeps this production snippet lean. No tracking/preview logic runs below
+    // this point for an edit-mode page load, so an editing session never sends
+    // a stray view event into real results.
+    const editVariantId = new URLSearchParams(window.location.search).get('ab_edit');
+    if (editVariantId) {
+      const editorScript = document.createElement('script');
+      editorScript.src = `${API_BASE}/snippet/editor.js`;
+      editorScript.setAttribute('data-api', API_BASE);
+      editorScript.setAttribute('data-variant-id', editVariantId);
+      document.head.appendChild(editorScript);
+      revealPage();
+      return;
+    }
+
     // Preview mode: ?ab_preview=<variant_id> forces that exact variant, works even
     // for a draft/paused experiment or a paused variant, and never logs events —
     // so previewing never pollutes your real results. It also bypasses the

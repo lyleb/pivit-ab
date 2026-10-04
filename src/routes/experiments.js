@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { recordGoalUsage } = require('./goals');
+const { createEditToken } = require('../edit-token');
 const router = express.Router();
 
 // GET /api/experiments?url=https://client-site.com/pricing[&preview=1]
@@ -226,6 +227,32 @@ router.patch('/:id/variants/:variantId', async (req, res) => {
 });
 
 // PATCH /api/experiments/:id/variants/:variantId/enabled  { enabled: true|false }
+// POST /api/experiments/:id/variants/:variantId/edit-link  { page_url }
+// Generates a scoped, time-limited link that opens the visual editor directly
+// on the live page — see src/edit-token.js for why this can't just be the
+// owner's normal session. page_url is the actual page to open (the same input
+// already used for Preview), since url_match is only ever a substring.
+router.post('/:id/variants/:variantId/edit-link', async (req, res) => {
+  try {
+    const { page_url } = req.body;
+    if (!page_url) return res.status(400).json({ error: 'page_url is required' });
+
+    const { rows } = await db.query(
+      `SELECT id FROM variants WHERE id = $1 AND experiment_id = $2`,
+      [req.params.variantId, req.params.id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id on that experiment' });
+
+    const token = createEditToken(req.params.variantId);
+    const sep = page_url.includes('?') ? '&' : '?';
+    const editUrl = `${page_url}${sep}ab_edit=${req.params.variantId}&token=${token}`;
+    res.json({ edit_url: editUrl });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
 // "Stop" a variant without losing its history — it's excluded from new visitor
 // traffic (and re-included from disk) but past events stay in the results table.
 router.patch('/:id/variants/:variantId/enabled', async (req, res) => {

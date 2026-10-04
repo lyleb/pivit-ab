@@ -104,6 +104,22 @@ If **none** of the above are present at all, the snippet runs as it always has (
 
 One deployment of this app can run experiments on as many different domains as you like at once. `url_match` is just a substring check against whatever page the snippet loads on — it has nothing to do with which site it's running on. Install the same snippet tag (see "Your Snippet" at the top of the dashboard) once per site, and the server figures out which experiments apply based on the current page's URL every time it loads. No per-site configuration needed beyond pasting the tag in.
 
+## Visual editor (stage 1: Remove, Duplicate, Add above/below)
+
+"Preview & Manage Variants" has a **🎯 Make Edits** button per variant (needs the page URL filled in, same as Preview). Clicking it opens the real live page in a new tab with an in-page editing overlay active:
+
+- Click **🎯 Select element**, then click anything on the page to select it
+- A quick-actions menu appears: **Duplicate**, **Add above**, **Add below**, **Remove**
+- Add above/below opens a small HTML input — whatever you enter gets inserted immediately so you see the result live
+- **💾 Save** persists everything to that variant's `changes`, same data model the dashboard's own "Make Changes" step produces — this is a different way to author the same thing, not a separate system
+- **Desktop / Tablet / Mobile** buttons open the live preview (`?ab_preview=`) in appropriately-sized new windows, reflecting the last *saved* state — not unsaved edits still sitting in the current tab
+
+**Why a new tab, not an embedded frame**: the browser's same-origin policy blocks reading or modifying a cross-origin iframe's DOM entirely. Opening the real page directly means the tracking snippet already running there (`ab.js`) can hand off to the editor with full same-origin access — the same approach tools like Optimizely and VWO use.
+
+**Authentication**: the new tab lives on the client's own domain, not `pivit.click`, so your normal login session (deliberately never sent cross-site) can't travel with it. Clicking "Make Edits" instead mints a signed, time-limited token scoped to that one variant (`src/edit-token.js`) — good for about an hour, useless for anything except saving changes to that specific variant. This is also what makes a future restricted client-side version of this feature straightforward: same mechanism, issued to a client instead of the owner.
+
+**What's not in this stage yet**: "Replace/change element" (the fuller HTML/CSS/JS editing panel, pre-filled with the element's current markup) is next — it needs a richer multi-field panel than the simple single-textarea insert used for Add above/below here. Owner-only for now; client-side rollout comes later, reusing the same token mechanism.
+
 ## The automatic Control variant
 
 Creating an experiment also creates a **"Control"** variant automatically — no changes, 50% traffic — in the same atomic step (both inserts happen in one database transaction, so you never end up with an experiment and no Control if something goes wrong partway through). This means a single variant you add yourself is never your *only* variant; it's compared against an unmodified baseline by default, without having to remember to set one up.
@@ -224,5 +240,7 @@ The public snippet endpoints (`GET /api/experiments`, `POST /api/event`, `GET /a
 
 - Support for multiple goals per variant with individual conversion rates
 - Per-teammate owner logins if you ever bring someone else onto the admin side
-- A visual click-to-configure variant editor, once the current form-based one has been stress-tested on a genuinely complex experiment
+- "Replace/change element" in the visual editor — the fuller HTML/CSS/JS panel, pre-filled with the selected element's current markup
+- A real code editor (e.g. CodeMirror) in place of the plain textarea used for the visual editor's HTML input
+- A restricted, client-facing version of the visual editor, using the same scoped edit-token mechanism
 - Synthetic demo data for show-and-tell purposes on low-traffic sites — scoped out for now to keep things simpler, worth revisiting later

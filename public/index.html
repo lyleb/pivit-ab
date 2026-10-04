@@ -1042,6 +1042,24 @@ function buildPreviewUrl(pageUrl, variantId) {
   return `${pageUrl}${sep}ab_preview=${variantId}`;
 }
 
+// Opens the real page in a new tab with the in-page visual editor active.
+// Generates a fresh, scoped, short-lived edit link each time rather than
+// reusing one — see src/edit-token.js for why this can't just use the normal
+// login session (the editor runs on the client's own domain).
+async function makeEdits(expId, variantId, btn) {
+  const pageUrl = document.getElementById('manage-page-url').value.trim();
+  if (!pageUrl) { alert('Enter a page URL above first.'); return; }
+
+  btn.disabled = true;
+  const result = await callApi(`/api/experiments/${expId}/variants/${variantId}/edit-link`, {
+    method: 'POST', headers: authHeaders(), body: JSON.stringify({ page_url: pageUrl }),
+  });
+  btn.disabled = false;
+
+  if (!result.ok) { alert(`Error: ${result.message}`); return; }
+  window.open(result.data.edit_url, '_blank');
+}
+
 async function loadManageVariants() {
   const expId = document.getElementById('manage-exp-id').value.trim();
   const msgEl = document.getElementById('manage-msg');
@@ -1086,6 +1104,9 @@ async function loadManageVariants() {
     const previewBtn = pageUrl
       ? `<button type="button" class="secondary" onclick="window.open('${buildPreviewUrl(pageUrl, v.id)}', '_blank')">Preview</button>`
       : `<button type="button" class="secondary" disabled title="Enter a page URL above first">Preview</button>`;
+    const makeEditsBtn = pageUrl
+      ? `<button type="button" class="secondary" onclick="makeEdits('${expId}', '${v.id}', this)">🎯 Make Edits</button>`
+      : `<button type="button" class="secondary" disabled title="Enter a page URL above first">🎯 Make Edits</button>`;
     card.innerHTML = `
       <div>
         <strong>${v.name}</strong>
@@ -1094,6 +1115,7 @@ async function loadManageVariants() {
       </div>
       <div class="vc-actions">
         ${previewBtn}
+        ${makeEditsBtn}
         <button type="button" class="secondary" onclick="editVariant(${i})">Edit</button>
         <button type="button" class="secondary" onclick="toggleVariantEnabled('${expId}', '${v.id}', ${!v.enabled}, this)">${v.enabled ? 'Pause' : 'Resume'}</button>
         <button type="button" class="secondary" style="color:#c0392b" onclick="deleteVariant('${expId}', '${v.id}', this)">Delete</button>
