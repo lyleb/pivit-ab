@@ -842,9 +842,6 @@ function collectGoals() {
   }).filter((g) => (g.type === 'url' ? g.url_match : g.selector));
 }
 
-// Seed one example goal row on load so the form isn't empty.
-addGoalRow({ type: 'click', selector: '#cta-button', id: 'cta_click' });
-
 // --- Popular goals (reuse across variants) ---
 
 let popularGoalsCache = [];
@@ -969,21 +966,35 @@ async function loadManageVariants() {
   const enabledCount = enabledVariants.length;
   const splitSum = enabledVariants.reduce((sum, v) => sum + (v.traffic_split || 0), 0);
 
-  let warning = '';
+  const warnings = [];
   if (enabledCount === 1) {
-    warning = '⚠ Only one active variant — 100% of matched traffic will see its changes, with no unmodified original shown to compare against. Add a "Control" variant with no changes if you want a real A/B split.';
+    warnings.push('⚠ Only one active variant — 100% of matched traffic will see its changes, with no unmodified original shown to compare against. Add a "Control" variant with no changes if you want a real A/B split.');
   } else if (enabledCount > 1 && splitSum !== 100) {
     const effective = enabledVariants.map((v) => `${v.name}: ${((v.traffic_split / splitSum) * 100).toFixed(1)}%`).join(', ');
-    warning = `⚠ Active variants' traffic splits add up to ${splitSum}%, not 100%. Every visitor still gets assigned to one of them — the splits are used as relative weights, not literal percentages — but the actual effective split is ${effective}, which may not be what the numbers suggest at a glance.`;
+    warnings.push(`⚠ Active variants' traffic splits add up to ${splitSum}%, not 100%. Every visitor still gets assigned to one of them — the splits are used as relative weights, not literal percentages — but the actual effective split is ${effective}, which may not be what the numbers suggest at a glance.`);
   }
 
-  if (warning) {
+  // Goals belong to each variant separately — a visitor's snippet only tracks the goals of
+  // the variant they were assigned. A variant with no goal can never record a conversion,
+  // so its rate reads 0% no matter how it really performs. Compared by label, because the
+  // selector can legitimately differ between variants (e.g. a replaced button).
+  if (enabledCount > 1) {
+    const goalLabels = (v) => (v.goals || []).map((g) => g.id || g.selector || g.url_match).sort();
+    if (new Set(enabledVariants.map((v) => JSON.stringify(goalLabels(v)))).size > 1) {
+      const summary = enabledVariants.map((v) => `${v.name}: ${goalLabels(v).join(', ') || 'none'}`).join(' · ');
+      warnings.push(`⚠ These variants don't have the same goals (${summary}). Conversions are only counted for a variant that has the goal, so a variant with no goal always shows 0% and the comparison is meaningless. Open 🎯 Make Edits on each variant and set the same goals, with the same labels.`);
+    }
+  }
+
+  if (warnings.length) {
     msgEl.style.color = '#a3690f';
     msgEl.style.fontWeight = '600';
-    msgEl.textContent = warning;
+    msgEl.style.whiteSpace = 'pre-line';
+    msgEl.textContent = warnings.join('\n\n');
   } else {
     msgEl.style.color = '';
     msgEl.style.fontWeight = '';
+    msgEl.style.whiteSpace = '';
     msgEl.textContent = '';
   }
   variants.forEach((v, i) => {
@@ -1050,7 +1061,6 @@ function cancelEditVariant() {
   document.getElementById('var-name').value = '';
   document.getElementById('var-split').value = 50;
   document.getElementById('goals-list').innerHTML = '';
-  addGoalRow({ type: 'click', selector: '#cta-button', id: 'cta_click' });
 }
 
 async function toggleVariantEnabled(expId, variantId, enabled, btn) {

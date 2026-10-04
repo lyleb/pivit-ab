@@ -1,6 +1,6 @@
 /**
- * Pivit visual editor — v0.3 (Edit element with HTML/CSS/JS, Remove, Duplicate,
- * Add above/below, plus a Changes list with Edit/Remove on each entry)
+ * Pivit visual editor — v0.4 (Edit element with HTML/CSS/JS, Remove, Duplicate,
+ * Add above/below, Set as goal, plus Changes and Goals lists)
  *
  * Loaded by ab.js only when it sees ?ab_edit=<variant_id>&token=<token> in the
  * URL — never downloaded by a real visitor. Runs entirely on the client's own
@@ -30,12 +30,14 @@
   const STORAGE_KEY = `pivit_editor_changes_${VARIANT_ID}`;
 
   let allChanges = [];       // the full working set — both already-saved and new-this-session
-  let savedSnapshot = '[]';  // JSON of what's actually saved on the server, for the dirty check
+  let allGoals = [];         // this variant's click/url goals, same idea
+  let savedSnapshot = '';    // canonical form of what's actually saved on the server, for the dirty check
   let experimentName = '';
   let variantName = '';
   let pickingActive = false;
   let hoveredEl = null;
   let changesListOpen = false;
+  let goalsListOpen = false;
 
   // --- DOM mutation primitives (same semantics as snippet/ab.js's applyChange,
   // kept as its own copy so this file has no runtime dependency on ab.js). ---
@@ -142,11 +144,11 @@
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
     return res.json();
   }
-  async function saveChanges(changes) {
+  async function saveWorkingSet(changes, goals) {
     const res = await fetch(`${API_BASE}/api/editor/variants/${VARIANT_ID}?token=${encodeURIComponent(TOKEN)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ changes }),
+      body: JSON.stringify({ changes, goals }),
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
     return res.json();
@@ -154,12 +156,16 @@
 
   // --- Working-set persistence across a reload ---
   function persistWorkingSet() {
-    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(allChanges)); } catch (e) { /* ignore quota/privacy-mode errors */ }
+    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ changes: allChanges, goals: allGoals })); } catch (e) { /* ignore quota/privacy-mode errors */ }
   }
   function readPersistedWorkingSet() {
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : null;
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return { changes: parsed, goals: null }; // written before goals existed here
+      if (parsed && Array.isArray(parsed.changes)) return { changes: parsed.changes, goals: Array.isArray(parsed.goals) ? parsed.goals : null };
+      return null;
     } catch (e) { return null; }
   }
   function clearPersistedWorkingSet() {
@@ -174,13 +180,24 @@
     window.location.reload();
   }
 
+  // Key-order-independent serialisation: the server's JSONB column hands objects
+  // back with its own key order, so a plain JSON.stringify comparison could call
+  // identical content "unsaved".
+  function canon(v) {
+    if (Array.isArray(v)) return '[' + v.map(canon).join(',') + ']';
+    if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + canon(v[k])).join(',') + '}';
+    return JSON.stringify(v);
+  }
+  function currentSnapshot() {
+    return canon({ changes: allChanges, goals: allGoals });
+  }
   function isDirty() {
-    return JSON.stringify(allChanges) !== savedSnapshot;
+    return currentSnapshot() !== savedSnapshot;
   }
 
   // --- UI: a single floating root element, all children styled inline to stay
   // insulated from whatever CSS the host page already has. ---
-  let root, toolbar, statusEl, countEl, actionPopup, panelEl, changesListEl;
+  let root, toolbar, statusEl, countEl, actionPopup, panelEl, changesListEl, goalsListEl;
 
   // Deliberately NOT `style.all = 'initial'` — that resets `display` to CSS's
   // initial value (inline), not a div's normal block default, which silently
@@ -245,6 +262,20 @@
     changesListEl.style.display = 'none';
     changesListEl.style.marginTop = '6px';
     toolbar.appendChild(changesListEl);
+
+    // --- Goals list (collapsible) ---
+    const goalsToggle = makeButton('Goals (0)', '#f0f0f7', toggleGoalsList);
+    goalsToggle.style.width = '100%';
+    goalsToggle.style.color = COLORS.ink;
+    goalsToggle.style.marginTop = '6px';
+    goalsToggle.id = 'pivit-goals-toggle';
+    toolbar.appendChild(goalsToggle);
+
+    goalsListEl = document.createElement('div');
+    styleReset(goalsListEl);
+    goalsListEl.style.display = 'none';
+    goalsListEl.style.marginTop = '6px';
+    toolbar.appendChild(goalsListEl);
 
     countEl = document.createElement('div');
     styleReset(countEl);
@@ -358,6 +389,52 @@
     });
   }
 
+  function toggleGoalsList() {
+    goalsListOpen = !goalsListOpen;
+    renderGoalsList();
+  }
+
+  function describeGoal(g) {
+    return (g.type || 'click') === 'url'
+      ? `Visit goal "${g.id || g.url_match}" — URL contains ${g.url_match}`
+      : `Click goal "${g.id || g.selector}" on ${g.selector}`;
+  }
+
+  function renderGoalsList() {
+    const toggleBtn = document.getElementById('pivit-goals-toggle');
+    if (toggleBtn) toggleBtn.textContent = `Goals (${allGoals.length}) ${goalsListOpen ? '▲' : '▼'}`;
+    goalsListEl.style.display = goalsListOpen ? 'block' : 'none';
+    goalsListEl.innerHTML = '';
+
+    if (allGoals.length === 0) {
+      const empty = document.createElement('div');
+      styleReset(empty);
+      Object.assign(empty.style, { fontSize: '12px', color: '#6b6f83', padding: '6px 2px' });
+      empty.textContent = 'No goals yet — select the button or link that counts as a conversion, then "Set as goal".';
+      goalsListEl.appendChild(empty);
+      return;
+    }
+    allGoals.forEach((goal, idx) => {
+      const row = document.createElement('div');
+      styleReset(row);
+      Object.assign(row.style, { padding: '8px', marginTop: '6px', background: '#fafafe', border: `1px solid ${COLORS.border}`, borderRadius: '8px', fontSize: '12px' });
+      const desc = document.createElement('div');
+      styleReset(desc);
+      Object.assign(desc.style, { marginBottom: '6px', color: COLORS.ink, wordBreak: 'break-word' });
+      desc.textContent = describeGoal(goal);
+      row.appendChild(desc);
+      const removeBtn = makeButton('Remove', '#fdeaea', () => {
+        if (!confirm(`Remove this goal?\n\n${describeGoal(goal)}`)) return;
+        allGoals.splice(idx, 1);
+        persistWorkingSet();
+        refreshToolbarState(); // goals don't touch the page, so no reload needed
+      });
+      Object.assign(removeBtn.style, { color: COLORS.danger, fontSize: '11px', padding: '5px 10px' });
+      row.appendChild(removeBtn);
+      goalsListEl.appendChild(row);
+    });
+  }
+
   function removeChangeAtIndex(idx) {
     const change = allChanges[idx];
     if (!confirm(`Remove this change?\n\n${describeChange(change)}\n\nThe page will reload to show the result.`)) return;
@@ -367,6 +444,9 @@
 
   function editChangeAtIndex(idx) {
     const change = allChanges[idx];
+    // The replace / stylesheet / js entries made together by "Edit element" are
+    // edited together too, so tweaking one part never means re-adding the others.
+    if (EDIT_SET_TYPES.indexOf(change.type) !== -1) { openEditSetPanel(null, change.selector, idx); return; }
     const meta = EDIT_META[change.type];
     showEditorPanel({
       title: describeChange(change),
@@ -384,6 +464,7 @@
   function refreshToolbarState() {
     countEl.textContent = isDirty() ? '● Unsaved changes' : '✓ All changes saved';
     renderChangesList();
+    renderGoalsList();
   }
 
   function openPreview(width, height) {
@@ -455,7 +536,7 @@
     actionPopup = document.createElement('div');
     styleReset(actionPopup);
     Object.assign(actionPopup.style, {
-      position: 'fixed', left: Math.min(x, window.innerWidth - 200) + 'px', top: Math.min(y, window.innerHeight - 270) + 'px',
+      position: 'fixed', left: Math.min(x, window.innerWidth - 200) + 'px', top: Math.min(y, window.innerHeight - 310) + 'px',
       zIndex: String(Z), background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: '10px',
       boxShadow: '0 8px 28px rgba(19,23,35,0.2)', padding: '8px', width: '190px', fontSize: '13px',
     });
@@ -466,6 +547,7 @@
       ['⬆ Add above', () => openInsertPanel(selector, 'insert_before')],
       ['⬇ Add below', () => openInsertPanel(selector, 'insert_after')],
       ['⧉ Duplicate', () => { recordAndApply({ selector, type: 'duplicate' }); closeActionPopup(); }],
+      ['🎯 Set as goal', () => openGoalPanel(el)],
       ['🗑 Remove', () => { recordAndApply({ selector, type: 'remove' }); closeActionPopup(); }],
     ];
     actions.forEach(([label, handler]) => {
@@ -558,13 +640,14 @@
     }
 
     fields.forEach((f) => {
-      const ta = document.createElement('textarea');
+      const ta = document.createElement(f.line ? 'input' : 'textarea'); // line: a one-line value (e.g. a label), not code
       styleReset(ta);
       Object.assign(ta.style, {
-        display: 'block', width: '100%', height: multi ? '240px' : '170px', padding: '10px',
+        display: 'block', width: '100%', height: f.line ? 'auto' : (multi ? '240px' : '170px'), padding: '10px',
         border: `1px solid ${COLORS.border}`, borderRadius: '8px', fontFamily: 'Menlo, Consolas, monospace',
-        fontSize: '12px', color: COLORS.ink, background: '#fff', resize: 'vertical',
+        fontSize: '12px', color: COLORS.ink, background: '#fff', resize: f.line ? 'none' : 'vertical',
       });
+      if (f.line) ta.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doApply(); } });
       ta.setAttribute('spellcheck', 'false');
       ta.placeholder = f.placeholder || '';
       ta.value = f.value || '';
@@ -600,13 +683,14 @@
     const row = document.createElement('div');
     styleReset(row);
     Object.assign(row.style, { display: 'flex', gap: '8px', marginTop: '12px' });
-    const applyBtn = makeButton(opts.applyLabel || 'Apply', COLORS.indigo, () => {
+    function doApply() {
       const values = {};
       fields.forEach((f) => { values[f.key] = areas[f.key].value; });
       const result = opts.onApply(values);
       if (result && result.error) { errEl.textContent = result.error; return; }
       if (panelEl) { panelEl.remove(); panelEl = null; }
-    });
+    }
+    const applyBtn = makeButton(opts.applyLabel || 'Apply', COLORS.indigo, doApply);
     applyBtn.style.flex = '1';
     const cancelBtn = makeButton('Cancel', '#f0f0f7', () => { panelEl.remove(); panelEl = null; });
     cancelBtn.style.flex = '1';
@@ -630,32 +714,141 @@
 
   const collapse = (str) => str.replace(/\s+/g, ' ').trim();
 
-  // "Edit element": HTML / CSS / JS in one panel. Each part that has actually
-  // been changed becomes its own entry — 'replace', 'stylesheet', 'js' — applied
-  // in that order, so the CSS and JS see the new markup.
-  function openEditElementPanel(el, selector) {
-    const originalHtml = cleanOuterHTML(el);
+  // The three parts of "Edit element" are stored as three separate entries.
+  const EDIT_SET_TYPES = ['replace', 'stylesheet', 'js'];
+
+  // Indexes (into allChanges) of the entries that make up one element's edit set:
+  // same selector, one slot per type. If an entry was clicked in the list
+  // (pinnedIdx), that exact entry fills its own slot — so with look-alike
+  // duplicates, the tab you opened from edits the entry you clicked.
+  function findEditSet(selector, pinnedIdx) {
+    const slot = {};
+    if (pinnedIdx !== null && pinnedIdx !== undefined) slot[allChanges[pinnedIdx].type] = pinnedIdx;
+    EDIT_SET_TYPES.forEach((t) => {
+      if (slot[t] !== undefined) return;
+      const i = allChanges.findIndex((c) => c.selector === selector && c.type === t);
+      if (i !== -1) slot[t] = i;
+    });
+    return slot;
+  }
+
+  // "Edit element": HTML / CSS / JS in one panel. Used for a fresh element AND
+  // for re-editing one: if this selector already has replace/stylesheet/js
+  // entries, they open pre-filled and are updated in place — change just the
+  // HTML and the CSS and JS entries are left exactly as they were. Clearing a
+  // tab removes that part. A fresh set applies live; editing existing entries
+  // replays on a clean page (see reloadAndReplay).
+  function openEditSetPanel(el, selector, pinnedIdx) {
+    const slot = findEditSet(selector, pinnedIdx);
+    const editing = Object.keys(slot).length > 0;
+    const target = el || document.querySelector(selector); // null if nothing matches right now
+    const cur = (t) => (slot[t] !== undefined ? allChanges[slot[t]] : null);
+
+    const baseHtml = cur('replace') ? cur('replace').value : (target ? cleanOuterHTML(target) : '');
     const cssSkeleton = `${selector} {\n  \n}`;
+
     showEditorPanel({
       title: 'Edit element',
       subtitle: selector,
       fields: [
-        { key: 'html', label: 'HTML', value: originalHtml,
-          hint: "The element's current markup. Edit it, or paste new HTML to replace it. Leave it unchanged to keep the element as it is." },
-        { key: 'css', label: 'CSS', value: cssSkeleton,
-          hint: "Plain CSS applied to the whole page, pre-filled with a rule for this element. Add !important to beat the site's own styles — z-index, colours, :hover and media queries all work. If you change the element's id or classes above, update the selector here too." },
-        { key: 'js', label: 'JS', value: '', placeholder: "el.addEventListener('click', () => console.log('clicked'));",
-          hint: 'Runs once for the selected element — "el" is that element. Applied after the HTML and CSS above.' },
+        { key: 'html', label: 'HTML', value: baseHtml,
+          hint: cur('replace')
+            ? "This is the markup the element is being replaced with. Edit it to tweak the replacement. Clear this tab to put back the page's original element."
+            : "The element's current markup on the page, including the effect of any other changes you've made to it. Edit it, or paste new HTML to replace it. Leave it unchanged to keep the element as it is." },
+        { key: 'css', label: 'CSS', value: cur('stylesheet') ? cur('stylesheet').value : cssSkeleton,
+          hint: "Plain CSS applied to the whole page" + (cur('stylesheet') ? '.' : ', pre-filled with a rule for this element.') +
+            " Add !important to beat the site's own styles — z-index, colours, :hover and media queries all work. If you change the element's id or classes above, update the selector here too." +
+            (cur('stylesheet') ? ' Clear this tab to remove the CSS.' : '') },
+        { key: 'js', label: 'JS', value: cur('js') ? cur('js').value : '', placeholder: "el.addEventListener('click', () => console.log('clicked'));",
+          hint: 'Runs once for the selected element — "el" is that element. Applied after the HTML and CSS.' + (cur('js') ? ' Clear this tab to remove the JS.' : '') },
       ],
-      applyLabel: 'Apply',
+      applyLabel: editing ? 'Save change' : 'Apply',
       onApply: (v) => {
-        const out = [];
         const html = v.html.trim();
-        if (html && collapse(html) !== collapse(originalHtml)) out.push({ selector, type: 'replace', value: html });
-        if (v.css.trim() && collapse(v.css) !== collapse(cssSkeleton)) out.push({ selector, type: 'stylesheet', value: v.css.trim() });
-        if (v.js.trim()) out.push({ selector, type: 'js', value: v.js.trim() });
-        if (!out.length) return { error: 'Nothing to apply yet — change the HTML, add some CSS, or add some JS.' };
-        out.forEach(recordAndApply);
+        const css = v.css.trim();
+        const js = v.js.trim();
+        const cssEmpty = !css || collapse(css) === collapse(cssSkeleton);
+        const next = { replace: null, stylesheet: null, js: null };
+        let changed = false;
+
+        // Per part: unchanged -> keep the existing entry untouched; changed ->
+        // update it; cleared -> drop it; new -> create it.
+        if (cur('replace')) {
+          if (!html) changed = true;
+          else if (collapse(html) !== collapse(cur('replace').value)) { next.replace = { ...cur('replace'), value: html }; changed = true; }
+          else next.replace = cur('replace');
+        } else if (html && collapse(html) !== collapse(baseHtml)) {
+          if (!target) return { error: "This selector doesn't match anything on the page right now, so its HTML can't be replaced." };
+          next.replace = { selector, type: 'replace', value: html }; changed = true;
+        }
+        if (cur('stylesheet')) {
+          if (cssEmpty) changed = true;
+          else if (collapse(css) !== collapse(cur('stylesheet').value)) { next.stylesheet = { ...cur('stylesheet'), value: css }; changed = true; }
+          else next.stylesheet = cur('stylesheet');
+        } else if (!cssEmpty) { next.stylesheet = { selector, type: 'stylesheet', value: css }; changed = true; }
+        if (cur('js')) {
+          if (!js) changed = true;
+          else if (collapse(js) !== collapse(cur('js').value)) { next.js = { ...cur('js'), value: js }; changed = true; }
+          else next.js = cur('js');
+        } else if (js) { next.js = { selector, type: 'js', value: js }; changed = true; }
+
+        if (!changed) return { error: editing ? 'Nothing changed yet.' : 'Nothing to apply yet — change the HTML, add some CSS, or add some JS.' };
+
+        const finalSet = [next.replace, next.stylesheet, next.js].filter(Boolean); // order matters: replace -> stylesheet -> js
+        if (!editing) { finalSet.forEach(recordAndApply); return; }
+
+        // Swap the old entries for the new ones where the first old one sat.
+        const oldIdx = Object.keys(slot).map((t) => slot[t]).sort((x, y) => x - y);
+        const oldSet = new Set(oldIdx);
+        const before = allChanges.slice(0, oldIdx[0]);
+        const after = allChanges.slice(oldIdx[0]).filter((_, j) => !oldSet.has(oldIdx[0] + j));
+        allChanges = before.concat(finalSet, after);
+        reloadAndReplay();
+      },
+    });
+  }
+
+  function openEditElementPanel(el, selector) { openEditSetPanel(el, selector, null); }
+
+  // --- Goals: "Set as goal" marks a click on this element as a conversion for
+  // THIS variant. Goals are per variant (each visitor's snippet only wires the
+  // goals of the variant they were assigned), so the hint says to repeat it on
+  // the others — otherwise those variants are never measured. ---
+  function suggestGoalLabel(el) {
+    const slug = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30);
+    let base = el.id ? slug(el.id) : '';
+    if (!base) base = slug((el.textContent || '').trim().split(/\s+/).slice(0, 3).join(' '));
+    if (!base) base = el.tagName.toLowerCase();
+    let label = `${base}_click`;
+    let n = 2;
+    while (allGoals.some((g) => g.id === label)) label = `${base}_click_${n++}`;
+    return label;
+  }
+
+  function openGoalPanel(pickedEl) {
+    // If the pick landed on the text/icon inside a button or link, the goal belongs on the
+    // button or link itself — that's what visitors actually click.
+    const clickable = pickedEl.closest('a, button, [role="button"], input[type="submit"], input[type="button"]') || pickedEl;
+    const selector = getSelector(clickable);
+    const existing = allGoals.find((g) => (g.type || 'click') === 'click' && g.selector === selector);
+    showEditorPanel({
+      title: 'Set as click goal',
+      subtitle: selector,
+      fields: [{
+        key: 'label', label: 'Goal label', line: true, value: suggestGoalLabel(clickable),
+        hint: 'A click on this element counts as a conversion for this variant, and the label names it in your results. ' +
+          (clickable !== pickedEl ? 'Using the button/link around what you clicked. ' : '') +
+          'Goals belong to each variant separately — set the same goal (same label) on your other variants too, otherwise they are not measured.',
+      }],
+      applyLabel: 'Set goal',
+      onApply: (v) => {
+        const label = v.label.trim();
+        if (existing) return { error: `This element is already a goal ("${existing.id || existing.selector}") on this variant. Remove it from the Goals list first to change its label.` };
+        if (!/^[A-Za-z0-9_-]{1,100}$/.test(label)) return { error: 'Use letters, numbers, underscores or hyphens only — no spaces.' };
+        if (allGoals.some((g) => g.id === label)) return { error: `A goal called "${label}" already exists on this variant — choose a different label.` };
+        allGoals.push({ type: 'click', selector, id: label });
+        persistWorkingSet();
+        refreshToolbarState();
       },
     });
   }
@@ -678,8 +871,8 @@
   async function onSave() {
     statusEl.textContent = 'Saving…';
     try {
-      await saveChanges(allChanges);
-      savedSnapshot = JSON.stringify(allChanges);
+      await saveWorkingSet(allChanges, allGoals);
+      savedSnapshot = currentSnapshot();
       clearPersistedWorkingSet();
       refreshToolbarState();
       statusEl.textContent = 'Saved ✓';
@@ -700,12 +893,14 @@
       experimentName = variant.experiment_name || '';
       variantName = variant.name || '';
       const serverChanges = Array.isArray(variant.changes) ? variant.changes : [];
-      savedSnapshot = JSON.stringify(serverChanges);
+      const serverGoals = Array.isArray(variant.goals) ? variant.goals : [];
+      savedSnapshot = canon({ changes: serverChanges, goals: serverGoals });
 
       // A working set left over from a reload-and-replay (an in-progress,
       // not-yet-saved edit) takes precedence over what's on the server.
       const persisted = readPersistedWorkingSet();
-      allChanges = persisted !== null ? persisted : serverChanges;
+      allChanges = persisted ? persisted.changes : serverChanges;
+      allGoals = persisted && persisted.goals !== null ? persisted.goals : serverGoals;
 
       allChanges.forEach(applyChange);
 

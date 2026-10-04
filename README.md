@@ -66,7 +66,7 @@ Supported `type` values: `text`, `html`, `hide`, `show`, `style`, `attr`, `js`, 
 
 ## Finding a selector for a click goal
 
-The visual editor picks elements for you, so changes never need a typed selector. **Click goals** still do — Add Goals has a **"Selector Picker"** link: drag it to your bookmarks bar once. Then, on the actual client page:
+The easiest way is the visual editor: **🎯 Make Edits → Select element → Set as goal** (see below) — no selector to find or type. The bookmarklet below is only for typing a selector into the dashboard's Add Goals form by hand. Drag its **"Selector Picker"** link to your bookmarks bar once. Then, on the actual client page:
 
 1. Click the bookmark
 2. Click the element you want to target
@@ -83,6 +83,8 @@ The dashboard has a "Goals" section alongside "Changes" when adding a variant, w
 - **Visited a URL** — fires when the visitor later loads any page whose URL contains the text you give (e.g. `/thank-you`). This works even though that page is completely different from the one the experiment's changes run on — the snippet checks every page load against every experiment you've ever been assigned to, not just the one currently "running" there. Each goal only ever counts once per visitor.
 
 Any goal firing sends a `convert` event back to the API (distinct from the automatic `view` event). The results table counts these under "conversions" and calculates the rate as conversions ÷ visitors.
+
+**Goals belong to each variant separately.** A visitor's snippet only tracks the goals of the variant they were assigned to, so a variant with no goal can never record a conversion — its rate reads 0% however it really performs. That includes the automatic Control, which starts with no goals. So every variant in an experiment needs the same goal (same label; the selector may differ if, say, a button was replaced). Preview & manage shows an amber warning whenever the active variants don't share the same goal labels, naming who has what. Goals made from the editor use a suggested label derived from the element (`cta_click`), which comes out the same on each variant if the element is the same.
 
 ## Reducing flicker
 
@@ -118,6 +120,7 @@ One deployment of this app can run experiments on as many different domains as y
 - Click **🎯 Select element**, then click anything on the page to select it
 - A quick-actions menu appears: **Edit element**, **Add above**, **Add below**, **Duplicate**, **Remove**
 - **Edit element** opens a panel with **HTML / CSS / JS** tabs. HTML is pre-filled with the element's current markup (edit it, or paste new markup to replace it); CSS is pre-filled with a ready-made rule for the element; JS runs once with `el` set to the element. Only the parts you actually change are saved, each as its own entry (`replace`, `stylesheet`, `js`), applied in that order so your CSS and JS see the new markup. The CSS is plain page-wide CSS — add `!important` to override the site's own styles (this is the fix for "my inserted element is hidden behind something": set a `z-index`).
+- **Set as goal** marks a click on the element as a conversion for this variant. If you pick the text or icon inside a button or link, the goal goes on the button/link itself (that's what visitors click). You choose a label (suggested for you); the Goals list in the toolbar shows and removes them. Goals are saved together with changes by the same **Save** button. URL ("visited a page") goals aren't element-based, so those are still added in the dashboard's Add Goals form — but they appear in the editor's Goals list too.
 - **Add above / Add below** open a small HTML input — whatever you enter is inserted immediately so you see the result live
 - **💾 Save** persists everything to that variant's `changes`, same data model the dashboard's own "Make Changes" step produces — this is a different way to author the same thing, not a separate system
 - **Changes (N)** expands a list of every change on the variant, saved earlier or made this session, each described in plain English ("Duplicate #cta-button", "Insert HTML below #headline"). **Remove** is on every entry; **Edit** appears on the insert-HTML entries (the only type with a simple editable value so far) and reopens the HTML panel pre-filled
@@ -130,7 +133,9 @@ One deployment of this app can run experiments on as many different domains as y
 
 **Authentication**: the new tab lives on the client's own domain, not `pivit.click`, so your normal login session (deliberately never sent cross-site) can't travel with it. Clicking "Make Edits" instead mints a signed, time-limited token scoped to that one variant (`src/edit-token.js`) — good for about an hour, useless for anything except saving changes to that specific variant. This is also what makes a future restricted client-side version of this feature straightforward: same mechanism, issued to a client instead of the owner.
 
-**Edit on the Changes list** works for `text`, `html`, `replace`, `insert_before`, `insert_after`, `stylesheet` and `js` entries (a single-field panel pre-filled with the stored value). `remove`, `duplicate`, `hide`, `show` have no content to edit, and the older `style` / `attr` types don't fit a single text box — those are Remove-only (remove, then re-add the effect with CSS or JS).
+**Re-editing an element's HTML/CSS/JS**: click **Edit** on any of its `replace` / `stylesheet` / `js` entries in the Changes list — or just pick the element again and choose Edit element — and the same three-tab panel opens pre-filled with everything currently saved for that element. Change only the HTML and the CSS and JS entries are left exactly as they were; nothing is re-added. **Clear a tab to remove that part** (clearing HTML puts the page's original element back). Adding a part that didn't exist yet slots it into the right place (replace → stylesheet → js). Entries are matched by selector, one per type; if older data has look-alike duplicates, the tab for the entry you clicked edits that exact entry. Editing existing entries reloads the page onto a clean copy and replays (see above); creating a brand-new set applies live. If no HTML entry exists, the HTML tab shows the element's *live* markup — including the effect of any other changes you've made to it — and says so.
+
+**Edit on other Changes-list entries** (`text`, `html`, `insert_before`, `insert_after`) opens a single-field panel pre-filled with the stored value. `remove`, `duplicate`, `hide`, `show` have no content to edit, and the older `style` / `attr` types don't fit a single text box — those are Remove-only (remove, then re-add the effect with CSS or JS).
 
 **Things to know about the JS box**: it runs once per element matching the selector, with no sandboxing, on the real site — the same trust level as any code you'd deploy there. If you change an element's HTML so its id/classes no longer match the selector, the CSS and JS that target that selector won't find it; update the selector in the CSS, or keep the id.
 
@@ -256,7 +261,8 @@ The public snippet endpoints (`GET /api/experiments`, `POST /api/event`, `GET /a
 
 - Support for multiple goals per variant with individual conversion rates
 - Per-teammate owner logins if you ever bring someone else onto the admin side
-- Picking click-goal elements inside the visual editor (a "set as goal" action), which would retire the selector-picker bookmarklet entirely
+- Retiring the selector-picker bookmarklet: the editor now covers click goals, so it's only needed for hand-typing a selector into the dashboard form. URL goals could get an editor action too.
+- An "also set this goal on the other variants" option in the editor. Left out deliberately for now: an edit token is scoped to one variant, and widening it to write to siblings (whose selectors may legitimately differ) is a bigger trust decision than it looks — the shared-goals warning covers the risk meanwhile.
 - A real code editor (e.g. CodeMirror) in place of the plain textareas in the visual editor's panel
 - Edit support in the Changes list for the older `style` / `attr` types (Remove-only today)
 - A restricted, client-facing version of the visual editor, using the same scoped edit-token mechanism
