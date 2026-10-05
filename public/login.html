@@ -28,7 +28,7 @@
     border-radius: 14px; padding: 36px 32px; box-shadow: 0 4px 20px rgba(19,23,35,0.06);
   }
   .card img.logo { height: 70px; display: block; margin: 0 auto 28px; }
-  .tagline { font-size: 0.8em; color: var(--text-muted); font-weight: 600; text-align: center; margin: -20px 0 28px; font-style: italic; }
+  .tagline { font-size: 0.8em; color: var(--text-muted); font-weight: 600; text-align: center; margin: -12px 0 12px; font-style: italic; }
   label { display: block; font-weight: 600; font-size: 0.85em; margin-bottom: 6px; }
   input {
     width: 100%; padding: 11px 13px; font-size: 0.95em; border: 1px solid #d5d7e3;
@@ -44,12 +44,18 @@
   button:hover { background: var(--indigo-dark); }
   button:disabled { background: #c9cadb; cursor: not-allowed; }
   .error-msg { color: var(--danger); font-size: 0.85em; margin-top: 14px; min-height: 1.2em; }
-  .toggle-button {
-    display: block; width: 100%; text-align: center; margin-top: 20px; padding: 12px;
-    background: var(--mint-dark); color: white; border: none; border-radius: 8px;
-    cursor: pointer; font-weight: 600; font-size: 0.95em; transition: background 0.15s ease;
+  .mode-label {
+    display: inline-block; margin: 0 auto 18px; padding: 3px 10px; border-radius: 999px;
+    background: #f4f2fe; color: var(--indigo); font-size: 0.75em; font-weight: 700;
+    letter-spacing: 0.04em; text-transform: uppercase;
   }
-  .toggle-button:hover { background: var(--mint-darker); }
+  .brand { text-align: center; }
+  .mode-switch {
+    display: block; width: 100%; text-align: center; margin-top: 18px; padding: 0;
+    background: none; color: var(--text-muted); border: none; cursor: pointer;
+    font-weight: 600; font-size: 0.85em; text-decoration: underline;
+  }
+  .mode-switch:hover { background: none; color: var(--indigo); }
   .forgot-link {
     display: block; text-align: center; margin-top: 14px; font-size: 0.82em;
     color: var(--text-muted); cursor: pointer; text-decoration: underline;
@@ -65,8 +71,11 @@
 </head>
 <body>
 <div class="card">
-  <img src="/assets/logo.png" alt="Pivit" class="logo">
-  <div class="tagline">Put your money where your data is</div>
+  <div class="brand">
+    <img src="/assets/logo.png" alt="Pivit" class="logo" id="login-logo">
+    <div class="tagline">Put your money where your data is</div>
+    <div class="mode-label" id="mode-label">Owner</div>
+  </div>
 
   <form id="owner-form">
     <label for="password">Password</label>
@@ -87,22 +96,34 @@
   </form>
 
   <p id="login-error" class="error-msg"></p>
-  <button type="button" class="toggle-button" id="toggle-link" onclick="toggleForm()">Client login</button>
+  <button type="button" class="mode-switch" id="toggle-link">Client login</button>
 </div>
 
 <script>
 let mode = 'owner';
 
-function toggleForm() {
-  mode = mode === 'owner' ? 'client' : 'owner';
+function applyMode(next, updateUrl) {
+  mode = next === 'client' ? 'client' : 'owner';
   document.getElementById('owner-form').style.display = mode === 'owner' ? 'block' : 'none';
   document.getElementById('client-form').style.display = mode === 'client' ? 'block' : 'none';
+  document.getElementById('mode-label').textContent = mode === 'owner' ? 'Owner' : 'Client';
   document.getElementById('toggle-link').textContent = mode === 'owner' ? 'Client login' : 'Owner login';
+  document.getElementById('login-logo').style.display = 'block';
   document.getElementById('login-error').textContent = '';
   // Collapse both "forgot password" notes whenever the form switches, so a
   // note left open on one side doesn't linger after switching to the other.
   document.getElementById('owner-forgot-note').style.display = 'none';
   document.getElementById('client-forgot-note').style.display = 'none';
+  if (updateUrl) {
+    const url = new URL(location.href);
+    if (mode === 'client') url.searchParams.set('role', 'client');
+    else url.searchParams.delete('role');
+    history.replaceState(null, '', url);
+  }
+}
+
+function toggleForm() {
+  applyMode(mode === 'owner' ? 'client' : 'owner', true);
 }
 
 function toggleForgotNote(id) {
@@ -152,6 +173,9 @@ document.getElementById('client-form').addEventListener('submit', (e) => {
     password: document.getElementById('client-password').value,
   }, btn);
 });
+
+document.getElementById('toggle-link').addEventListener('click', toggleForm);
+applyMode(new URLSearchParams(location.search).get('role') === 'client' ? 'client' : 'owner', false);
 </script>
 </body>
 </html>

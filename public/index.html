@@ -3,362 +3,456 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AB Platform — Admin</title>
+<title>Pivit</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="/admin-ui.js"></script>
 <style>
   :root {
-    --ink: #131723;
+    --ink: #e8e9f0;
     --indigo: #5635FB;
     --indigo-dark: #4527d6;
     --mint: #02DEB5;
-    --mint-dark: #02b895;
-    --bg: #f5f6fb;
-    --card: #ffffff;
-    --border: #e6e7f0;
-    --text-muted: #6b6f83;
-    --danger: #d64545;
-    --danger-bg: #fdeaea;
+    --mint-dark: #7dffe2;
+    --bg: #0c0e14;
+    --sidebar: #10131a;
+    --card: #171a22;
+    --card-2: #1e222c;
+    --border: #2c3140;
+    --text-muted: #9398ab;
+    --danger: #f07178;
+    --warn: #e6c27a;
+    --warn-bg: #2a2416;
+    --ok: #8ee4c7;
     font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   * { box-sizing: border-box; }
-  body { max-width: 1280px; margin: 0 auto; padding: 0 20px 80px; background: var(--bg); color: var(--ink); line-height: 1.5; }
-  .app-shell { display: flex; gap: 24px; align-items: flex-start; }
+  body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.5; }
+  button, input, select, textarea { font-family: inherit; }
+  .app-shell { display: flex; min-height: 100vh; align-items: stretch; }
   .sidebar {
-    width: 210px; flex-shrink: 0; position: sticky; top: 20px;
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-    padding: 16px 10px; display: flex; flex-direction: column; gap: 2px;
+    width: 232px; flex-shrink: 0; background: var(--sidebar);
+    border-right: 1px solid var(--border); padding: 18px 12px 16px;
+    display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; height: 100vh;
   }
-  .topbar-brand img.logo { height: 56px; display: block; }
-  .topbar-brand .tagline { margin-top: 8px; font-size: 0.85em; }
+  .brand {
+    background: #fff; border-radius: 12px; padding: 10px 12px 8px; margin: 0 6px 18px;
+    text-align: center;
+  }
+  .brand img.logo { height: 44px; width: auto; max-width: 100%; display: block; margin: 0 auto; }
+  .tagline { margin-top: 4px; font-size: 0.68em; color: #5c6070; font-weight: 600; font-style: italic; }
   .nav-item {
-    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
-    border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.88em;
-    color: var(--text-muted); transition: background 0.15s ease, color 0.15s ease;
+    display: flex; align-items: center; width: 100%; text-align: left; gap: 10px;
+    padding: 10px 12px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.9em;
+    color: var(--text-muted); background: transparent; border: none; margin: 0;
   }
-  .nav-item:hover { background: #f0f0f7; color: var(--ink); }
-  .nav-item.active { background: #f4f2fe; color: var(--indigo); }
-  .main-area { flex: 1; min-width: 0; }
+  .nav-item:hover { background: #1a1e28; color: var(--ink); }
+  .nav-item.active { background: rgba(86,53,251,0.16); color: #c4b6ff; }
+  .sidebar-foot { margin-top: auto; padding-top: 12px; }
+  .main-area { flex: 1; min-width: 0; padding: 28px 36px 80px; }
   .page { display: none; }
   .page.active { display: block; }
+  .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
+  .page-head h1 { margin: 0; font-size: 1.45em; letter-spacing: -0.02em; }
+  .page-actions, .header-actions, .wizard-actions .right, .inline-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  h1, h2, h3 { color: var(--ink); font-weight: 700; letter-spacing: -0.01em; }
+  h2 { font-size: 1.05em; margin: 0 0 12px; }
+  h3 { font-size: 0.95em; margin: 0 0 8px; }
+  .card, section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px;
+  }
+  .card + .card { margin-top: 14px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+  label { display: block; margin-top: 14px; font-weight: 600; font-size: 0.85em; }
+  .card label:first-child, .stack label:first-child { margin-top: 0; }
+  input, textarea, select {
+    width: 100%; padding: 9px 11px; margin-top: 5px; box-sizing: border-box;
+    font-size: 0.95em; border: 1px solid #3a4054; border-radius: 8px;
+    background: #10131a; color: var(--ink);
+  }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(86,53,251,0.25); }
+  input[readonly] { opacity: 0.75; }
+  textarea { height: 90px; font-family: "SF Mono", Menlo, monospace; font-size: 0.85em; }
+  button, .btn {
+    margin: 0; padding: 9px 16px; background: var(--indigo); color: white;
+    border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.9em;
+  }
+  button:hover, .btn:hover { background: var(--indigo-dark); }
+  button:disabled { background: #3a3e50; color: #9aa0b4; cursor: not-allowed; }
+  .btn-ghost, button.secondary {
+    background: transparent; color: var(--ink); border: 1px solid var(--border);
+  }
+  .btn-ghost:hover, button.secondary:hover { background: #222633; }
+  .btn-danger { background: transparent; color: var(--danger); border: 1px solid rgba(240,113,120,0.4); }
+  .btn-danger:hover { background: rgba(240,113,120,0.12); }
+  button.remove-row { background: transparent; color: var(--danger); padding: 4px 8px; font-size: 1em; }
+  button.remove-row:hover { background: rgba(240,113,120,0.12); }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 10px 8px; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+  td { text-align: left; padding: 12px 8px; border-bottom: 1px solid var(--border); font-size: 0.92em; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: rgba(255,255,255,0.02); }
+  .hint { color: var(--text-muted); font-size: 0.85em; }
+  .error-msg { color: var(--danger); font-weight: 600; font-size: 0.88em; }
+  .ok-msg { color: var(--ok); font-weight: 600; font-size: 0.88em; }
+  pre { background: #10131a; border: 1px solid var(--border); padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 0.8em; white-space: pre-wrap; word-break: break-all; }
+  .name-btn, .linkish {
+    background: none; border: none; color: var(--ink); padding: 0; font-weight: 700; cursor: pointer; text-align: left;
+  }
+  .name-btn:hover, .linkish:hover { color: #c4b6ff; background: none; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.72em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+  .badge.live { background: rgba(2,222,181,0.15); color: var(--mint-dark); }
+  .badge.paused { background: #2a2e3c; color: var(--text-muted); }
+  .badge.draft { background: #3a2e14; color: var(--warn); }
+  .badge.archived { background: #2a2d38; color: #b0b4c4; }
+  .mono { font-family: "SF Mono", Menlo, monospace; font-size: 0.84em; color: var(--text-muted); }
+  .kicker { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 700; }
+  .status-big { font-size: 1.55em; font-weight: 750; margin: 6px 0; letter-spacing: -0.02em; }
+  .crumb { color: var(--text-muted); font-size: 0.85em; margin-bottom: 8px; }
+  .crumb button { background: none; border: none; color: var(--text-muted); padding: 0; font-weight: 600; }
+  .crumb button:hover { color: var(--ink); background: none; }
+  .detail-top { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 8px; }
+  .meta-line { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; color: var(--text-muted); font-size: 0.88em; margin-top: 6px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 18px 0 16px; }
+  .tabs button {
+    background: none; color: var(--text-muted); border: none; border-bottom: 2px solid transparent;
+    border-radius: 0; padding: 10px 14px; margin: 0;
+  }
+  .tabs button:hover { background: none; color: var(--ink); }
+  .tabs button.active { color: #fff; border-bottom-color: var(--indigo); }
+  .banner {
+    display: flex; justify-content: space-between; gap: 12px; align-items: center;
+    background: var(--warn-bg); border: 1px solid #6a5420; color: #f0e2c0;
+    border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; font-size: 0.92em;
+  }
+  .checklist { margin: 8px 0 0; padding-left: 18px; }
+  .checklist li { margin: 4px 0; }
+  .activity-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.88em; }
+  .activity-row:last-child { border-bottom: none; }
+  .placeholder {
+    border: 1px dashed #3a4054; border-radius: 10px; padding: 22px; color: var(--text-muted); margin-top: 12px;
+  }
+  .placeholder strong { display: block; color: var(--ink); margin-bottom: 4px; }
+  .steps { display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 8px 0 16px; }
+  .step-pill {
+    display: flex; align-items: center; gap: 8px; background: transparent; border: none;
+    color: var(--text-muted); font-weight: 650; padding: 4px 6px; border-radius: 999px;
+  }
+  .step-pill:hover:not(:disabled) { background: #1a1e28; color: var(--ink); }
+  .step-pill:disabled { cursor: default; }
+  .step-num {
+    width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+    background: #262a38; font-size: 0.78em;
+  }
+  .step-pill.active { color: #fff; }
+  .step-pill.active .step-num { background: var(--indigo); box-shadow: 0 0 0 3px rgba(86,53,251,0.35); }
+  .step-pill.done { color: #d5d8e6; }
+  .step-pill.done .step-num { background: #14382f; color: var(--mint); }
+  .wizard-card { max-width: 720px; }
+  .wizard-actions { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-top: 22px; }
+  .summary dt { color: var(--text-muted); font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 14px; }
+  .summary dd { margin: 3px 0 0; font-weight: 650; }
+  .var-row, .goal-saved {
+    display: flex; justify-content: space-between; gap: 10px; align-items: center;
+    padding: 12px 0; border-bottom: 1px solid var(--border);
+  }
+  .var-row .grow, .split-input { display: flex; gap: 8px; align-items: center; flex: 1; }
+  .var-row input[type="text"], .add-row input[type="text"] { margin: 0; }
+  .split-input input, .add-row input[type="number"] { width: 88px; margin: 0; }
+  .add-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+  .add-row input[type="text"] { flex: 1; min-width: 160px; margin: 0; }
+  .goal-row {
+    display: grid; grid-template-columns: 1.2fr 1fr auto; gap: 10px; padding: 12px;
+    margin-top: 10px; background: var(--card-2); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .goal-row .full-width { grid-column: 1 / -1; }
+  .picker-link {
+    display: inline-block; padding: 8px 12px; background: #fff; color: #131723;
+    border-radius: 8px; text-decoration: none; font-weight: 700; cursor: grab; font-size: 0.85em;
+  }
+  .variant-card {
+    display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 14px;
+    margin-top: 10px; background: var(--card-2); border: 1px solid var(--border); border-radius: 8px;
+    border-left: 4px solid var(--indigo);
+  }
+  .variant-card.disabled { border-left-color: #3a4054; opacity: 0.72; }
+  .vc-meta { font-size: 0.85em; color: var(--text-muted); margin-top: 4px; }
+  .vc-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+  .vc-actions button { margin: 0; }
+  .check { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; font-weight: 600; }
+  .check input { width: auto; margin-top: 3px; }
+  .chart-wrap { max-width: 100%; margin-top: 16px; }
+  .chart-wrap.trend-wrap { height: 0; overflow: hidden; }
+  .trend-toggle-btn.active { background: var(--indigo); color: white; border-color: transparent; }
   .modal-backdrop {
-    display: none; position: fixed; inset: 0; background: rgba(19,23,35,0.45);
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55);
     z-index: 100; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 40px 20px;
   }
   .modal-backdrop.active { display: flex; }
   .modal-box {
-    background: var(--card); border-radius: 12px; padding: 28px; width: 560px; max-width: 100%;
-    box-shadow: 0 12px 40px rgba(19,23,35,0.2);
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px;
+    width: 560px; max-width: 100%;
   }
-  .modal-box-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-  .modal-close-btn { background: none; border: none; color: var(--text-muted); font-size: 1.3em; cursor: pointer; margin: 0; padding: 4px 8px; }
-  .modal-close-btn:hover { background: #f0f0f7; border-radius: 6px; }
-  h1, h2, h3 { color: var(--ink); font-weight: 700; letter-spacing: -0.01em; }
-  h2 { font-size: 1.05em; margin: 0 0 4px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
-  h3 { font-size: 0.95em; margin: 20px 0 8px; color: var(--ink); }
-  section {
-    margin-bottom: 24px; padding: 24px; background: var(--card);
-    border: 1px solid var(--border); border-radius: 12px;
-    box-shadow: 0 1px 2px rgba(19,23,35,0.04);
-  }
-  label { display: block; margin-top: 14px; font-weight: 600; font-size: 0.85em; color: var(--ink); }
-  input, textarea, select {
-    width: 100%; padding: 9px 11px; margin-top: 5px; box-sizing: border-box;
-    font-family: -apple-system, sans-serif; font-size: 0.95em;
-    border: 1px solid #d5d7e3; border-radius: 8px; background: #fff; color: var(--ink);
-    transition: border-color 0.15s ease;
-  }
-  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(86,53,251,0.12); }
-  textarea { height: 90px; font-family: "SF Mono", Menlo, monospace; font-size: 0.85em; }
-  button {
-    margin-top: 16px; padding: 10px 20px; background: var(--indigo); color: white;
-    border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.9em;
-    transition: background 0.15s ease, transform 0.1s ease;
-  }
-  button:hover { background: var(--indigo-dark); }
-  button:active { transform: scale(0.98); }
-  button:disabled { background: #c9cadb; cursor: not-allowed; }
-  button.secondary {
-    background: #f0f0f7; color: var(--ink); padding: 7px 14px; margin-top: 8px;
-    font-weight: 600; font-size: 0.85em; border: 1px solid var(--border);
-  }
-  button.secondary:hover { background: #e6e6f2; }
-  button.remove-row { background: transparent; color: var(--danger); padding: 4px 8px; margin: 0; font-size: 1.1em; line-height: 1; }
-  button.remove-row:hover { background: var(--danger-bg); }
-  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-  th { text-align: left; padding: 10px 8px; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); border-bottom: 2px solid var(--border); }
-  td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 0.92em; }
-  tr:last-child td { border-bottom: none; }
-  .hint { color: var(--text-muted); font-size: 0.85em; }
-  .error-msg { color: var(--danger); font-weight: 600; }
-  .ok-msg { color: var(--mint-dark); font-weight: 600; }
-  pre { background: #f7f7fc; border: 1px solid var(--border); padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 0.85em; }
-  .change-row, .goal-row {
-    display: grid; grid-template-columns: 1.3fr 1fr; gap: 10px; padding: 14px;
-    margin-top: 10px; background: #fafafe; border: 1px solid var(--border); border-radius: 8px; position: relative;
-  }
-  .goal-row { grid-template-columns: 1.3fr 1fr auto; align-items: center; }
-  .change-row .full-width, .goal-row .full-width { grid-column: 1 / -1; }
-  .picker-link {
-    display: inline-block; padding: 10px 20px; background: var(--ink); color: white;
-    border-radius: 8px; text-decoration: none; font-weight: 600; cursor: grab; font-size: 0.9em;
-  }
-  .variant-card {
-    display: flex; justify-content: space-between; align-items: center; padding: 16px;
-    margin-top: 10px; background: #fafafe; border: 1px solid var(--border); border-radius: 8px;
-    border-left: 4px solid var(--indigo);
-  }
-  .variant-card.disabled { border-left-color: #c9cadb; opacity: 0.7; }
-  .variant-card .vc-meta { font-size: 0.85em; color: var(--text-muted); margin-top: 4px; }
-  .variant-card .vc-actions button { margin: 0 0 0 8px; padding: 6px 12px; font-size: 0.85em; }
-  .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.72em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
-  .badge.live { background: rgba(2,222,181,0.15); color: var(--mint-dark); }
-  .badge.paused { background: #f0f0f7; color: var(--text-muted); }
-  .badge.draft { background: #fff4e0; color: #a3690f; }
-  .badge.archived { background: #eceef5; color: #5a5d70; }
-  .chart-wrap { max-width: 100%; margin-top: 20px; }
-  .chart-wrap.trend-wrap { height: 0; overflow: hidden; } /* JS sets this to 340px only while an actual chart is rendered */
-  .topbar {
-    display: flex; justify-content: space-between; align-items: flex-start;
-    margin-bottom: 24px; padding: 8px 4px 20px; position: relative;
-  }
-  .tagline { font-size: 0.78em; color: var(--text-muted); font-weight: 600; font-style: italic; }
-  .topbar-link {
-    color: var(--ink); font-weight: 600; text-decoration: none; font-size: 0.88em;
-    cursor: pointer; padding: 8px 14px; border-radius: 8px; background: #f0f0f7;
-  }
-  .topbar-link:hover { background: #e6e6f2; }
+  .modal-box-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .modal-close-btn { background: none; border: none; color: var(--text-muted); font-size: 1.2em; padding: 4px 8px; }
   .snippet-popover {
-    display: none; position: absolute; top: 100%; right: 0; margin-top: 10px;
-    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
-    padding: 18px; box-shadow: 0 8px 28px rgba(19,23,35,0.14); z-index: 10; width: 360px; max-width: 90vw;
+    display: none; position: fixed; background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+    z-index: 80; width: 380px; max-width: calc(100vw - 24px);
   }
-  .snippet-popover pre { white-space: pre-wrap; word-break: break-all; font-size: 0.8em; }
-  details {
-    border: 1px solid var(--border); border-radius: 10px; margin-top: 12px; overflow: hidden;
-  }
+  details { border: 1px solid var(--border); border-radius: 10px; margin-top: 12px; overflow: hidden; }
   details summary {
-    padding: 14px 18px; font-weight: 700; cursor: pointer; background: #fafafe;
-    font-size: 0.92em; list-style: none; display: flex; align-items: center;
+    padding: 12px 14px; font-weight: 700; cursor: pointer; background: #1a1e28; font-size: 0.9em;
   }
-  details summary::-webkit-details-marker { display: none; }
-  details summary::before { content: "▸"; color: var(--indigo); margin-right: 10px; transition: transform 0.15s ease; }
-  details[open] summary::before { transform: rotate(90deg); }
-  details[open] summary { border-bottom: 1px solid var(--border); }
-  details .accordion-body { padding: 18px; }
-  .activity-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.85em; }
-  .trend-toggle-btn.active { background: var(--indigo); color: white; }
-  .activity-row:last-child { border-bottom: none; }
-  .srm-ok { background: rgba(2,222,181,0.1); border: 1px solid var(--mint-dark); border-radius: 8px; padding: 14px 16px; font-size: 0.92em; }
-  .srm-warning { background: #fdeaea; border: 1px solid var(--danger); border-radius: 8px; padding: 14px 16px; font-size: 0.92em; color: #8a2d2d; }
+  details .accordion-body { padding: 14px; }
+  .srm-ok { background: rgba(2,222,181,0.08); border: 1px solid rgba(2,184,149,0.45); border-radius: 8px; padding: 14px 16px; font-size: 0.92em; color: #c8ffe9; }
+  .srm-warning { background: rgba(240,113,120,0.1); border: 1px solid rgba(240,113,120,0.5); border-radius: 8px; padding: 14px 16px; font-size: 0.92em; color: #ffd0d3; }
+  .warn-text { color: var(--warn); font-weight: 650; white-space: pre-line; }
+  .empty { padding: 28px 8px; color: var(--text-muted); }
+  code { font-family: "SF Mono", Menlo, monospace; font-size: 0.88em; }
+  @media (max-width: 860px) {
+    .app-shell { flex-direction: column; }
+    .sidebar { width: 100%; height: auto; position: relative; border-right: none; border-bottom: 1px solid var(--border); }
+    .sidebar-foot { margin-top: 8px; }
+    .main-area { padding: 20px 16px 64px; }
+    .grid-2, .detail-top, .page-head { grid-template-columns: 1fr; display: flex; flex-direction: column; }
+    .goal-row { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
 <div class="app-shell">
-  <div class="sidebar">
-    <div class="nav-item active" id="nav-page-home" onclick="showPage('page-home')">🏠 Home</div>
-    <div class="nav-item" id="nav-page-create" onclick="showPage('page-create')">➕ Create experiment</div>
-    <div class="nav-item" id="nav-page-preview" onclick="showPage('page-preview')">👁 Preview &amp; manage</div>
-    <div class="nav-item" id="nav-page-status" onclick="showPage('page-status')">⏯ Start &amp; pause</div>
-  </div>
+  <aside class="sidebar">
+    <div class="brand">
+      <img src="/assets/logo.png" alt="Pivit" class="logo">
+      <div class="tagline">Put your money where your data is</div>
+    </div>
+    <button type="button" class="nav-item active" id="nav-page-home" data-go="#home">Home</button>
+    <button type="button" class="nav-item" id="nav-page-create" data-go="#create">Create experiment</button>
+    <button type="button" class="nav-item" id="nav-page-preview" data-go="#preview">Preview &amp; manage</button>
+    <button type="button" class="nav-item" id="nav-page-status" data-go="#status">Start &amp; pause</button>
+    <div class="sidebar-foot">
+      <button type="button" class="nav-item" onclick="logout()">Log out</button>
+    </div>
+  </aside>
 
   <div class="main-area">
-    <div class="topbar">
-      <div class="topbar-brand">
-        <img src="/assets/logo.png" alt="Pivit" class="logo">
-        <div class="tagline">Put your money where your data is</div>
+    <div id="page-home" class="page active">
+      <div class="page-head">
+        <div>
+          <h1>Experiments</h1>
+          <p class="hint" style="margin:4px 0 0;">Open a test for variants, goals and results. New tests stay draft until you start them.</p>
+        </div>
+        <div class="page-actions">
+          <button type="button" class="btn-ghost" onclick="openClientsModal()">Clients</button>
+          <button type="button" class="btn-ghost" data-snippet-toggle>Copy snippet</button>
+          <button type="button" id="new-experiment-btn" onclick="startNewExperiment()">New experiment</button>
+        </div>
       </div>
-      <div>
-        <a class="topbar-link" onclick="openClientsModal()">👥 Clients</a>
-        <a class="topbar-link" onclick="toggleSnippetPopover(event)" style="margin-left:8px;">📋 Copy Snippet</a>
-        <a class="topbar-link" onclick="logout()" style="margin-left:8px;">🚪 Log out</a>
-      </div>
-      <div id="snippet-popover" class="snippet-popover">
-        <p class="hint" style="margin-top:0; font-weight:600; color:var(--ink);">1. Add to &lt;head&gt; <span class="hint" style="font-weight:400;">(prevents flicker — optional but recommended)</span></p>
-        <pre id="antiflicker-code"></pre>
-        <button type="button" class="secondary" onclick="copyAntiflicker()">Copy</button>
-        <span id="antiflicker-copied" class="hint"></span>
-
-        <p class="hint" style="margin-top:16px; font-weight:600; color:var(--ink);">2. Add just before &lt;/body&gt;</p>
-        <pre id="snippet-code"></pre>
-        <button type="button" class="secondary" onclick="copySnippet()">Copy</button>
-        <span id="snippet-copied" class="hint"></span>
+      <div class="card">
+        <p id="exp-list-msg" class="hint">Loading…</p>
+        <table id="exp-list-table" style="display:none">
+          <thead>
+            <tr>
+              <th>Name</th><th>Status</th><th>URL match</th><th>Client</th><th>Variants</th><th>Signal</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="exp-list-body"></tbody>
+        </table>
       </div>
     </div>
 
-    <div id="page-home" class="page active">
-      <section>
-        <h2>Your Experiments</h2>
-        <button type="button" class="secondary" onclick="refreshAll()">🔄 Refresh</button>
-        <p id="exp-list-msg" class="hint"></p>
-        <table id="exp-list-table" style="display:none">
-          <thead><tr><th>Name</th><th>Status</th><th>URL match</th><th>Client</th><th>Variants</th><th>Created</th><th></th></tr></thead>
-          <tbody id="exp-list-body"></tbody>
-        </table>
-      </section>
-
-      <section>
-        <h2>Results</h2>
-        <label>Experiment <span class="hint">(or click a row above)</span></label>
-        <select id="results-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
-        <label>Visitors <span class="hint">(filters the table and rate chart below)</span></label>
-        <select id="visitor-type-filter">
-          <option value="">All visitors</option>
-          <option value="new">New only</option>
-          <option value="returning">Returning only</option>
-        </select>
-        <button onclick="loadResults()">Load Results</button>
-        <p id="results-msg" class="hint"></p>
-        <table id="results-table" style="display:none">
-          <thead><tr><th>Variant</th><th>Visitors</th><th>New</th><th>Returning</th><th>Clicks</th><th>Conversions</th><th>Rate</th></tr></thead>
-          <tbody id="results-body"></tbody>
-        </table>
-        <div class="chart-wrap"><canvas id="rate-chart" style="display:none"></canvas></div>
-        <div style="margin-top:16px; display:flex; gap:8px; align-items:center;">
-          <span class="hint">Trend:</span>
-          <button type="button" class="secondary trend-toggle-btn" id="trend-mode-cumulative" onclick="setTrendMode('cumulative')">Cumulative</button>
-          <button type="button" class="secondary trend-toggle-btn" id="trend-mode-daily" onclick="setTrendMode('daily')">Daily</button>
-        </div>
-        <div class="chart-wrap trend-wrap"><canvas id="trend-chart" style="display:none"></canvas></div>
-        <button type="button" class="secondary" id="refresh-results-btn" style="display:none" onclick="loadResults()">🔄 Refresh Results</button>
-        <button type="button" class="secondary" id="export-results-btn" style="display:none" onclick="exportResultsCsv(document.getElementById('results-exp-id').value)">⬇ Export CSV</button>
-
-        <h3 style="margin-top:24px;">Sample Ratio Check <span class="hint">(is traffic actually split the way it's configured?)</span></h3>
-        <div id="srm-panel" style="display:none;"></div>
-
-        <h3 style="margin-top:24px;">Bayesian Analysis <span class="hint">(which variant is actually winning, and how sure we can be)</span></h3>
-        <p class="hint">Instead of just a raw percentage, this treats each variant's true conversion rate as uncertain and narrows that uncertainty as data comes in — so a 20% lead from 10 visitors and a 20% lead from 10,000 visitors don't look equally convincing. "Probability best" is the chance that variant is genuinely the top performer, not just ahead by chance.</p>
-        <div id="bayesian-warning" class="hint" style="display:none; color:#a3690f; font-weight:600;"></div>
-        <table id="bayesian-table" style="display:none">
-          <thead><tr><th>Variant</th><th>Visitors</th><th>Conversions</th><th>Est. Rate (95% range)</th><th>Probability Best</th></tr></thead>
-          <tbody id="bayesian-body"></tbody>
-        </table>
-
-        <h3 style="margin-top:24px;">Recent Activity <span class="hint">(raw events, most recent 20 — useful for confirming events are arriving at all)</span></h3>
-        <div id="activity-log" class="hint">Load results above to see recent activity.</div>
-      </section>
+    <div id="page-detail" class="page">
+      <div id="detail-root"></div>
     </div>
 
     <div id="page-create" class="page">
-      <section>
-        <h2>Create Experiment &amp; Add Variant</h2>
+      <div class="page-head">
+        <div>
+          <h1>Create experiment</h1>
+          <p class="hint" style="margin:4px 0 0;">Guided setup — finish with the install snippet, then start when ready.</p>
+        </div>
+      </div>
+      <div class="steps" id="wizard-steps"></div>
+      <div class="card wizard-card" id="wizard-card">
+        <div id="wizard-step-1" class="wizard-step">
+          <label for="wizard-name">Experiment name</label>
+          <input id="wizard-name" placeholder="Homepage CTA copy">
+          <label for="wizard-url">Page URL match</label>
+          <input id="wizard-url" placeholder="https://example.com/about or /about" spellcheck="false">
+          <p class="hint">The page address must contain this text. A path such as /about, or the full URL, both work.</p>
+          <label for="wizard-client">Client (optional)</label>
+          <select id="wizard-client"><option value="">None — internal only</option></select>
+          <p id="wizard-lock-hint" class="hint" hidden>Name and URL are fixed once the draft exists. Client can still be changed.</p>
+        </div>
 
-        <details>
-          <summary>1. Create Experiment</summary>
-          <div class="accordion-body">
-            <label>Name</label>
-            <input id="exp-name" placeholder="Homepage CTA button copy">
-            <label>URL match <span class="hint">(substring the page URL must contain — this is just stored for later, it doesn't check anything right now)</span></label>
-            <input id="exp-url" placeholder="/pricing">
-            <label>Client <span class="hint">(optional — only assigned clients can see this experiment's results)</span></label>
-            <select id="exp-client-id"><option value="">— internal only, no client —</option></select>
-            <button onclick="createExperiment()">Create</button>
-            <p id="exp-result" class="hint"></p>
+        <div id="wizard-step-2" class="wizard-step" hidden>
+          <p class="hint" style="margin-top:0;">Control is created for you. Add the challenger, set the split, then make edits on the live page.</p>
+          <label for="wizard-page-url">Page URL for preview and edits</label>
+          <input id="wizard-page-url" placeholder="https://example.com/about" spellcheck="false">
+          <div id="wizard-variants"></div>
+          <p id="wizard-split-note" class="hint"></p>
+          <button type="button" class="btn-ghost" id="wizard-add-variant" style="margin-top:10px;">+ Add variant</button>
+        </div>
+
+        <div id="wizard-step-3" class="wizard-step" hidden>
+          <p class="hint" style="margin-top:0;">Optional. The same goals are saved on every variant so the comparison stays fair. Skip if you will add them in the editor.</p>
+          <p style="margin-top:10px;"><a class="picker-link picker-bookmarklet" href="#">Selector Picker</a> <span class="hint">Drag to your bookmarks bar, then click it on the live page.</span></p>
+          <div id="wizard-popular-goals"></div>
+          <div id="wizard-goals-list"></div>
+          <button type="button" class="btn-ghost" style="margin-top:10px;" onclick="addGoalRow(null, 'wizard-goals-list')">+ Add goal</button>
+        </div>
+
+        <div id="wizard-step-4" class="wizard-step" hidden>
+          <p class="hint" style="margin-top:0;">Add both snippets to the page you are testing. The checklist is for you — it does not block saving.</p>
+          <p class="hint" style="font-weight:700; color:var(--ink);">1. Add to &lt;head&gt; <span class="hint" style="font-weight:400;">(reduces flicker — recommended)</span></p>
+          <pre id="wizard-antiflicker-code"></pre>
+          <button type="button" class="btn-ghost" onclick="copyAntiflicker('wizard-antiflicker-copied')">Copy</button>
+          <span id="wizard-antiflicker-copied" class="hint"></span>
+          <p class="hint" style="font-weight:700; color:var(--ink);">2. Add just before &lt;/body&gt;</p>
+          <pre id="wizard-snippet-code"></pre>
+          <button type="button" class="btn-ghost" onclick="copySnippet('wizard-snippet-copied')">Copy</button>
+          <span id="wizard-snippet-copied" class="hint"></span>
+          <label class="check"><input type="checkbox" data-wizard-check="snippet"> Snippet is on the page</label>
+          <label class="check"><input type="checkbox" data-wizard-check="preview"> Preview looks right on both variants</label>
+          <label class="check"><input type="checkbox" data-wizard-check="event"> A test view shows up after you start</label>
+        </div>
+
+        <div id="wizard-step-5" class="wizard-step" hidden>
+          <dl class="summary" id="wizard-summary"></dl>
+        </div>
+
+        <p id="wizard-msg" class="hint"></p>
+        <div class="wizard-actions">
+          <button type="button" class="btn-ghost" id="wizard-back" hidden>Back</button>
+          <div class="right">
+            <button type="button" class="btn-ghost" id="wizard-skip" hidden>Skip</button>
+            <button type="button" class="btn-ghost" id="wizard-save-draft" hidden>Save as draft</button>
+            <button type="button" id="wizard-next">Continue</button>
           </div>
-        </details>
-
-        <details>
-          <summary>2. Add Variant</summary>
-          <div class="accordion-body">
-            <p id="edit-banner" class="hint" style="display:none; color:#c0392b;">Editing an existing variant's name, traffic split and goals — takes effect immediately for live traffic. To change what it does on the page, use 🎯 Make Edits. <button type="button" class="secondary" onclick="cancelEditVariant()" style="margin:0 0 0 8px;">Cancel edit</button></p>
-            <label>Experiment</label>
-            <select id="var-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
-            <label>Variant Name</label>
-            <input id="var-name" placeholder="control / variant-b">
-            <label>Traffic Split (%)</label>
-            <input id="var-split" type="number" value="50">
-          </div>
-        </details>
-
-        <details>
-          <summary>3. Add Goals <span class="hint">(optional)</span></summary>
-          <div class="accordion-body">
-            <p class="hint" style="margin-top:0;">Need a selector for a click goal? <a class="picker-link" id="picker-bookmarklet" href="#" style="padding:4px 10px; font-size:0.85em; margin-left:4px;">🎯 Selector Picker</a> — drag to your bookmarks bar once, then click it on the live page and click any element to copy its selector.</p>
-            <div id="popular-goals"></div>
-            <div id="goals-list"></div>
-            <button type="button" class="secondary" onclick="addGoalRow()">+ Add another goal</button>
-          </div>
-        </details>
-
-        <input type="hidden" id="editing-variant-id" value="">
-        <button id="save-variant-btn" onclick="saveVariant()">Save Variant</button>
-        <p id="var-result" class="hint"></p>
-
-        <div id="saved-variant-summary"></div>
-      </section>
+        </div>
+      </div>
     </div>
 
     <div id="page-preview" class="page">
-      <section>
-        <h2>Preview &amp; Manage Variants</h2>
-        <label>Experiment</label>
-        <select id="manage-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
-        <label>Page URL to preview on <span class="hint">(the actual page, e.g. https://cantsaythat.co.uk/shop)</span></label>
-        <input id="manage-page-url" placeholder="https://cantsaythat.co.uk/shop">
-        <button onclick="loadManageVariants()">Load Variants</button>
+      <div class="page-head">
+        <div>
+          <h1>Preview &amp; manage</h1>
+          <p class="hint" style="margin:4px 0 0;">Open a variant on the live page, or jump into the experiment to edit splits and goals.</p>
+        </div>
+      </div>
+      <section class="card">
+        <label for="manage-exp-id">Experiment</label>
+        <select id="manage-exp-id"><option value="">— select an experiment —</option></select>
+        <label for="manage-page-url">Page URL to preview on</label>
+        <input id="manage-page-url" placeholder="https://example.com/about" spellcheck="false">
+        <div style="margin-top:14px;"><button type="button" onclick="loadManageVariants()">Load variants</button></div>
         <p id="manage-msg" class="hint"></p>
         <div id="manage-variants-list"></div>
       </section>
     </div>
 
     <div id="page-status" class="page">
-      <section>
-        <h2>Start / Pause Experiment</h2>
-        <label>Experiment</label>
-        <select id="status-exp-id"><option value="">— select an experiment (refresh list above first) —</option></select>
-        <label>Status</label>
+      <div class="page-head">
+        <div>
+          <h1>Start &amp; pause</h1>
+          <p class="hint" style="margin:4px 0 0;">Same control as an experiment’s Settings tab. Day to day, open the experiment and use Start, Pause or Settings.</p>
+        </div>
+      </div>
+      <section class="card" style="max-width:640px;">
+        <label for="status-exp-id">Experiment</label>
+        <select id="status-exp-id"><option value="">— select an experiment —</option></select>
+        <label for="status-value">Status</label>
         <select id="status-value">
           <option value="running">running</option>
           <option value="paused">paused</option>
           <option value="draft">draft</option>
           <option value="archived">archived</option>
         </select>
-        <button onclick="updateStatus()">Update</button>
+        <div class="inline-actions" style="margin-top:16px;">
+          <button type="button" onclick="updateStatus()">Update</button>
+          <button type="button" class="btn-ghost" onclick="openStatusSettings()">Open in Settings</button>
+        </div>
         <p id="status-result" class="hint"></p>
       </section>
     </div>
   </div>
 </div>
 
+<div id="snippet-popover" class="snippet-popover">
+  <p class="hint" style="margin-top:0; font-weight:700; color:var(--ink);">1. Add to &lt;head&gt; <span class="hint" style="font-weight:400;">(reduces flicker — recommended)</span></p>
+  <pre id="antiflicker-code"></pre>
+  <button type="button" class="btn-ghost" onclick="copyAntiflicker('antiflicker-copied')">Copy</button>
+  <span id="antiflicker-copied" class="hint"></span>
+  <p class="hint" style="margin-top:16px; font-weight:700; color:var(--ink);">2. Add just before &lt;/body&gt;</p>
+  <pre id="snippet-code"></pre>
+  <button type="button" class="btn-ghost" onclick="copySnippet('snippet-copied')">Copy</button>
+  <span id="snippet-copied" class="hint"></span>
+</div>
+
 <div id="clients-modal" class="modal-backdrop">
   <div class="modal-box">
     <div class="modal-box-header">
-      <h2 style="border:none; padding:0; margin:0;">Clients</h2>
-      <button type="button" class="modal-close-btn" onclick="closeClientsModal()">✕</button>
+      <h2 style="margin:0;">Clients</h2>
+      <button type="button" class="modal-close-btn" onclick="closeClientsModal()" aria-label="Close">✕</button>
     </div>
-    <p class="hint">Create a login for a client here, then assign them to experiments on the Home page (or reassign anytime from the experiments table) so they can see just their own results at <code id="client-login-url"></code>.</p>
-
+    <p class="hint">Create a login, then assign that client on an experiment’s Settings tab. They only see their own results at <code id="client-login-url"></code>.</p>
     <details>
       <summary>Add a client</summary>
       <div class="accordion-body">
-        <label>Display name</label>
+        <label for="new-client-name">Display name</label>
         <input id="new-client-name" placeholder="Can't Say That?">
-        <label>Username</label>
+        <label for="new-client-username">Username</label>
         <input id="new-client-username" placeholder="cantsaythat">
-        <label>Password</label>
+        <label for="new-client-password">Password</label>
         <input id="new-client-password" type="password" placeholder="At least 8 characters">
-        <button onclick="createClient()">Create client</button>
+        <div style="margin-top:12px;"><button type="button" onclick="createClient()">Create client</button></div>
         <p id="client-result" class="hint"></p>
         <div id="new-client-credentials"></div>
       </div>
     </details>
-
     <div id="clients-list" style="margin-top:12px;"></div>
   </div>
 </div>
 
 <script>
+const UI = window.PivitUI;
 const API = '';
+const EXP_SELECT_IDS = ['manage-exp-id', 'status-exp-id'];
+const STATUS_CLASS = { running: 'live', draft: 'draft', paused: 'paused', archived: 'archived' };
+const WIZARD_LABELS = ['Basics', 'Variants', 'Goals', 'Install', 'Review'];
+
+let clientsCache = [];
+let experimentsCache = [];
+let currentDetail = null;
+let currentTab = 'overview';
+let routeToken = 0;
+let pickerHref = '#';
+let rateChart = null;
+let trendChart = null;
+let currentTrendSeries = [];
+let trendMode = 'cumulative';
+let popularGoalsCache = [];
+let currentManageVariants = [];
+let currentManageExpId = '';
+
+const wizard = {
+  step: 1,
+  maxStep: 1,
+  expId: null,
+  name: '',
+  url: '',
+  clientId: '',
+  pageUrl: '',
+  variants: [],
+  goalRows: [],
+  checks: { snippet: false, preview: false, event: false },
+  busy: false,
+};
 
 function authHeaders() {
-  // Auth is now the session cookie, sent automatically on same-origin requests —
-  // nothing to attach here. Kept as a function (rather than removing every call
-  // site) since it still centralizes the Content-Type header.
   return { 'Content-Type': 'application/json' };
 }
 
-// Every request goes through here so failures always produce a readable message —
-// covers a bad/missing API key, a network/CORS failure, or a server error that
-// isn't valid JSON, instead of ever showing a bare "undefined".
 async function callApi(path, options = {}) {
   let res;
   try {
@@ -366,32 +460,22 @@ async function callApi(path, options = {}) {
   } catch (networkErr) {
     return { ok: false, message: `Network error — could not reach the server (${networkErr.message}). Check the URL and that the server is running.` };
   }
-
   if (res.status === 401) {
-    // Session missing or expired — bounce to login rather than showing a
-    // confusing inline error on every section of the dashboard.
     window.location.href = '/login.html';
     return { ok: false, message: 'not authenticated' };
   }
-
   const raw = await res.text();
   let data = null;
   try { data = raw ? JSON.parse(raw) : null; } catch (e) { /* not JSON */ }
-
   if (!res.ok) {
     let detail;
-    if (data && (data.error || data.detail)) {
-      detail = data.detail ? `${data.error} — ${data.detail}` : data.error;
-    } else {
-      detail = raw || `HTTP ${res.status}`;
-    }
+    if (data && (data.error || data.detail)) detail = data.detail ? `${data.error} — ${data.detail}` : data.error;
+    else detail = raw || `HTTP ${res.status}`;
     return { ok: false, message: `${res.status}: ${detail}` };
   }
   return { ok: true, data };
 }
 
-// Confirms an active owner session on load; bounces to login immediately if
-// there isn't one, before any data-fetching happens.
 async function requireOwnerSession() {
   try {
     const res = await fetch('/api/auth/me');
@@ -412,19 +496,64 @@ async function logout() {
   window.location.href = '/login.html';
 }
 
-// --- Left-nav page switching ---
-
-const PAGE_IDS = ['page-home', 'page-create', 'page-preview', 'page-status'];
-
-function showPage(pageId) {
-  PAGE_IDS.forEach((id) => {
-    document.getElementById(id).classList.toggle('active', id === pageId);
-    document.getElementById('nav-' + id).classList.toggle('active', id === pageId);
-  });
-  try { localStorage.setItem('pivit_last_page', pageId); } catch (e) {}
+function go(hash) {
+  if (location.hash === hash) applyRoute();
+  else location.hash = hash;
 }
 
-// --- Clients modal ---
+function showPage(id) {
+  ['page-home', 'page-detail', 'page-create', 'page-preview', 'page-status'].forEach((pageId) => {
+    document.getElementById(pageId).classList.toggle('active', pageId === id);
+  });
+}
+
+function setNav(activeId) {
+  ['page-home', 'page-create', 'page-preview', 'page-status'].forEach((id) => {
+    const el = document.getElementById('nav-' + id);
+    if (el) el.classList.toggle('active', id === activeId);
+  });
+}
+
+function setTitle(text) {
+  document.title = text;
+}
+
+async function applyRoute() {
+  const token = ++routeToken;
+  const hash = location.hash || '#home';
+  const expMatch = hash.match(/^#experiment\/([0-9a-f-]{36})(?:\/(overview|variants|goals|results|settings))?$/i);
+  if (expMatch) {
+    showPage('page-detail');
+    setNav('page-home');
+    setTitle('Pivit — Experiment');
+    await openExperiment(expMatch[1], expMatch[2] || 'overview', { token });
+    return;
+  }
+  const pages = { '#home': 'page-home', '#create': 'page-create', '#preview': 'page-preview', '#status': 'page-status' };
+  const page = pages[hash] || 'page-home';
+  showPage(page);
+  setNav(page);
+  if (page === 'page-home') { setTitle('Pivit — Experiments'); loadExperimentList(); }
+  if (page === 'page-create') { setTitle('Pivit — Create experiment'); renderWizard(); }
+  if (page === 'page-preview') setTitle('Pivit — Preview');
+  if (page === 'page-status') setTitle('Pivit — Start & pause');
+  if (token !== routeToken) return;
+}
+
+function startNewExperiment() {
+  resetWizard();
+  go('#create');
+}
+
+document.querySelector('.sidebar').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-go]');
+  if (!btn) return;
+  go(btn.dataset.go);
+});
+
+window.addEventListener('hashchange', () => applyRoute());
+
+// --- Clients ---
 
 function openClientsModal() {
   document.getElementById('clients-modal').classList.add('active');
@@ -433,129 +562,58 @@ function openClientsModal() {
 function closeClientsModal() {
   document.getElementById('clients-modal').classList.remove('active');
 }
-// Click outside the modal box (on the dark backdrop) closes it, same as the X button.
 document.getElementById('clients-modal').addEventListener('click', (e) => {
   if (e.target.id === 'clients-modal') closeClientsModal();
 });
 
-// --- Experiments list ---
-
-const STATUS_COLORS = { running: 'live', draft: 'draft', paused: 'paused', archived: 'archived' };
-const EXP_SELECT_IDS = ['var-exp-id', 'manage-exp-id', 'status-exp-id', 'results-exp-id'];
-
-// Rebuilds all four "Experiment" dropdowns from the current list, preserving
-// whatever was selected in each if that experiment still exists.
-function populateExperimentSelects(experiments) {
-  EXP_SELECT_IDS.forEach((fieldId) => {
-    const select = document.getElementById(fieldId);
-    const previousValue = select.value;
-    const options = experiments.map((exp) =>
-      `<option value="${exp.id}">${exp.name} — ${exp.status} (${exp.id.slice(0, 8)}…)</option>`
-    ).join('');
-    select.innerHTML = '<option value="">— select an experiment —</option>' + options;
-    if (experiments.some((exp) => exp.id === previousValue)) select.value = previousValue;
-  });
+function fillClientSelect(select, blankLabel, selected) {
+  if (!select) return;
+  const previous = selected != null ? selected : select.value;
+  select.innerHTML = `<option value="">${UI.escapeHtml(blankLabel)}</option>` +
+    clientsCache.map((c) => `<option value="${c.id}">${UI.escapeHtml(c.name)}</option>`).join('');
+  if ([...select.options].some((o) => o.value === previous)) select.value = previous;
 }
 
-async function loadExperimentList() {
-  const msgEl = document.getElementById('exp-list-msg');
-  const table = document.getElementById('exp-list-table');
-
-  const result = await callApi('/api/experiments/all', { headers: authHeaders() });
-  if (!result.ok) { msgEl.className = 'error-msg'; msgEl.textContent = `Error: ${result.message}`; table.style.display = 'none'; return; }
-
-  const experiments = result.data.experiments || [];
-  populateExperimentSelects(experiments);
-
-  if (experiments.length === 0) { msgEl.className = 'hint'; msgEl.textContent = 'No experiments yet — create one below.'; table.style.display = 'none'; return; }
-
-  msgEl.textContent = '';
-  const tbody = document.getElementById('exp-list-body');
-  tbody.innerHTML = '';
-  experiments.forEach((exp) => {
-    const tr = document.createElement('tr');
-    const created = new Date(exp.created_at).toLocaleDateString();
-    const archivedActions = exp.status === 'archived'
-      ? `<button type="button" class="secondary" onclick="exportResultsCsv('${exp.id}')">Export CSV</button>
-         <button type="button" class="secondary" style="color:#c0392b" onclick="deleteExperiment('${exp.id}', this)">Delete</button>`
-      : '';
-    const clientOptions = clientsCache.map((c) => `<option value="${c.id}" ${exp.client_id === c.id ? 'selected' : ''}>${c.name}</option>`).join('');
-    const clientSelect = `<select onchange="assignClient('${exp.id}', this.value)" style="width:auto; margin:0; padding:4px 6px; font-size:0.82em;"><option value="">— none —</option>${clientOptions}</select>`;
-    tr.innerHTML = `
-      <td>${exp.name}</td>
-      <td><span class="badge ${STATUS_COLORS[exp.status] || 'paused'}">${exp.status}</span></td>
-      <td class="hint">${exp.url_match}</td>
-      <td>${clientSelect}</td>
-      <td>${exp.variant_count}</td>
-      <td class="hint">${created}</td>
-      <td>
-        <button type="button" onclick="viewResultsFor('${exp.id}')">View Results</button>
-        <button type="button" class="secondary" onclick="useExperiment('${exp.id}', '${(exp.url_match || '').replace(/'/g, "\\'")}')">Use ↓</button> ${archivedActions}
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
-  table.style.display = 'table';
-}
-
-// Selects this experiment in the Home page's Results section and loads it
-// straight away — the "click an experiment, see its results" flow.
-function viewResultsFor(expId) {
-  document.getElementById('results-exp-id').value = expId;
-  loadResults();
-  document.getElementById('results-exp-id').closest('section').scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-// Reassigns (or un-assigns with an empty value) which client can see an experiment.
-async function assignClient(expId, clientId) {
-  const result = await callApi(`/api/experiments/${expId}/client`, {
-    method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ client_id: clientId || null })
-  });
-  if (!result.ok) alert(`Error: ${result.message}`);
-  loadExperimentList();
-}
-
-// --- Clients ---
-
-let clientsCache = [];
-document.getElementById('client-login-url').textContent = `${location.origin}/login.html`;
-
-function populateClientDropdown() {
-  const select = document.getElementById('exp-client-id');
-  const previous = select.value;
-  select.innerHTML = '<option value="">— internal only, no client —</option>' +
-    clientsCache.map((c) => `<option value="${c.id}">${c.name}</option>`).join('');
-  if (clientsCache.some((c) => c.id === previous)) select.value = previous;
+function populateClientDropdowns() {
+  fillClientSelect(document.getElementById('wizard-client'), 'None — internal only', wizard.clientId || '');
+  if (currentDetail) {
+    fillClientSelect(document.getElementById('settings-client'), 'None — internal only', currentDetail.client_id || '');
+  }
 }
 
 async function loadClients() {
   const result = await callApi('/api/clients', { headers: authHeaders() });
   const listEl = document.getElementById('clients-list');
-  if (!result.ok) { listEl.innerHTML = `<p class="error-msg">Error: ${result.message}</p>`; clientsCache = []; populateClientDropdown(); return; }
-
+  if (!result.ok) {
+    listEl.innerHTML = `<p class="error-msg">Error: ${UI.escapeHtml(result.message)}</p>`;
+    clientsCache = [];
+    populateClientDropdowns();
+    return;
+  }
   clientsCache = result.data.clients || [];
-  populateClientDropdown();
-
-  if (clientsCache.length === 0) { listEl.innerHTML = '<p class="hint">No clients yet — add one above.</p>'; return; }
-
+  populateClientDropdowns();
+  if (clientsCache.length === 0) {
+    listEl.innerHTML = '<p class="hint">No clients yet — add one above.</p>';
+    return;
+  }
   listEl.innerHTML = clientsCache.map((c) => `
     <div class="variant-card" style="flex-direction:column; align-items:stretch;">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
         <div>
-          <strong>${c.name}</strong>
-          <div class="vc-meta">username: ${c.username} · ${c.experiment_count} experiment(s) assigned</div>
+          <strong>${UI.escapeHtml(c.name)}</strong>
+          <div class="vc-meta">username: ${UI.escapeHtml(c.username)} · ${c.experiment_count} experiment(s) assigned</div>
         </div>
         <div class="vc-actions">
-          <button type="button" class="secondary" onclick="renameClient('${c.id}', '${c.name.replace(/'/g, "\\'")}')">Rename</button>
-          <button type="button" class="secondary" onclick="toggleResetPassword('${c.id}')">Reset password</button>
-          <button type="button" class="secondary" style="color:#c0392b" onclick="deleteClient('${c.id}', this)">Delete</button>
+          <button type="button" class="btn-ghost" data-client-action="rename" data-id="${c.id}" data-name="${UI.escapeHtml(c.name)}">Rename</button>
+          <button type="button" class="btn-ghost" data-client-action="reset" data-id="${c.id}">Reset password</button>
+          <button type="button" class="btn-danger" data-client-action="delete" data-id="${c.id}">Delete</button>
         </div>
       </div>
       <div id="reset-pw-row-${c.id}" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
         <div style="display:flex; gap:8px; align-items:center;">
           <input type="password" id="reset-pw-input-${c.id}" placeholder="New password (min 8 characters)" style="flex:1; margin:0;">
-          <button type="button" onclick="saveClientPassword('${c.id}', '${c.username}')" style="margin:0; white-space:nowrap;">Save</button>
-          <button type="button" class="secondary" onclick="toggleResetPassword('${c.id}')" style="margin:0;">Cancel</button>
+          <button type="button" data-client-action="save-password" data-id="${c.id}" data-username="${UI.escapeHtml(c.username)}">Save</button>
+          <button type="button" class="btn-ghost" data-client-action="reset" data-id="${c.id}">Cancel</button>
         </div>
         <div id="reset-pw-credentials-${c.id}" style="margin-top:8px;"></div>
       </div>
@@ -563,24 +621,36 @@ async function loadClients() {
   `).join('');
 }
 
-// Shared by client creation and password reset — a persistent, copyable box
-// instead of a transient alert()/prompt(), since a native dialog disappears the
-// moment you dismiss it and can't be copied cleanly.
+document.getElementById('clients-list').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-client-action]');
+  if (!btn) return;
+  if (btn.dataset.clientAction === 'rename') renameClient(btn.dataset.id, btn.dataset.name);
+  if (btn.dataset.clientAction === 'reset') toggleResetPassword(btn.dataset.id);
+  if (btn.dataset.clientAction === 'delete') deleteClient(btn.dataset.id, btn);
+  if (btn.dataset.clientAction === 'save-password') saveClientPassword(btn.dataset.id, btn.dataset.username);
+});
+
+function clientNameById(id) {
+  if (!id) return null;
+  const found = clientsCache.find((c) => c.id === id);
+  return found ? found.name : null;
+}
+
 function showCredentialBox(containerId, username, password) {
   const container = document.getElementById(containerId);
-  const escapedPw = password.replace(/'/g, "\\'").replace(/"/g, '&quot;');
   container.innerHTML = `
-    <div style="background:#f4f2fe; border:1px solid var(--indigo); border-radius:8px; padding:12px; margin-top:10px;">
+    <div style="background:#221c3d; border:1px solid var(--indigo); border-radius:8px; padding:12px; margin-top:10px;">
       <div class="hint" style="margin-bottom:6px;">Give these to your client — the password can't be shown again once you leave this page.</div>
-      <div style="font-family:'SF Mono', Menlo, monospace; font-size:0.9em;">Username: <strong>${username}</strong><br>Password: <strong>${password}</strong></div>
-      <button type="button" class="secondary" style="margin-top:8px;" onclick="copyCredentials('${username}', '${escapedPw}')">Copy both</button>
+      <div style="font-family:'SF Mono', Menlo, monospace; font-size:0.9em;">Username: <strong>${UI.escapeHtml(username)}</strong><br>Password: <strong>${UI.escapeHtml(password)}</strong></div>
+      <button type="button" class="btn-ghost" style="margin-top:8px;" id="${containerId}-copy">Copy both</button>
       <span id="${containerId}-copied" class="hint"></span>
     </div>
   `;
-}
-
-function copyCredentials(username, password) {
-  navigator.clipboard.writeText(`Username: ${username}\nPassword: ${password}`).catch(() => {});
+  document.getElementById(`${containerId}-copy`).addEventListener('click', () => {
+    navigator.clipboard.writeText(`Username: ${username}\nPassword: ${password}`).then(() => {
+      document.getElementById(`${containerId}-copied`).textContent = ' Copied';
+    }).catch(() => {});
+  });
 }
 
 function toggleResetPassword(id) {
@@ -626,8 +696,9 @@ async function renameClient(id, currentName) {
   if (!name) return;
   const result = await callApi(`/api/clients/${id}`, { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ name }) });
   if (!result.ok) alert(`Error: ${result.message}`);
-  loadClients();
+  await loadClients();
   loadExperimentList();
+  if (currentDetail) reloadDetail();
 }
 
 async function deleteClient(id, btn) {
@@ -636,12 +707,81 @@ async function deleteClient(id, btn) {
   const result = await callApi(`/api/clients/${id}`, { method: 'DELETE', headers: authHeaders() });
   btn.disabled = false;
   if (!result.ok) { alert(`Error: ${result.message}`); return; }
-  loadClients();
+  await loadClients();
   loadExperimentList();
+  if (currentDetail) reloadDetail();
 }
 
-// Downloads the full raw-event CSV for an experiment. Works from any row (Your
-// Experiments list or Results section) since it just needs the id.
+// --- Experiments list ---
+
+function populateExperimentSelects(experiments) {
+  EXP_SELECT_IDS.forEach((fieldId) => {
+    const select = document.getElementById(fieldId);
+    if (!select) return;
+    const previousValue = select.value;
+    const options = experiments.map((exp) =>
+      `<option value="${exp.id}">${UI.escapeHtml(exp.name)} — ${UI.escapeHtml(exp.status)}</option>`
+    ).join('');
+    select.innerHTML = '<option value="">— select an experiment —</option>' + options;
+    if (experiments.some((exp) => exp.id === previousValue)) select.value = previousValue;
+  });
+}
+
+async function loadExperimentList() {
+  const msgEl = document.getElementById('exp-list-msg');
+  const table = document.getElementById('exp-list-table');
+  const result = await callApi('/api/experiments/all', { headers: authHeaders() });
+  if (!result.ok) {
+    msgEl.className = 'error-msg';
+    msgEl.textContent = `Error: ${result.message}`;
+    table.style.display = 'none';
+    return;
+  }
+  const experiments = result.data.experiments || [];
+  experimentsCache = experiments;
+  populateExperimentSelects(experiments);
+  if (experiments.length === 0) {
+    msgEl.className = 'hint';
+    msgEl.textContent = 'No experiments yet. Create one to get a draft and an install snippet.';
+    table.style.display = 'none';
+    document.getElementById('exp-list-body').innerHTML = '';
+    return;
+  }
+  msgEl.textContent = '';
+  const tbody = document.getElementById('exp-list-body');
+  tbody.innerHTML = experiments.map((exp) => {
+    const client = exp.client_name || '—';
+    return `<tr>
+      <td><button type="button" class="name-btn" data-open="${exp.id}">${UI.escapeHtml(exp.name)}</button></td>
+      <td><span class="badge ${STATUS_CLASS[exp.status] || 'paused'}">${UI.escapeHtml(exp.status)}</span></td>
+      <td class="mono" title="${UI.escapeHtml(exp.url_match || '')}">${UI.escapeHtml(UI.shortUrl(exp.url_match))}</td>
+      <td>${UI.escapeHtml(client)}</td>
+      <td>${exp.variant_count}</td>
+      <td class="hint" data-signal-for="${exp.id}">${exp.status === 'draft' ? 'No data yet' : '…'}</td>
+      <td><button type="button" class="btn-ghost" data-open="${exp.id}">Open</button></td>
+    </tr>`;
+  }).join('');
+  table.style.display = 'table';
+  fillSignals(experiments);
+}
+
+async function fillSignals(experiments) {
+  await Promise.all(experiments.map(async (exp) => {
+    const cell = document.querySelector(`[data-signal-for="${exp.id}"]`);
+    if (!cell || exp.status === 'draft') return;
+    const result = await callApi(`/api/results/${exp.id}/bayesian`, { headers: authHeaders() });
+    const live = document.querySelector(`[data-signal-for="${exp.id}"]`);
+    if (!live) return;
+    live.textContent = UI.signalText(exp.status, result.ok ? result.data : null);
+  }));
+}
+
+document.getElementById('exp-list-body').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-open]');
+  if (!btn) return;
+  go(`#experiment/${btn.dataset.open}/overview`);
+});
+
 async function exportResultsCsv(expId) {
   const res = await fetch(`/api/results/${expId}/export`, { headers: authHeaders() });
   if (res.status === 401) { window.location.href = '/login.html'; return; }
@@ -662,139 +802,1188 @@ async function exportResultsCsv(expId) {
   URL.revokeObjectURL(url);
 }
 
-// Permanent — server also enforces "archived only" as a safety net, but check here
-// too so the confirm text is accurate before the request even goes out.
 async function deleteExperiment(expId, btn) {
   if (!confirm('Delete this experiment permanently? This removes all its variants and every recorded event — there is no undo.\n\nMake sure you\'ve exported the CSV first if you want to keep the data.')) return;
-  btn.disabled = true;
+  if (btn) btn.disabled = true;
   const result = await callApi(`/api/experiments/${expId}`, { method: 'DELETE', headers: authHeaders() });
-  btn.disabled = false;
+  if (btn) btn.disabled = false;
   if (!result.ok) { alert(`Error: ${result.message}`); return; }
-  loadExperimentList();
+  if (currentDetail && currentDetail.id === expId) currentDetail = null;
+  go('#home');
 }
 
-// Selects this experiment in every dropdown below, and the preview page URL
-// if url_match looks like a full URL — so picking from the list is one click.
-function useExperiment(id, urlMatch) {
-  EXP_SELECT_IDS.forEach((fieldId) => {
-    document.getElementById(fieldId).value = id;
-  });
-  if (/^https?:\/\//.test(urlMatch)) document.getElementById('manage-page-url').value = urlMatch;
-  // The experiment dropdowns are shared across pages, so selecting it above applies everywhere;
-  // jump to Preview & manage, since that's where "use this experiment" usually leads next.
-  showPage('page-preview');
+// --- Detail ---
+
+function pageUrlKey(id) { return `pivit_page_url_${id}`; }
+
+function storedPageUrl(exp) {
+  try {
+    const stored = sessionStorage.getItem(pageUrlKey(exp.id));
+    if (stored) return stored;
+  } catch (e) {}
+  if (/^https?:\/\//i.test(exp.url_match || '')) return exp.url_match;
+  return '';
 }
 
-// Refresh the list (and dropdowns, and popular goals) — called once the owner
-// session is confirmed on page load, and by the Refresh button.
-async function refreshAll() {
-  await loadClients();
-  loadExperimentList();
-  loadPopularGoals();
+function rememberPageUrl(id, value) {
+  try { sessionStorage.setItem(pageUrlKey(id), value); } catch (e) {}
 }
 
-// Selecting an experiment in these two dropdowns loads its data immediately —
-// no separate click needed once it's picked.
-document.getElementById('results-exp-id').addEventListener('change', (e) => {
-  if (e.target.value) loadResults();
-});
-document.getElementById('visitor-type-filter').addEventListener('change', () => {
-  if (document.getElementById('results-exp-id').value) loadResults();
-});
-document.getElementById('manage-exp-id').addEventListener('change', (e) => {
-  if (e.target.value) loadManageVariants();
-});
-
-// --- Snippet, computed from wherever this dashboard is actually hosted ---
-
-function toggleSnippetPopover(e) {
-  e.preventDefault();
-  const el = document.getElementById('snippet-popover');
-  el.style.display = el.style.display === 'block' ? 'none' : 'block';
-}
-document.addEventListener('click', (e) => {
-  const popover = document.getElementById('snippet-popover');
-  if (popover.style.display === 'block' && !popover.contains(e.target) && !e.target.classList.contains('topbar-link')) {
-    popover.style.display = 'none';
+async function openExperiment(id, tab, { token, force } = {}) {
+  const requestToken = token || routeToken;
+  if (!force && currentDetail && currentDetail.id === id && document.getElementById('detail-header')) {
+    if (requestToken !== routeToken) return;
+    showDetailTab(tab || 'overview');
+    return;
   }
-});
-
-function snippetTag() {
-  // Deliberately built without the literal closing-script-tag sequence anywhere in
-  // this file's source (not even in a comment) — that exact text, even inside a JS
-  // string or comment, makes the browser's HTML parser end THIS surrounding script
-  // block early, dumping everything after it onto the page as plain text.
-  const closeTag = '</' + 'script>';
-  return `<script src="${location.origin}/snippet/ab.js" data-api="${location.origin}">${closeTag}`;
+  const root = document.getElementById('detail-root');
+  if (!currentDetail || currentDetail.id !== id) root.innerHTML = '<p class="hint">Loading…</p>';
+  const result = await callApi(`/api/experiments/${id}`, { headers: authHeaders() });
+  if (requestToken !== routeToken) return;
+  if (!result.ok) {
+    root.innerHTML = `<p class="error-msg">Error: ${UI.escapeHtml(result.message)}</p>`;
+    return;
+  }
+  currentDetail = result.data;
+  currentDetail.client_name = clientNameById(currentDetail.client_id);
+  currentTab = tab || 'overview';
+  renderDetail();
+  showDetailTab(currentTab);
+  setTitle(`Pivit — ${currentDetail.name}`);
 }
-document.getElementById('snippet-code').textContent = snippetTag();
 
-function copySnippet() {
-  navigator.clipboard.writeText(snippetTag()).then(() => {
-    const el = document.getElementById('snippet-copied');
-    el.textContent = 'Copied!';
-    setTimeout(() => { el.textContent = ''; }, 2000);
-  }).catch(() => {
-    document.getElementById('snippet-copied').textContent = 'Could not copy — select the text above manually.';
+async function reloadDetail() {
+  if (!currentDetail) return;
+  const id = currentDetail.id;
+  const tab = currentTab;
+  await openExperiment(id, tab, { force: true });
+  loadExperimentList();
+}
+
+function renderDetail() {
+  const exp = currentDetail;
+  const variants = exp.variants || [];
+  const action = UI.statusAction(exp.status);
+  const client = exp.client_name || clientNameById(exp.client_id) || 'none';
+  const pageUrl = storedPageUrl(exp);
+  const created = UI.formatCreated(exp.created_at);
+  // Draft can show the empty-state banner immediately. Other statuses wait for
+  // the activity request so a live test doesn't flash "no traffic".
+  const banner = exp.status === 'draft' ? UI.overviewBanner('draft', 0) : { show: false, text: '' };
+  const next = exp.status === 'draft';
+
+  document.getElementById('detail-root').innerHTML = `
+    <div class="crumb"><button type="button" data-go-home>Experiments</button> / ${UI.escapeHtml(exp.name)}</div>
+    <div class="detail-top" id="detail-header">
+      <div>
+        <h1 style="margin:0;">${UI.escapeHtml(exp.name)}</h1>
+        <div class="meta-line">
+          <span class="badge ${STATUS_CLASS[exp.status] || 'paused'}">${UI.escapeHtml(exp.status)}</span>
+          <span class="mono">${UI.escapeHtml(exp.url_match || '—')}</span>
+          <span>Client · ${UI.escapeHtml(client)}</span>
+          <span>${variants.length} variant${variants.length === 1 ? '' : 's'}</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="btn-ghost" data-action="preview">Preview</button>
+        <button type="button" class="btn-ghost" data-snippet-toggle>Copy snippet</button>
+        ${action ? `<button type="button" data-action="set-status" data-status="${action.next}">${action.label}</button>` : ''}
+      </div>
+    </div>
+    <p id="detail-error" class="error-msg" hidden></p>
+    <div class="tabs" role="tablist">
+      ${['overview', 'variants', 'goals', 'results', 'settings'].map((tab) =>
+        `<button type="button" role="tab" data-action="tab" data-tab="${tab}" aria-selected="false">${tab[0].toUpperCase()}${tab.slice(1)}</button>`
+      ).join('')}
+    </div>
+
+    <div data-tab-panel="overview">
+      <div id="overview-banner" class="banner" ${banner.show ? '' : 'hidden'}>
+        <span id="overview-banner-text">${UI.escapeHtml(banner.text)}</span>
+        <button type="button" class="btn-ghost" data-action="focus-checklist">Checklist</button>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="kicker">Status</div>
+          <div class="status-big">${UI.escapeHtml(exp.status[0].toUpperCase() + exp.status.slice(1))}</div>
+          <p class="hint" id="overview-event-line">Created ${UI.escapeHtml(created)} · Checking activity…</p>
+        </div>
+        <div class="card" id="next-steps" ${next ? '' : 'hidden'}>
+          <div class="kicker">Next steps</div>
+          <ul class="checklist">
+            <li>Confirm the snippet is on the page</li>
+            <li>Preview both variants</li>
+            <li>Start when ready to split traffic</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px;">
+        <h2>Recent activity</h2>
+        <div id="activity-log" class="hint">Loading…</div>
+      </div>
+    </div>
+
+    <div data-tab-panel="variants" hidden>
+      <div class="card">
+        <label for="detail-page-url">Page URL for preview and edits</label>
+        <input id="detail-page-url" value="${UI.escapeHtml(pageUrl)}" placeholder="https://example.com/about" spellcheck="false">
+        <p id="variant-warnings" class="hint"></p>
+        <div id="detail-variants"></div>
+        <div class="add-row">
+          <input id="new-var-name" type="text" placeholder="variant name">
+          <input id="new-var-split" type="number" value="50" aria-label="Traffic split">
+          <button type="button" data-action="add-variant">Add variant</button>
+        </div>
+      </div>
+    </div>
+
+    <div data-tab-panel="goals" hidden>
+      <div class="card">
+        <p class="hint" style="margin-top:0;">Goals belong to each variant. Use the same label on every variant, or the comparison will not line up.</p>
+        <p><a class="picker-link picker-bookmarklet" href="${pickerHref}">Selector Picker</a> <span class="hint">Drag to your bookmarks bar once, then use it on the live page.</span></p>
+        <div id="detail-popular-goals"></div>
+        <div id="detail-goals"></div>
+      </div>
+    </div>
+
+    <div data-tab-panel="results" hidden>
+      <div id="results-gate" class="card">
+        <div class="banner" id="results-gate-banner"><span id="results-gate-text">Loading results…</span></div>
+        <div class="placeholder"><strong>Conversion chart</strong>Shown once this experiment is running and has visitors.</div>
+        <div class="placeholder"><strong>Probability best</strong>Hidden until there is traffic to read. A draft does not show a 50/50 split.</div>
+      </div>
+      <div id="results-live" hidden>
+        <div class="card">
+          <label for="visitor-type-filter">Visitors <span class="hint">(filters the table and rate chart)</span></label>
+          <select id="visitor-type-filter">
+            <option value="">All visitors</option>
+            <option value="new">New only</option>
+            <option value="returning">Returning only</option>
+          </select>
+          <p id="results-msg" class="hint"></p>
+          <table id="results-table" style="display:none">
+            <thead><tr><th>Variant</th><th>Visitors</th><th>New</th><th>Returning</th><th>Clicks</th><th>Conversions</th><th>Rate</th></tr></thead>
+            <tbody id="results-body"></tbody>
+          </table>
+          <div class="chart-wrap"><canvas id="rate-chart" style="display:none"></canvas></div>
+          <div style="margin-top:16px;" class="inline-actions">
+            <span class="hint">Trend:</span>
+            <button type="button" class="btn-ghost trend-toggle-btn" id="trend-mode-cumulative" data-action="trend" data-mode="cumulative">Cumulative</button>
+            <button type="button" class="btn-ghost trend-toggle-btn" id="trend-mode-daily" data-action="trend" data-mode="daily">Daily</button>
+          </div>
+          <div class="chart-wrap trend-wrap"><canvas id="trend-chart" style="display:none"></canvas></div>
+          <div class="inline-actions" style="margin-top:14px;">
+            <button type="button" class="btn-ghost" id="refresh-results-btn" data-action="refresh-results">Refresh</button>
+            <button type="button" class="btn-ghost" id="export-results-btn" data-action="export">Export CSV</button>
+          </div>
+          <h3 style="margin-top:22px;">Sample ratio check</h3>
+          <p class="hint">Whether traffic is actually split the way it is configured.</p>
+          <div id="srm-panel" style="display:none;"></div>
+          <h3 style="margin-top:22px;">Bayesian analysis</h3>
+          <details>
+            <summary>How probability best is calculated</summary>
+            <div class="accordion-body hint">Each variant’s true conversion rate is treated as uncertain, and that range narrows as data comes in. Probability best is the chance that variant is genuinely ahead, not just lucky.</div>
+          </details>
+          <div id="bayesian-warning" class="hint" style="display:none; color:var(--warn); font-weight:650;"></div>
+          <table id="bayesian-table" style="display:none">
+            <thead><tr><th>Variant</th><th>Visitors</th><th>Conversions</th><th>Est. rate (95% range)</th><th>Probability best</th></tr></thead>
+            <tbody id="bayesian-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div data-tab-panel="settings" hidden>
+      <div class="card" style="max-width:640px;">
+        <label for="settings-client">Client</label>
+        <select id="settings-client"></select>
+        <p class="hint">Only this client can see the experiment on their results page.</p>
+        <label for="settings-status">Status</label>
+        <select id="settings-status">
+          <option value="draft">draft</option>
+          <option value="running">running</option>
+          <option value="paused">paused</option>
+          <option value="archived">archived</option>
+        </select>
+        <div class="inline-actions" style="margin-top:16px;">
+          <button type="button" data-action="save-settings">Save</button>
+          <button type="button" class="btn-ghost" data-action="export">Export CSV</button>
+          ${exp.status === 'archived' ? '<button type="button" class="btn-danger" data-action="delete-experiment">Delete</button>' : ''}
+        </div>
+        <p id="settings-msg" class="hint"></p>
+      </div>
+    </div>
+  `;
+
+  fillClientSelect(document.getElementById('settings-client'), 'None — internal only', exp.client_id || '');
+  document.getElementById('settings-status').value = exp.status;
+  renderVariantRows();
+  renderGoalBlocks();
+  document.querySelectorAll('.picker-bookmarklet').forEach((a) => { a.href = pickerHref; });
+  const pageInput = document.getElementById('detail-page-url');
+  if (pageInput) {
+    pageInput.addEventListener('input', () => rememberPageUrl(exp.id, pageInput.value.trim()));
+  }
+}
+
+function showDetailTab(tab) {
+  currentTab = tab || 'overview';
+  document.querySelectorAll('#detail-root [data-tab-panel]').forEach((panel) => {
+    panel.hidden = panel.dataset.tabPanel !== currentTab;
   });
-}
-
-function antiflickerSnippet() {
-  // Same closing-tag caveat as snippetTag() above — built without the literal
-  // substring anywhere in this file's source.
-  const closeTag = '</' + 'script>';
-  return `<style>html.ab-hide{opacity:0 !important}</style>\n<script>document.documentElement.classList.add('ab-hide');setTimeout(function(){document.documentElement.classList.remove('ab-hide')},3000)${closeTag}`;
-}
-document.getElementById('antiflicker-code').textContent = antiflickerSnippet();
-
-function copyAntiflicker() {
-  navigator.clipboard.writeText(antiflickerSnippet()).then(() => {
-    const el = document.getElementById('antiflicker-copied');
-    el.textContent = 'Copied!';
-    setTimeout(() => { el.textContent = ''; }, 2000);
-  }).catch(() => {
-    document.getElementById('antiflicker-copied').textContent = 'Could not copy — select the text above manually.';
+  document.querySelectorAll('#detail-root [data-action="tab"]').forEach((btn) => {
+    const on = btn.dataset.tab === currentTab;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-selected', on ? 'true' : 'false');
   });
+  if (currentTab === 'overview') loadOverview();
+  if (currentTab === 'results') loadResults();
+  if (currentTab === 'goals') loadPopularGoals('detail-popular-goals', 'all');
+  if (currentTab === 'variants') renderVariantWarnings();
 }
 
-async function createExperiment() {
-  const name = document.getElementById('exp-name').value;
-  const url_match = document.getElementById('exp-url').value;
-  const client_id = document.getElementById('exp-client-id').value || null;
-  const el = document.getElementById('exp-result');
-  const result = await callApi('/api/experiments', {
-    method: 'POST', headers: authHeaders(), body: JSON.stringify({ name, url_match, client_id })
+function detailError(message) {
+  const el = document.getElementById('detail-error');
+  if (!el) { if (message) alert(message); return; }
+  el.hidden = !message;
+  el.textContent = message || '';
+}
+
+function requirePageUrl() {
+  const input = document.getElementById('detail-page-url');
+  const value = (input ? input.value : storedPageUrl(currentDetail)).trim();
+  if (value) {
+    rememberPageUrl(currentDetail.id, value);
+    const manage = document.getElementById('manage-page-url');
+    if (manage && !manage.value) manage.value = value;
+    return value;
+  }
+  showDetailTab('variants');
+  const hash = `#experiment/${currentDetail.id}/variants`;
+  if (location.hash !== hash) history.replaceState(null, '', hash);
+  requestAnimationFrame(() => {
+    const field = document.getElementById('detail-page-url');
+    if (field) field.focus();
   });
-  el.className = result.ok ? 'ok-msg' : 'error-msg';
-  if (result.ok) {
-    el.textContent = `Created, with a "Control" variant (no changes, 50% traffic) already set up automatically. Just add your test variant(s) next — make sure the snippet above is installed on the target page.`;
-    // Refresh the dropdowns FIRST so the new experiment's <option> actually exists
-    // before we try to select it — otherwise the assignment below is silently ignored.
-    await loadExperimentList();
-    EXP_SELECT_IDS.forEach((fieldId) => {
-      document.getElementById(fieldId).value = result.data.id;
+  detailError('Enter the page URL to preview on, then try again.');
+  return '';
+}
+
+function pickPreviewVariant(variants) {
+  const list = variants || [];
+  const enabled = list.filter((v) => v.enabled !== false);
+  return enabled.find((v) => !/^control$/i.test(v.name)) || enabled[0] || list[0] || null;
+}
+
+function buildPreviewUrl(pageUrl, variantId) {
+  const sep = pageUrl.includes('?') ? '&' : '?';
+  return `${pageUrl}${sep}ab_preview=${variantId}`;
+}
+
+async function loadOverview() {
+  if (!currentDetail) return;
+  const expId = currentDetail.id;
+  const [recentResult, bayesResult] = await Promise.all([
+    callApi(`/api/results/${expId}/recent`, { headers: authHeaders() }),
+    callApi(`/api/results/${expId}/bayesian`, { headers: authHeaders() }),
+  ]);
+  if (!currentDetail || currentDetail.id !== expId) return;
+  const visitors = bayesResult.ok ? Number(bayesResult.data.total_visitors) || 0 : 0;
+  const banner = UI.overviewBanner(currentDetail.status, visitors);
+  const bannerEl = document.getElementById('overview-banner');
+  const bannerText = document.getElementById('overview-banner-text');
+  if (bannerEl && bannerText) {
+    bannerEl.hidden = !banner.show;
+    bannerText.textContent = banner.text;
+  }
+  const steps = document.getElementById('next-steps');
+  if (steps) steps.hidden = !UI.showNextSteps(currentDetail.status, visitors);
+  const line = document.getElementById('overview-event-line');
+  if (line) {
+    const created = UI.formatCreated(currentDetail.created_at);
+    const summary = visitors > 0 ? `${visitors} visitor${visitors === 1 ? '' : 's'}` : 'No events yet';
+    line.textContent = `Created ${created} · ${summary}`;
+  }
+  const activityEl = document.getElementById('activity-log');
+  if (!activityEl) return;
+  if (!recentResult.ok) {
+    activityEl.textContent = `Error loading activity: ${recentResult.message}`;
+    return;
+  }
+  const events = recentResult.data.events || [];
+  if (events.length === 0) {
+    activityEl.innerHTML = `<p style="margin:0;">No events recorded yet. Once running, the last 20 events appear here.</p>
+      <details>
+        <summary>Not seeing events?</summary>
+        <div class="accordion-body">
+          <ul class="checklist">
+            <li>Set the experiment to running (draft and paused do not collect live traffic).</li>
+            <li>Leave at least one variant enabled.</li>
+            <li>Confirm the snippet is on the page you are testing.</li>
+            <li>Check the browser console for errors from the snippet or the event endpoint.</li>
+          </ul>
+        </div>
+      </details>`;
+    return;
+  }
+  activityEl.innerHTML = events.map((ev) => `
+    <div class="activity-row">
+      <span><strong>${UI.escapeHtml(ev.event_type)}</strong> · ${UI.escapeHtml(ev.variant_name)}${ev.goal_id ? ' · ' + UI.escapeHtml(ev.goal_id) : ''}</span>
+      <span class="hint">${UI.escapeHtml(new Date(ev.created_at).toLocaleString('en-GB'))}</span>
+    </div>
+  `).join('');
+}
+
+function renderVariantRows() {
+  const mount = document.getElementById('detail-variants');
+  if (!mount || !currentDetail) return;
+  const variants = currentDetail.variants || [];
+  if (variants.length === 0) {
+    mount.innerHTML = '<p class="hint">No variants yet.</p>';
+    return;
+  }
+  mount.innerHTML = variants.map((v) => `
+    <div class="var-row">
+      <div class="grow">
+        <input type="text" value="${UI.escapeHtml(v.name)}" data-var-name="${v.id}" aria-label="Variant name" style="max-width:240px;">
+        <span class="split-input"><input type="number" value="${Number(v.traffic_split)}" data-var-split="${v.id}" aria-label="Traffic split">%</span>
+        <span class="badge ${v.enabled ? 'live' : 'paused'}">${v.enabled ? 'enabled' : 'paused'}</span>
+      </div>
+      <div class="vc-actions">
+        <button type="button" class="btn-ghost" data-action="save-variant" data-id="${v.id}">Save</button>
+        <button type="button" class="btn-ghost" data-action="preview-variant" data-id="${v.id}">Preview</button>
+        <button type="button" class="btn-ghost" data-action="make-edits" data-id="${v.id}">Make edits</button>
+        <button type="button" class="btn-ghost" data-action="toggle-variant" data-id="${v.id}" data-enabled="${v.enabled ? 'false' : 'true'}">${v.enabled ? 'Pause variant' : 'Resume variant'}</button>
+        <button type="button" class="btn-danger" data-action="delete-variant" data-id="${v.id}">Delete</button>
+      </div>
+    </div>
+  `).join('');
+  renderVariantWarnings();
+}
+
+function renderVariantWarnings() {
+  const msgEl = document.getElementById('variant-warnings');
+  if (!msgEl || !currentDetail) return;
+  const variants = currentDetail.variants || [];
+  const enabled = variants.filter((v) => v.enabled);
+  const warnings = [];
+  if (enabled.length === 1) {
+    warnings.push('Only one active variant — matched traffic will all see its changes. Add a Control with no changes if you want a real A/B split.');
+  } else if (enabled.length > 1) {
+    const splitSum = enabled.reduce((sum, v) => sum + (Number(v.traffic_split) || 0), 0);
+    if (splitSum !== 100) {
+      warnings.push(`Active splits add up to ${splitSum}%, not 100%. Visitors are still assigned using the numbers as weights.`);
+    }
+    const labels = (v) => (v.goals || []).map((g) => g.id || g.selector || g.url_match).sort();
+    if (new Set(enabled.map((v) => JSON.stringify(labels(v)))).size > 1) {
+      const summary = enabled.map((v) => `${v.name}: ${labels(v).join(', ') || 'none'}`).join(' · ');
+      warnings.push(`These variants don’t share the same goals (${summary}). A variant with no goal always shows 0%.`);
+    }
+  }
+  msgEl.className = warnings.length ? 'warn-text' : 'hint';
+  msgEl.textContent = warnings.join('\n\n');
+}
+
+function renderGoalBlocks() {
+  const mount = document.getElementById('detail-goals');
+  if (!mount || !currentDetail) return;
+  const variants = currentDetail.variants || [];
+  mount.innerHTML = variants.map((v) => {
+    const goals = v.goals || [];
+    const items = goals.length
+      ? goals.map((g, i) => `<div class="goal-saved"><span>${UI.escapeHtml(UI.describeGoal(g))}</span><button type="button" class="btn-ghost" data-action="remove-goal" data-id="${v.id}" data-index="${i}">Remove</button></div>`).join('')
+      : '<p class="hint">No goals on this variant yet.</p>';
+    return `<div style="margin-top:16px;">
+      <h3>${UI.escapeHtml(v.name)}</h3>
+      ${items}
+      <div class="add-row" data-goal-draft="${v.id}">
+        <select class="g-type" style="width:auto; margin:0;">
+          <option value="click">Click</option>
+          <option value="url">Visited URL</option>
+        </select>
+        <input class="g-value" type="text" placeholder="#cta-button" style="margin:0; flex:1;">
+        <input class="g-id" type="text" placeholder="label" style="margin:0; width:140px;">
+        <button type="button" data-action="add-goal" data-id="${v.id}">Add goal</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function patchVariant(variant, fields) {
+  const result = await callApi(`/api/experiments/${currentDetail.id}/variants/${variant.id}`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({
+      name: fields.name != null ? fields.name : variant.name,
+      traffic_split: fields.traffic_split != null ? fields.traffic_split : variant.traffic_split,
+      goals: fields.goals != null ? fields.goals : (variant.goals || []),
+    }),
+  });
+  if (!result.ok) { detailError(result.message); return false; }
+  detailError('');
+  await reloadDetail();
+  return true;
+}
+
+async function setExperimentStatus(status, { confirmArchive = true } = {}) {
+  if (!currentDetail) return false;
+  if (status === 'paused' && !confirm('Pause this experiment? New visitors will stop being assigned.')) return false;
+  if (status === 'archived' && confirmArchive && !confirm('Archive this experiment? It leaves the live set. You can still read results.')) return false;
+  const result = await callApi(`/api/experiments/${currentDetail.id}/status`, {
+    method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ status }),
+  });
+  if (!result.ok) { detailError(result.message); return false; }
+  detailError('');
+  await reloadDetail();
+  return true;
+}
+
+document.getElementById('page-detail').addEventListener('click', async (e) => {
+  if (e.target.closest('[data-go-home]')) { go('#home'); return; }
+  const btn = e.target.closest('[data-action]');
+  if (!btn || !currentDetail) return;
+  const action = btn.dataset.action;
+  const id = btn.dataset.id;
+  if (action === 'tab') {
+    const tab = btn.dataset.tab;
+    go(`#experiment/${currentDetail.id}/${tab}`);
+    return;
+  }
+  if (action === 'preview') {
+    const pageUrl = requirePageUrl();
+    if (!pageUrl) return;
+    const variant = pickPreviewVariant(currentDetail.variants);
+    if (!variant) { detailError('Add a variant before previewing.'); return; }
+    window.open(buildPreviewUrl(pageUrl, variant.id), '_blank');
+    return;
+  }
+  if (action === 'preview-variant') {
+    const pageUrl = requirePageUrl();
+    if (!pageUrl) return;
+    window.open(buildPreviewUrl(pageUrl, id), '_blank');
+    return;
+  }
+  if (action === 'make-edits') {
+    const pageUrl = requirePageUrl();
+    if (!pageUrl) return;
+    await makeEdits(currentDetail.id, id, btn, pageUrl);
+    return;
+  }
+  if (action === 'set-status') {
+    await setExperimentStatus(btn.dataset.status);
+    return;
+  }
+  if (action === 'focus-checklist') {
+    const steps = document.getElementById('next-steps');
+    if (steps) { steps.hidden = false; steps.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    return;
+  }
+  if (action === 'save-variant') {
+    const variant = (currentDetail.variants || []).find((v) => v.id === id);
+    if (!variant) return;
+    const name = document.querySelector(`[data-var-name="${id}"]`).value.trim();
+    const traffic_split = parseInt(document.querySelector(`[data-var-split="${id}"]`).value, 10);
+    if (!name) { detailError('Variant name is required.'); return; }
+    await patchVariant(variant, { name, traffic_split });
+    return;
+  }
+  if (action === 'toggle-variant') {
+    btn.disabled = true;
+    const enabled = btn.dataset.enabled === 'true';
+    const result = await callApi(`/api/experiments/${currentDetail.id}/variants/${id}/enabled`, {
+      method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ enabled }),
     });
-    // If the url_match looks like a real URL (not just a path fragment), pre-fill the preview URL too.
-    if (/^https?:\/\//.test(url_match)) document.getElementById('manage-page-url').value = url_match;
+    btn.disabled = false;
+    if (!result.ok) { detailError(result.message); return; }
+    await reloadDetail();
+    return;
+  }
+  if (action === 'delete-variant') {
+    if (!confirm('Delete this variant permanently? This also deletes its recorded views and conversions.\n\nTo stop it running while keeping history, pause the variant instead.')) return;
+    btn.disabled = true;
+    const result = await callApi(`/api/experiments/${currentDetail.id}/variants/${id}`, { method: 'DELETE', headers: authHeaders() });
+    btn.disabled = false;
+    if (!result.ok) { detailError(result.message); return; }
+    await reloadDetail();
+    return;
+  }
+  if (action === 'add-variant') {
+    const name = document.getElementById('new-var-name').value.trim();
+    const traffic_split = parseInt(document.getElementById('new-var-split').value, 10);
+    if (!name) { detailError('Give the new variant a name.'); return; }
+    btn.disabled = true;
+    const result = await callApi(`/api/experiments/${currentDetail.id}/variants`, {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify({ name, traffic_split, goals: [] }),
+    });
+    btn.disabled = false;
+    if (!result.ok) { detailError(result.message); return; }
+    await reloadDetail();
+    return;
+  }
+  if (action === 'remove-goal') {
+    const variant = (currentDetail.variants || []).find((v) => v.id === id);
+    if (!variant) return;
+    const goals = (variant.goals || []).slice();
+    goals.splice(Number(btn.dataset.index), 1);
+    await patchVariant(variant, { goals });
+    return;
+  }
+  if (action === 'add-goal') {
+    const variant = (currentDetail.variants || []).find((v) => v.id === id);
+    const draft = document.querySelector(`[data-goal-draft="${id}"]`);
+    if (!variant || !draft) return;
+    const type = draft.querySelector('.g-type').value;
+    const value = draft.querySelector('.g-value').value.trim();
+    const label = draft.querySelector('.g-id').value.trim();
+    if (!value) { detailError(type === 'url' ? 'Add the URL text to match.' : 'Add a selector.'); return; }
+    const goal = type === 'url' ? { type: 'url', url_match: value, id: label } : { type: 'click', selector: value, id: label };
+    await patchVariant(variant, { goals: [...(variant.goals || []), goal] });
+    return;
+  }
+  if (action === 'save-settings') {
+    await saveDetailSettings();
+    return;
+  }
+  if (action === 'export') {
+    exportResultsCsv(currentDetail.id);
+    return;
+  }
+  if (action === 'delete-experiment') {
+    await deleteExperiment(currentDetail.id, btn);
+    return;
+  }
+  if (action === 'refresh-results') loadResults();
+  if (action === 'trend') setTrendMode(btn.dataset.mode);
+});
+
+document.getElementById('page-detail').addEventListener('change', (e) => {
+  if (!e.target.classList.contains('g-type')) return;
+  const draft = e.target.closest('[data-goal-draft]');
+  if (!draft) return;
+  const value = draft.querySelector('.g-value');
+  if (e.target.value === 'url') value.placeholder = '/thank-you';
+  else value.placeholder = '#cta-button';
+});
+
+async function saveDetailSettings() {
+  const msg = document.getElementById('settings-msg');
+  const clientId = document.getElementById('settings-client').value || null;
+  const status = document.getElementById('settings-status').value;
+  if ((currentDetail.client_id || null) !== clientId) {
+    const clientResult = await callApi(`/api/experiments/${currentDetail.id}/client`, {
+      method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ client_id: clientId }),
+    });
+    if (!clientResult.ok) { msg.className = 'error-msg'; msg.textContent = clientResult.message; return; }
+    currentDetail.client_id = clientId;
+  }
+  if (currentDetail.status !== status) {
+    if (status === 'archived' && !confirm('Archive this experiment? It leaves the live set. You can still read results.')) return;
+    const statusResult = await callApi(`/api/experiments/${currentDetail.id}/status`, {
+      method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ status }),
+    });
+    if (!statusResult.ok) { msg.className = 'error-msg'; msg.textContent = statusResult.message; return; }
+  }
+  msg.className = 'ok-msg';
+  msg.textContent = 'Saved.';
+  await reloadDetail();
+}
+
+// --- Results (detail tab; hidden for draft or zero visitors) ---
+
+function computeTrendDatasets(series, mode) {
+  const days = [...new Set(series.map((r) => r.day))].sort();
+  const variantNames = [...new Set(series.map((r) => r.variant_name))];
+  const palette = ['#8b74ff', '#02DEB5', '#e07a5f', '#f2f3f8', '#e6c27a'];
+  const datasets = variantNames.map((name, i) => {
+    let cumVisitors = 0, cumConversions = 0;
+    const dataByDay = days.map((day) => {
+      const row = series.find((r) => r.day === day && r.variant_name === name);
+      const v = row ? Number(row.visitors) : 0;
+      const c = row ? Number(row.conversions) : 0;
+      if (mode === 'cumulative') {
+        cumVisitors += v; cumConversions += c;
+        return cumVisitors > 0 ? +(cumConversions / cumVisitors * 100).toFixed(2) : 0;
+      }
+      return v > 0 ? +(c / v * 100).toFixed(2) : 0;
+    });
+    return { label: name, data: dataByDay, borderColor: palette[i % palette.length], backgroundColor: palette[i % palette.length], tension: 0.2, fill: false };
+  });
+  return { labels: days.map((d) => new Date(d).toLocaleDateString('en-GB')), datasets };
+}
+
+function renderTrendChart() {
+  const trendCanvas = document.getElementById('trend-chart');
+  const cumBtn = document.getElementById('trend-mode-cumulative');
+  const dayBtn = document.getElementById('trend-mode-daily');
+  if (!trendCanvas || !cumBtn || !window.Chart) return;
+  cumBtn.classList.toggle('active', trendMode === 'cumulative');
+  dayBtn.classList.toggle('active', trendMode === 'daily');
+  if (trendChart) trendChart.destroy();
+  if (currentTrendSeries.length === 0) { trendCanvas.style.display = 'none'; trendCanvas.parentElement.style.height = '0'; return; }
+  const { labels, datasets } = computeTrendDatasets(currentTrendSeries, trendMode);
+  trendCanvas.style.display = 'block';
+  trendCanvas.parentElement.style.height = '340px';
+  trendChart = new Chart(trendCanvas, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { title: { display: true, text: (trendMode === 'cumulative' ? 'Cumulative' : 'Daily') + ' conversion rate over time', color: '#e8e9f0' } },
+      scales: {
+        x: { title: { display: true, text: 'Time (days)' }, ticks: { color: '#9398ab' }, grid: { color: 'rgba(255,255,255,0.06)' } },
+        y: { beginAtZero: true, title: { display: true, text: 'Conversion rate (%)' }, ticks: { callback: (v) => v + '%', color: '#9398ab' }, grid: { color: 'rgba(255,255,255,0.06)' } },
+      },
+    },
+  });
+}
+
+function setTrendMode(mode) {
+  trendMode = mode;
+  renderTrendChart();
+}
+
+function showResultsGate(text) {
+  const gate = document.getElementById('results-gate');
+  const live = document.getElementById('results-live');
+  if (gate) gate.hidden = false;
+  if (live) live.hidden = true;
+  const label = document.getElementById('results-gate-text');
+  if (label) label.textContent = text;
+  if (rateChart) { rateChart.destroy(); rateChart = null; }
+  if (trendChart) { trendChart.destroy(); trendChart = null; }
+  currentTrendSeries = [];
+}
+
+async function loadResults() {
+  if (!currentDetail) return;
+  const expId = currentDetail.id;
+  const status = currentDetail.status;
+  if (status === 'draft') {
+    showResultsGate('Not running — Bayesian and conversion rates stay hidden until you collect traffic. Install the snippet, then start.');
+    return;
+  }
+  const filterEl = document.getElementById('visitor-type-filter');
+  const visitorType = filterEl ? filterEl.value : '';
+  const qs = visitorType ? `?visitor_type=${encodeURIComponent(visitorType)}` : '';
+  const result = await callApi(`/api/results/${expId}${qs}`, { headers: authHeaders() });
+  if (!currentDetail || currentDetail.id !== expId) return;
+  if (!result.ok) {
+    showResultsGate(`Could not load results: ${result.message}`);
+    return;
+  }
+  const results = result.data.results || [];
+  const visitors = results.reduce((sum, row) => sum + Number(row.visitors || 0), 0);
+  if (UI.resultsGated(status, visitors)) {
+    showResultsGate(status === 'draft'
+      ? 'Not running — Bayesian and conversion rates stay hidden until you collect traffic. Install the snippet, then start.'
+      : 'No traffic yet — rates and probability best stay hidden until visitors arrive.');
+    return;
+  }
+  document.getElementById('results-gate').hidden = true;
+  document.getElementById('results-live').hidden = false;
+  const msgEl = document.getElementById('results-msg');
+  msgEl.textContent = '';
+  const tbody = document.getElementById('results-body');
+  tbody.innerHTML = results.map((r) => `<tr><td>${UI.escapeHtml(r.variant_name)}</td><td>${r.visitors}</td><td>${r.new_visitors}</td><td>${r.returning_visitors}</td><td>${r.clicks}</td><td>${r.conversions}</td><td>${r.conversion_rate}%</td></tr>`).join('');
+  document.getElementById('results-table').style.display = 'table';
+
+  const rateCanvas = document.getElementById('rate-chart');
+  rateCanvas.style.display = results.length ? 'block' : 'none';
+  if (rateChart) rateChart.destroy();
+  if (results.length && window.Chart) {
+    rateChart = new Chart(rateCanvas, {
+      type: 'bar',
+      data: {
+        labels: results.map((r) => r.variant_name),
+        datasets: [{ label: 'Conversion rate (%)', data: results.map((r) => r.conversion_rate), backgroundColor: '#5635FB' }],
+      },
+      options: {
+        responsive: true,
+        plugins: { title: { display: true, text: 'Conversion rate by variant', color: '#e8e9f0' }, legend: { labels: { color: '#e8e9f0' } } },
+        scales: {
+          x: { ticks: { color: '#9398ab' }, grid: { color: 'rgba(255,255,255,0.06)' } },
+          y: { beginAtZero: true, ticks: { color: '#9398ab' }, grid: { color: 'rgba(255,255,255,0.06)' } },
+        },
+      },
+    });
+  }
+
+  const trendResult = await callApi(`/api/results/${expId}/timeseries`, { headers: authHeaders() });
+  currentTrendSeries = (trendResult.ok && trendResult.data.series) ? trendResult.data.series : [];
+  renderTrendChart();
+
+  const srmPanel = document.getElementById('srm-panel');
+  const srmResult = await callApi(`/api/results/${expId}/srm`, { headers: authHeaders() });
+  if (!srmResult.ok || !srmResult.data.applicable) {
+    srmPanel.style.display = 'none';
   } else {
-    el.textContent = `Error: ${result.message}`;
+    const srm = srmResult.data;
+    srmPanel.style.display = 'block';
+    if (srm.srm_detected) {
+      srmPanel.className = 'srm-warning';
+      const splits = srm.variants.map((v) => `${v.name}: ${v.visitors} visitors (configured ${v.traffic_split}%)`).join(' · ');
+      srmPanel.innerHTML = `<strong>Sample ratio mismatch detected</strong> (p = ${srm.p_value < 0.0001 ? '&lt;0.0001' : Number(srm.p_value).toFixed(4)}). Actual traffic doesn’t match the configured split closely enough to be ordinary chance. Treat the rates below with caution until that is understood.<br><span class="hint" style="color:inherit;">${UI.escapeHtml(splits)}</span>`;
+    } else {
+      srmPanel.className = 'srm-ok';
+      srmPanel.textContent = `Traffic split looks healthy (p = ${Number(srm.p_value).toFixed(3)}).`;
+    }
+  }
+
+  const bayesianTable = document.getElementById('bayesian-table');
+  const bayesianWarning = document.getElementById('bayesian-warning');
+  const bayesianResult = await callApi(`/api/results/${expId}/bayesian`, { headers: authHeaders() });
+  if (!bayesianResult.ok || !bayesianResult.data.stats || bayesianResult.data.stats.length === 0) {
+    bayesianTable.style.display = 'none';
+    bayesianWarning.style.display = 'none';
+  } else {
+    const stats = bayesianResult.data.stats;
+    if (bayesianResult.data.low_sample_warning) {
+      bayesianWarning.style.display = 'block';
+      bayesianWarning.textContent = 'At least one variant still has under 30 visitors — treat this as early, not final.';
+    } else bayesianWarning.style.display = 'none';
+    document.getElementById('bayesian-body').innerHTML = stats.map((s) => `
+      <tr>
+        <td>${UI.escapeHtml(s.variant_name)}${s.probability_best >= 90 ? ' ★' : ''}</td>
+        <td>${s.visitors}</td>
+        <td>${s.conversions}</td>
+        <td>${s.posterior_mean}% <span class="hint">(${s.ci_low}%–${s.ci_high}%)</span></td>
+        <td><strong>${s.probability_best}%</strong></td>
+      </tr>
+    `).join('');
+    bayesianTable.style.display = 'table';
   }
 }
 
-// --- Goal row builder ---
-// (What a variant *does* on the page is authored in the visual editor — Preview &
-// manage -> 🎯 Make Edits — not here. This form covers name, traffic split and goals.)
+document.addEventListener('change', (e) => {
+  if (e.target && e.target.id === 'visitor-type-filter' && currentDetail) loadResults();
+});
 
-function addGoalRow(prefill) {
-  const list = document.getElementById('goals-list');
+// --- Wizard ---
+
+function loadWizard() {
+  try {
+    const raw = sessionStorage.getItem('pivit_wizard');
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    Object.assign(wizard, saved, { busy: false });
+  } catch (e) {}
+}
+
+function saveWizard() {
+  try { sessionStorage.setItem('pivit_wizard', JSON.stringify(wizard)); } catch (e) {}
+}
+
+function resetWizard() {
+  wizard.step = 1;
+  wizard.maxStep = 1;
+  wizard.expId = null;
+  wizard.name = '';
+  wizard.url = '';
+  wizard.clientId = '';
+  wizard.pageUrl = '';
+  wizard.variants = [];
+  wizard.goalRows = [];
+  wizard.checks = { snippet: false, preview: false, event: false };
+  wizard.busy = false;
+  try { sessionStorage.removeItem('pivit_wizard'); } catch (e) {}
+  const list = document.getElementById('wizard-goals-list');
+  if (list) list.innerHTML = '';
+}
+
+function wizardMsg(text, ok) {
+  const el = document.getElementById('wizard-msg');
+  el.className = text ? (ok ? 'ok-msg' : 'error-msg') : 'hint';
+  el.textContent = text || '';
+}
+
+function readWizardBasics() {
+  wizard.name = document.getElementById('wizard-name').value.trim();
+  wizard.url = document.getElementById('wizard-url').value.trim();
+  wizard.clientId = document.getElementById('wizard-client').value;
+  saveWizard();
+}
+
+async function renderWizard() {
+  if (wizard.expId && wizard.variants.length === 0) await ensureWizardVariants();
+  for (let step = 1; step <= 5; step += 1) {
+    document.getElementById('wizard-step-' + step).hidden = step !== wizard.step;
+  }
+  const steps = document.getElementById('wizard-steps');
+  steps.innerHTML = WIZARD_LABELS.map((label, i) => {
+    const n = i + 1;
+    const cls = n === wizard.step ? 'active' : (n < wizard.step ? 'done' : '');
+    const disabled = n > wizard.maxStep && n !== wizard.step;
+    const mark = n < wizard.step ? '✓' : String(n);
+    return `<button type="button" class="step-pill ${cls}" data-wizard-step="${n}" ${disabled ? 'disabled' : ''}><span class="step-num">${mark}</span>${label}</button>`;
+  }).join('');
+
+  document.getElementById('wizard-name').value = wizard.name;
+  document.getElementById('wizard-url').value = wizard.url;
+  fillClientSelect(document.getElementById('wizard-client'), 'None — internal only', wizard.clientId || '');
+  const locked = !!wizard.expId;
+  document.getElementById('wizard-name').readOnly = locked;
+  document.getElementById('wizard-url').readOnly = locked;
+  document.getElementById('wizard-lock-hint').hidden = !locked;
+
+  const back = document.getElementById('wizard-back');
+  const skip = document.getElementById('wizard-skip');
+  const draftBtn = document.getElementById('wizard-save-draft');
+  const next = document.getElementById('wizard-next');
+  back.hidden = wizard.step === 1;
+  skip.hidden = wizard.step !== 3;
+  draftBtn.hidden = wizard.step !== 5;
+  next.hidden = false;
+  next.textContent = wizard.step === 5 ? 'Save & go to Start' : 'Continue';
+
+  if (wizard.step === 2) {
+    document.getElementById('wizard-page-url').value = wizard.pageUrl || (/^https?:\/\//i.test(wizard.url) ? wizard.url : '');
+    renderWizardVariants();
+  }
+  if (wizard.step === 3) {
+    const list = document.getElementById('wizard-goals-list');
+    if (!list.childElementCount && wizard.goalRows.length) {
+      wizard.goalRows.forEach((g) => addGoalRow(g, 'wizard-goals-list'));
+    }
+    loadPopularGoals('wizard-popular-goals', 'wizard');
+  }
+  if (wizard.step === 4) {
+    document.querySelectorAll('[data-wizard-check]').forEach((box) => {
+      box.checked = !!wizard.checks[box.dataset.wizardCheck];
+    });
+  }
+  if (wizard.step === 5) renderWizardSummary();
+  ['wizard-antiflicker-code', 'antiflicker-code'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = antiflickerSnippet();
+  });
+  ['wizard-snippet-code', 'snippet-code'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = snippetTag();
+  });
+}
+
+function renderWizardVariants() {
+  const mount = document.getElementById('wizard-variants');
+  mount.innerHTML = wizard.variants.map((row, index) => {
+    return `<div class="var-row">
+      <div class="grow">
+        <input type="text" value="${UI.escapeHtml(row.name)}" data-wiz-name="${index}" aria-label="Variant name" ${index === 0 ? 'readonly' : ''}>
+        <span class="split-input"><input type="number" value="${Number(row.split)}" data-wiz-split="${index}" aria-label="Traffic split">%</span>
+      </div>
+      <div class="vc-actions">
+        <button type="button" class="btn-ghost" data-wiz-edit="${index}">Make edits</button>
+        ${index === 0 ? '' : `<button type="button" class="btn-ghost" data-wiz-remove="${index}">Remove</button>`}
+      </div>
+    </div>`;
+  }).join('');
+  updateSplitNote();
+}
+
+function updateSplitNote() {
+  const note = document.getElementById('wizard-split-note');
+  if (!note) return;
+  const sum = wizard.variants.reduce((total, row) => total + (parseInt(row.split, 10) || 0), 0);
+  note.textContent = wizard.variants.length ? `Splits currently add up to ${sum}%.` : '';
+}
+
+function syncWizardVariantFromDom(index) {
+  const nameEl = document.querySelector(`[data-wiz-name="${index}"]`);
+  const splitEl = document.querySelector(`[data-wiz-split="${index}"]`);
+  if (!wizard.variants[index]) return;
+  if (nameEl) wizard.variants[index].name = nameEl.value;
+  if (splitEl) wizard.variants[index].split = splitEl.value;
+}
+
+async function ensureWizardVariants() {
+  if (!wizard.expId || wizard.variants.length) return;
+  const result = await callApi(`/api/experiments/${wizard.expId}`, { headers: authHeaders() });
+  if (!result.ok) return;
+  wizard.variants = (result.data.variants || []).map((v) => ({ id: v.id, name: v.name, split: v.traffic_split }));
+  const withGoals = (result.data.variants || []).find((v) => v.goals && v.goals.length);
+  if (withGoals && !wizard.goalRows.length) wizard.goalRows = withGoals.goals;
+  saveWizard();
+}
+
+async function persistWizardBasics() {
+  readWizardBasics();
+  if (!wizard.name || !wizard.url) { wizardMsg('Add a name and a URL match.'); return false; }
+  if (!wizard.expId) {
+    const result = await callApi('/api/experiments', {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({ name: wizard.name, url_match: wizard.url, client_id: wizard.clientId || null }),
+    });
+    if (!result.ok) { wizardMsg(result.message); return false; }
+    wizard.expId = result.data.id;
+    const control = result.data.control_variant;
+    wizard.variants = [
+      { id: control.id, name: control.name || 'Control', split: control.traffic_split },
+      { id: null, name: 'variant-b', split: 50 },
+    ];
+    if (/^https?:\/\//i.test(wizard.url)) wizard.pageUrl = wizard.url;
+    saveWizard();
+    loadExperimentList();
+    return true;
+  }
+  const result = await callApi(`/api/experiments/${wizard.expId}/client`, {
+    method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ client_id: wizard.clientId || null }),
+  });
+  if (!result.ok) { wizardMsg(result.message); return false; }
+  loadExperimentList();
+  return true;
+}
+
+async function persistVariantRow(index) {
+  syncWizardVariantFromDom(index);
+  const row = wizard.variants[index];
+  const name = String(row.name || '').trim();
+  const traffic_split = parseInt(row.split, 10);
+  if (!name) { wizardMsg('Give every variant a name.'); return false; }
+  if (!Number.isFinite(traffic_split) || traffic_split < 0 || traffic_split > 100) {
+    wizardMsg('Each traffic split needs to be between 0 and 100.');
+    return false;
+  }
+  const exp = await callApi(`/api/experiments/${wizard.expId}`, { headers: authHeaders() });
+  if (!exp.ok) { wizardMsg(exp.message); return false; }
+  const existing = (exp.data.variants || []).find((v) => v.id === row.id);
+  const goals = existing ? (existing.goals || []) : [];
+  if (row.id) {
+    const result = await callApi(`/api/experiments/${wizard.expId}/variants/${row.id}`, {
+      method: 'PATCH', headers: authHeaders(),
+      body: JSON.stringify({ name, traffic_split, goals }),
+    });
+    if (!result.ok) { wizardMsg(result.message); return false; }
+  } else {
+    const result = await callApi(`/api/experiments/${wizard.expId}/variants`, {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({ name, traffic_split, goals: [] }),
+    });
+    if (!result.ok) { wizardMsg(result.message); return false; }
+    row.id = result.data.id;
+  }
+  row.name = name;
+  row.split = traffic_split;
+  saveWizard();
+  return true;
+}
+
+async function persistAllVariants() {
+  for (let i = 0; i < wizard.variants.length; i += 1) {
+    const ok = await persistVariantRow(i);
+    if (!ok) return false;
+  }
+  loadExperimentList();
+  return true;
+}
+
+function rememberWizardGoals() {
+  const list = document.getElementById('wizard-goals-list');
+  if (!list) return;
+  // Review/install don't rebuild the goal rows. An empty list there means
+  // "not on screen", not "the user cleared every goal".
+  if (wizard.step !== 3 && list.childElementCount === 0) return;
+  wizard.goalRows = collectGoals('wizard-goals-list');
+  saveWizard();
+}
+
+async function persistWizardGoals() {
+  rememberWizardGoals();
+  const goals = wizard.goalRows;
+  const exp = await callApi(`/api/experiments/${wizard.expId}`, { headers: authHeaders() });
+  if (!exp.ok) { wizardMsg(exp.message); return false; }
+  for (const variant of exp.data.variants || []) {
+    const result = await callApi(`/api/experiments/${wizard.expId}/variants/${variant.id}`, {
+      method: 'PATCH', headers: authHeaders(),
+      body: JSON.stringify({ name: variant.name, traffic_split: variant.traffic_split, goals }),
+    });
+    if (!result.ok) { wizardMsg(result.message); return false; }
+  }
+  saveWizard();
+  return true;
+}
+
+function renderWizardSummary() {
+  const goals = (wizard.goalRows || []).map((g) => UI.describeGoal(g)).filter(Boolean);
+  const variants = wizard.variants.map((v) => `${v.name} ${v.split}%`).join(' · ') || '—';
+  const client = clientNameById(wizard.clientId) || 'None';
+  document.getElementById('wizard-summary').innerHTML = `
+    <dt>Name</dt><dd>${UI.escapeHtml(wizard.name)}</dd>
+    <dt>URL match</dt><dd class="mono">${UI.escapeHtml(wizard.url)}</dd>
+    <dt>Client</dt><dd>${UI.escapeHtml(client)}</dd>
+    <dt>Variants</dt><dd>${UI.escapeHtml(variants)}</dd>
+    <dt>Goals</dt><dd>${goals.length ? UI.escapeHtml(goals.join(' · ')) : 'None yet'}</dd>
+    <dt>Status after save</dt><dd><span class="badge draft">Draft</span> — start when you’re ready to collect traffic</dd>
+  `;
+}
+
+async function finishWizard(toSettings) {
+  const id = wizard.expId;
+  resetWizard();
+  go(toSettings ? `#experiment/${id}/settings` : `#experiment/${id}/overview`);
+}
+
+async function wizardAdvance() {
+  if (wizard.busy) return;
+  wizard.busy = true;
+  wizardMsg('');
+  try {
+    if (wizard.step === 1) {
+      const ok = await persistWizardBasics();
+      if (!ok) return;
+      wizard.step = 2;
+    } else if (wizard.step === 2) {
+      wizard.pageUrl = document.getElementById('wizard-page-url').value.trim();
+      const ok = await persistAllVariants();
+      if (!ok) return;
+      wizard.step = 3;
+    } else if (wizard.step === 3) {
+      const ok = await persistWizardGoals();
+      if (!ok) return;
+      wizard.step = 4;
+    } else if (wizard.step === 4) {
+      document.querySelectorAll('[data-wizard-check]').forEach((box) => {
+        wizard.checks[box.dataset.wizardCheck] = box.checked;
+      });
+      wizard.step = 5;
+    } else if (wizard.step === 5) {
+      await finishWizard(true);
+      return;
+    }
+    wizard.maxStep = Math.max(wizard.maxStep, wizard.step);
+    saveWizard();
+    await renderWizard();
+  } finally {
+    wizard.busy = false;
+  }
+}
+
+document.getElementById('wizard-next').addEventListener('click', wizardAdvance);
+document.getElementById('wizard-save-draft').addEventListener('click', () => {
+  if (wizard.expId) finishWizard(false);
+});
+document.getElementById('wizard-skip').addEventListener('click', async () => {
+  wizard.step = 4;
+  wizard.maxStep = Math.max(wizard.maxStep, 4);
+  saveWizard();
+  wizardMsg('');
+  await renderWizard();
+});
+document.getElementById('wizard-back').addEventListener('click', async () => {
+  if (wizard.step === 3) rememberWizardGoals();
+  if (wizard.step === 2) {
+    wizard.variants.forEach((_, i) => syncWizardVariantFromDom(i));
+    wizard.pageUrl = document.getElementById('wizard-page-url').value.trim();
+  }
+  if (wizard.step > 1) wizard.step -= 1;
+  saveWizard();
+  wizardMsg('');
+  await renderWizard();
+});
+document.getElementById('wizard-steps').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-wizard-step]');
+  if (!btn || btn.disabled || wizard.busy) return;
+  const step = Number(btn.dataset.wizardStep);
+  if (step === wizard.step) return;
+  if (step > wizard.step) {
+    wizard.busy = true;
+    let ok = true;
+    try {
+      if (wizard.step === 1) ok = await persistWizardBasics();
+      else if (wizard.step === 2) {
+        wizard.pageUrl = document.getElementById('wizard-page-url').value.trim();
+        ok = await persistAllVariants();
+      } else if (wizard.step === 3) ok = await persistWizardGoals();
+    } finally {
+      wizard.busy = false;
+    }
+    if (!ok) return;
+  } else {
+    if (wizard.step === 3) rememberWizardGoals();
+    if (wizard.step === 2) {
+      wizard.variants.forEach((_, i) => syncWizardVariantFromDom(i));
+      wizard.pageUrl = document.getElementById('wizard-page-url').value.trim();
+    }
+  }
+  wizard.step = step;
+  wizard.maxStep = Math.max(wizard.maxStep, step);
+  saveWizard();
+  wizardMsg('');
+  await renderWizard();
+});
+document.getElementById('wizard-add-variant').addEventListener('click', () => {
+  wizard.variants.forEach((_, i) => syncWizardVariantFromDom(i));
+  const n = wizard.variants.length;
+  const letter = String.fromCharCode(97 + Math.min(25, n));
+  wizard.variants.push({ id: null, name: `variant-${letter}`, split: 0 });
+  saveWizard();
+  renderWizardVariants();
+});
+document.getElementById('wizard-variants').addEventListener('input', (e) => {
+  const name = e.target.closest('[data-wiz-name]');
+  const split = e.target.closest('[data-wiz-split]');
+  if (name) wizard.variants[name.dataset.wizName].name = name.value;
+  if (split) wizard.variants[split.dataset.wizSplit].split = split.value;
+  updateSplitNote();
+  saveWizard();
+});
+document.getElementById('wizard-variants').addEventListener('click', async (e) => {
+  const edit = e.target.closest('[data-wiz-edit]');
+  const remove = e.target.closest('[data-wiz-remove]');
+  if (edit) {
+    const index = Number(edit.dataset.wizEdit);
+    wizard.pageUrl = document.getElementById('wizard-page-url').value.trim();
+    if (!wizard.pageUrl) { wizardMsg('Add the page URL first so edits open on the right page.'); return; }
+    edit.disabled = true;
+    const ok = await persistVariantRow(index);
+    edit.disabled = false;
+    if (!ok) return;
+    wizardMsg('');
+    await makeEdits(wizard.expId, wizard.variants[index].id, edit, wizard.pageUrl);
+    renderWizardVariants();
+  }
+  if (remove) {
+    const index = Number(remove.dataset.wizRemove);
+    const row = wizard.variants[index];
+    if (row && row.id) {
+      if (!confirm('Remove this variant from the draft?')) return;
+      const result = await callApi(`/api/experiments/${wizard.expId}/variants/${row.id}`, { method: 'DELETE', headers: authHeaders() });
+      if (!result.ok) { wizardMsg(result.message); return; }
+    }
+    wizard.variants.splice(index, 1);
+    saveWizard();
+    renderWizardVariants();
+  }
+});
+document.getElementById('wizard-page-url').addEventListener('input', (e) => {
+  wizard.pageUrl = e.target.value.trim();
+  saveWizard();
+});
+['wizard-name', 'wizard-url', 'wizard-client'].forEach((id) => {
+  document.getElementById(id).addEventListener('input', readWizardBasics);
+  document.getElementById(id).addEventListener('change', readWizardBasics);
+});
+document.getElementById('wizard-goals-list').addEventListener('input', rememberWizardGoals);
+document.getElementById('wizard-goals-list').addEventListener('click', () => setTimeout(rememberWizardGoals, 0));
+document.getElementById('page-create').addEventListener('change', (e) => {
+  if (e.target && e.target.dataset && e.target.dataset.wizardCheck) {
+    wizard.checks[e.target.dataset.wizardCheck] = e.target.checked;
+    saveWizard();
+  }
+});
+
+// --- Goals helpers ---
+
+function addGoalRow(prefill, listId) {
+  const list = document.getElementById(listId || 'wizard-goals-list');
+  if (!list) return;
   const row = document.createElement('div');
   row.className = 'goal-row';
   row.innerHTML = `
     <div class="full-width">
       <label>Goal type</label>
       <select class="g-type">
-        <option value="click">Click on element (any selector — button, div, span, etc.)</option>
-        <option value="url">Visited a URL (e.g. a thank-you / confirmation page)</option>
+        <option value="click">Click on element</option>
+        <option value="url">Visited a URL</option>
       </select>
     </div>
     <div>
@@ -805,12 +1994,11 @@ function addGoalRow(prefill) {
       <label>Label</label>
       <input class="g-id" placeholder="cta_click">
     </div>
-    <div class="full-width" style="text-align:right;">
-      <button type="button" class="remove-row" onclick="this.closest('.goal-row').remove()">✕</button>
+    <div style="align-self:end;">
+      <button type="button" class="remove-row" onclick="this.closest('.goal-row').remove()">Remove</button>
     </div>
   `;
   list.appendChild(row);
-
   const typeEl = row.querySelector('.g-type');
   const valueLabelEl = row.querySelector('.g-value-label');
   const valueEl = row.querySelector('.g-value');
@@ -824,7 +2012,6 @@ function addGoalRow(prefill) {
     }
   }
   typeEl.addEventListener('change', renderValueField);
-
   if (prefill) {
     typeEl.value = prefill.type || 'click';
     row.querySelector('.g-id').value = prefill.id || '';
@@ -833,8 +2020,8 @@ function addGoalRow(prefill) {
   renderValueField();
 }
 
-function collectGoals() {
-  return Array.from(document.querySelectorAll('#goals-list .goal-row')).map((row) => {
+function collectGoals(listId) {
+  return Array.from(document.querySelectorAll(`#${listId} .goal-row`)).map((row) => {
     const type = row.querySelector('.g-type').value;
     const value = row.querySelector('.g-value').value.trim();
     const id = row.querySelector('.g-id').value.trim();
@@ -842,105 +2029,71 @@ function collectGoals() {
   }).filter((g) => (g.type === 'url' ? g.url_match : g.selector));
 }
 
-// --- Popular goals (reuse across variants) ---
-
-let popularGoalsCache = [];
-
-async function loadPopularGoals() {
-  const container = document.getElementById('popular-goals');
+async function loadPopularGoals(containerId, mode) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
   const result = await callApi('/api/goals/popular?limit=5', { headers: authHeaders() });
-  if (!result.ok || !result.data.goals || result.data.goals.length === 0) { container.innerHTML = ''; popularGoalsCache = []; return; }
-
+  if (!result.ok || !result.data.goals || result.data.goals.length === 0) {
+    container.innerHTML = '';
+    popularGoalsCache = [];
+    return;
+  }
   popularGoalsCache = result.data.goals;
   const chips = popularGoalsCache.map((g, i) => {
-    // Prefer the short label ("cta_click") over the raw selector/URL, which can
-    // be long and unreadable (e.g. auto-generated selectors from page builders)
-    // — the full value is still available as a hover tooltip.
     const fallback = g.type === 'url' ? `Visited "${g.value}"` : `Click "${g.value}"`;
     const display = g.label ? g.label : fallback;
     const tooltip = g.type === 'url' ? `Visited "${g.value}"` : `Click "${g.value}"`;
-    return `<button type="button" class="secondary" style="margin:4px 4px 0 0; font-size:0.8em;" title="${tooltip.replace(/"/g, '&quot;')}" onclick="usePopularGoal(${i})">${display}</button>`;
+    return `<button type="button" class="btn-ghost" style="margin:4px 4px 0 0; font-size:0.8em;" title="${UI.escapeHtml(tooltip)}" data-popular="${i}" data-popular-mode="${mode}">${UI.escapeHtml(display)}</button>`;
   }).join('');
-  container.innerHTML = '<div class="hint" style="margin-bottom:4px;">Frequently used — click to add:</div>' + chips;
+  container.innerHTML = '<div class="hint" style="margin-top:8px;">Frequently used — click to add:</div>' + chips;
 }
 
-function usePopularGoal(i) {
-  const g = popularGoalsCache[i];
+document.body.addEventListener('click', async (e) => {
+  const chip = e.target.closest('[data-popular]');
+  if (!chip) return;
+  const g = popularGoalsCache[Number(chip.dataset.popular)];
   if (!g) return;
-  addGoalRow({
+  const prefill = {
     type: g.type,
     selector: g.type === 'click' ? g.value : undefined,
     url_match: g.type === 'url' ? g.value : undefined,
     id: g.label,
-  });
-}
-
-async function saveVariant() {
-  const expId = document.getElementById('var-exp-id').value.trim();
-  const el = document.getElementById('var-result');
-  if (!expId) { el.className = 'error-msg'; el.textContent = 'Select an experiment above first (or create one, or refresh the list).'; return; }
-
-  const name = document.getElementById('var-name').value;
-  const traffic_split = parseInt(document.getElementById('var-split').value, 10);
-  const goals = collectGoals();
-  const editingId = document.getElementById('editing-variant-id').value;
-
-  const path = editingId ? `/api/experiments/${expId}/variants/${editingId}` : `/api/experiments/${expId}/variants`;
-  const result = await callApi(path, {
-    method: editingId ? 'PATCH' : 'POST', headers: authHeaders(), body: JSON.stringify({ name, traffic_split, goals }) // no `changes` on purpose: the server leaves a variant's changes untouched when they're omitted
-  });
-  el.className = result.ok ? 'ok-msg' : 'error-msg';
-  if (result.ok) {
-    el.textContent = editingId ? 'Variant updated.' : 'Variant created. Next: open Preview & manage and click 🎯 Make Edits to change what it does on the page.';
-    const expSelect = document.getElementById('var-exp-id');
-    const expLabel = expSelect.selectedOptions[0] ? expSelect.selectedOptions[0].text : '';
-    renderSavedVariantSummary(result.data, expLabel);
-    if (editingId) cancelEditVariant();
-    loadPopularGoals();
-  } else {
-    el.textContent = `Error: ${result.message}`;
+  };
+  if (chip.dataset.popularMode === 'wizard') {
+    addGoalRow(prefill, 'wizard-goals-list');
+    rememberWizardGoals();
+    return;
   }
-}
+  if (!currentDetail) return;
+  const goal = g.type === 'url'
+    ? { type: 'url', url_match: g.value, id: g.label || '' }
+    : { type: 'click', selector: g.value, id: g.label || '' };
+  for (const variant of currentDetail.variants || []) {
+    const already = (variant.goals || []).some((existing) => existing.id === goal.id && (existing.selector === goal.selector || existing.url_match === goal.url_match));
+    if (already) continue;
+    const result = await callApi(`/api/experiments/${currentDetail.id}/variants/${variant.id}`, {
+      method: 'PATCH', headers: authHeaders(),
+      body: JSON.stringify({ name: variant.name, traffic_split: variant.traffic_split, goals: [...(variant.goals || []), goal] }),
+    });
+    if (!result.ok) { detailError(result.message); return; }
+  }
+  await reloadDetail();
+});
 
-// Shows a quick read-only recap right after saving, so what you just submitted is
-// visible without having to jump to the Manage Variants section to confirm it.
-function renderSavedVariantSummary(variant, expLabel) {
-  const container = document.getElementById('saved-variant-summary');
-  const card = document.createElement('div');
-  card.className = 'variant-card';
-  card.innerHTML = `
-    <div>
-      <strong>${variant.name}</strong> <span class="hint">saved to ${expLabel || 'experiment'}</span>
-      <div class="vc-meta">${variant.traffic_split}% traffic · ${(variant.changes || []).length} change(s) · ${(variant.goals || []).length} goal(s)</div>
-    </div>
-  `;
-  container.prepend(card);
-}
+// --- Preview page ---
 
-// --- Preview & manage variants ---
+document.getElementById('manage-exp-id').addEventListener('change', (e) => {
+  if (e.target.value) loadManageVariants();
+});
 
-let currentManageVariants = [];
-let currentManageExpId = '';
-
-function buildPreviewUrl(pageUrl, variantId) {
-  const sep = pageUrl.includes('?') ? '&' : '?';
-  return `${pageUrl}${sep}ab_preview=${variantId}`;
-}
-
-// Opens the real page in a new tab with the in-page visual editor active.
-// Generates a fresh, scoped, short-lived edit link each time rather than
-// reusing one — see src/edit-token.js for why this can't just use the normal
-// login session (the editor runs on the client's own domain).
-async function makeEdits(expId, variantId, btn) {
-  const pageUrl = document.getElementById('manage-page-url').value.trim();
-  if (!pageUrl) { alert('Enter a page URL above first.'); return; }
-
-  btn.disabled = true;
+async function makeEdits(expId, variantId, btn, pageUrl) {
+  const url = (pageUrl || (document.getElementById('manage-page-url') || {}).value || '').trim();
+  if (!url) { alert('Enter a page URL first.'); return; }
+  if (btn) btn.disabled = true;
   const result = await callApi(`/api/experiments/${expId}/variants/${variantId}/edit-link`, {
-    method: 'POST', headers: authHeaders(), body: JSON.stringify({ page_url: pageUrl }),
+    method: 'POST', headers: authHeaders(), body: JSON.stringify({ page_url: url }),
   });
-  btn.disabled = false;
-
+  if (btn) btn.disabled = false;
   if (!result.ok) { alert(`Error: ${result.message}`); return; }
   window.open(result.data.edit_url, '_blank');
 }
@@ -951,362 +2104,151 @@ async function loadManageVariants() {
   const listEl = document.getElementById('manage-variants-list');
   listEl.innerHTML = '';
   if (!expId) { msgEl.className = 'error-msg'; msgEl.textContent = 'Select an experiment above first.'; return; }
-
   const result = await callApi(`/api/experiments/${expId}`, { headers: authHeaders() });
   if (!result.ok) { msgEl.className = 'error-msg'; msgEl.textContent = `Error: ${result.message}`; return; }
-
   const pageUrl = document.getElementById('manage-page-url').value.trim();
   const variants = result.data.variants || [];
   currentManageVariants = variants;
   currentManageExpId = expId;
   if (variants.length === 0) { msgEl.className = 'hint'; msgEl.textContent = 'No variants yet on this experiment.'; return; }
-
   msgEl.className = 'hint';
-  const enabledVariants = variants.filter((v) => v.enabled);
-  const enabledCount = enabledVariants.length;
-  const splitSum = enabledVariants.reduce((sum, v) => sum + (v.traffic_split || 0), 0);
-
-  const warnings = [];
-  if (enabledCount === 1) {
-    warnings.push('⚠ Only one active variant — 100% of matched traffic will see its changes, with no unmodified original shown to compare against. Add a "Control" variant with no changes if you want a real A/B split.');
-  } else if (enabledCount > 1 && splitSum !== 100) {
-    const effective = enabledVariants.map((v) => `${v.name}: ${((v.traffic_split / splitSum) * 100).toFixed(1)}%`).join(', ');
-    warnings.push(`⚠ Active variants' traffic splits add up to ${splitSum}%, not 100%. Every visitor still gets assigned to one of them — the splits are used as relative weights, not literal percentages — but the actual effective split is ${effective}, which may not be what the numbers suggest at a glance.`);
-  }
-
-  // Goals belong to each variant separately — a visitor's snippet only tracks the goals of
-  // the variant they were assigned. A variant with no goal can never record a conversion,
-  // so its rate reads 0% no matter how it really performs. Compared by label, because the
-  // selector can legitimately differ between variants (e.g. a replaced button).
-  if (enabledCount > 1) {
-    const goalLabels = (v) => (v.goals || []).map((g) => g.id || g.selector || g.url_match).sort();
-    if (new Set(enabledVariants.map((v) => JSON.stringify(goalLabels(v)))).size > 1) {
-      const summary = enabledVariants.map((v) => `${v.name}: ${goalLabels(v).join(', ') || 'none'}`).join(' · ');
-      warnings.push(`⚠ These variants don't have the same goals (${summary}). Conversions are only counted for a variant that has the goal, so a variant with no goal always shows 0% and the comparison is meaningless. Open 🎯 Make Edits on each variant and set the same goals, with the same labels.`);
-    }
-  }
-
-  if (warnings.length) {
-    msgEl.style.color = '#a3690f';
-    msgEl.style.fontWeight = '600';
-    msgEl.style.whiteSpace = 'pre-line';
-    msgEl.textContent = warnings.join('\n\n');
-  } else {
-    msgEl.style.color = '';
-    msgEl.style.fontWeight = '';
-    msgEl.style.whiteSpace = '';
-    msgEl.textContent = '';
-  }
-  variants.forEach((v, i) => {
+  msgEl.textContent = '';
+  variants.forEach((v) => {
     const card = document.createElement('div');
     card.className = 'variant-card' + (v.enabled ? '' : ' disabled');
-    const previewBtn = pageUrl
-      ? `<button type="button" class="secondary" onclick="window.open('${buildPreviewUrl(pageUrl, v.id)}', '_blank')">Preview</button>`
-      : `<button type="button" class="secondary" disabled title="Enter a page URL above first">Preview</button>`;
-    const makeEditsBtn = pageUrl
-      ? `<button type="button" class="secondary" onclick="makeEdits('${expId}', '${v.id}', this)">🎯 Make Edits</button>`
-      : `<button type="button" class="secondary" disabled title="Enter a page URL above first">🎯 Make Edits</button>`;
     card.innerHTML = `
       <div>
-        <strong>${v.name}</strong>
-        <span class="badge ${v.enabled ? 'live' : 'paused'}">${v.enabled ? 'live' : 'paused'}</span>
+        <strong>${UI.escapeHtml(v.name)}</strong>
+        <span class="badge ${v.enabled ? 'live' : 'paused'}">${v.enabled ? 'enabled' : 'paused'}</span>
         <div class="vc-meta">${v.traffic_split}% traffic · ${(v.changes || []).length} change(s) · ${(v.goals || []).length} goal(s)</div>
       </div>
       <div class="vc-actions">
-        ${previewBtn}
-        ${makeEditsBtn}
-        <button type="button" class="secondary" onclick="editVariant(${i})">Edit</button>
-        <button type="button" class="secondary" onclick="toggleVariantEnabled('${expId}', '${v.id}', ${!v.enabled}, this)">${v.enabled ? 'Pause' : 'Resume'}</button>
-        <button type="button" class="secondary" style="color:#c0392b" onclick="deleteVariant('${expId}', '${v.id}', this)">Delete</button>
+        <button type="button" class="btn-ghost" data-manage="preview" data-id="${v.id}">Preview</button>
+        <button type="button" class="btn-ghost" data-manage="edit" data-id="${v.id}">Make edits</button>
+        <button type="button" class="btn-ghost" data-manage="open">Open experiment</button>
+        <button type="button" class="btn-ghost" data-manage="toggle" data-id="${v.id}" data-enabled="${v.enabled ? 'false' : 'true'}">${v.enabled ? 'Pause' : 'Resume'}</button>
+        <button type="button" class="btn-danger" data-manage="delete" data-id="${v.id}">Delete</button>
       </div>
     `;
     listEl.appendChild(card);
   });
 }
 
-// Loads a variant's current data into the "Add Variant" form and switches it into
-// edit mode. Saving will PATCH this variant instead of creating a new one.
-function editVariant(index) {
-  const v = currentManageVariants[index];
-  if (!v) return;
-
-  document.getElementById('var-exp-id').value = currentManageExpId;
-  document.getElementById('var-name').value = v.name;
-  document.getElementById('var-split').value = v.traffic_split;
-
-  const goalsList = document.getElementById('goals-list');
-  goalsList.innerHTML = '';
-  if (v.goals && v.goals.length) v.goals.forEach((g) => addGoalRow(g));
-
-  document.getElementById('editing-variant-id').value = v.id;
-  document.getElementById('edit-banner').style.display = 'block';
-  document.getElementById('save-variant-btn').textContent = `Save Changes to "${v.name}"`;
-  document.getElementById('var-result').textContent = '';
-  // The edit form lives on the Create experiment page — go there (scrolling alone does
-  // nothing while that page is hidden) and open the accordions holding what's being edited.
-  showPage('page-create');
-  const nameDetails = document.getElementById('var-name').closest('details');
-  if (nameDetails) nameDetails.open = true;
-  if (v.goals && v.goals.length) {
-    const goalsDetails = document.getElementById('goals-list').closest('details');
-    if (goalsDetails) goalsDetails.open = true;
+document.getElementById('manage-variants-list').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-manage]');
+  if (!btn) return;
+  const pageUrl = document.getElementById('manage-page-url').value.trim();
+  if (btn.dataset.manage === 'preview') {
+    if (!pageUrl) { alert('Enter a page URL above first.'); return; }
+    window.open(buildPreviewUrl(pageUrl, btn.dataset.id), '_blank');
+  } else if (btn.dataset.manage === 'edit') {
+    await makeEdits(currentManageExpId, btn.dataset.id, btn, pageUrl);
+  } else if (btn.dataset.manage === 'open') {
+    go(`#experiment/${currentManageExpId}/variants`);
+  } else if (btn.dataset.manage === 'toggle') {
+    btn.disabled = true;
+    const enabled = btn.dataset.enabled === 'true';
+    const result = await callApi(`/api/experiments/${currentManageExpId}/variants/${btn.dataset.id}/enabled`, {
+      method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ enabled }),
+    });
+    btn.disabled = false;
+    if (!result.ok) { alert(`Error: ${result.message}`); return; }
+    loadManageVariants();
+  } else if (btn.dataset.manage === 'delete') {
+    if (!confirm('Delete this variant permanently? This also deletes its recorded views and conversions.\n\nTo stop it running while keeping history, pause the variant instead.')) return;
+    btn.disabled = true;
+    const result = await callApi(`/api/experiments/${currentManageExpId}/variants/${btn.dataset.id}`, { method: 'DELETE', headers: authHeaders() });
+    btn.disabled = false;
+    if (!result.ok) { alert(`Error: ${result.message}`); return; }
+    loadManageVariants();
+    loadExperimentList();
   }
-  document.getElementById('var-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
-function cancelEditVariant() {
-  document.getElementById('editing-variant-id').value = '';
-  document.getElementById('edit-banner').style.display = 'none';
-  document.getElementById('save-variant-btn').textContent = 'Add Variant';
-  document.getElementById('var-name').value = '';
-  document.getElementById('var-split').value = 50;
-  document.getElementById('goals-list').innerHTML = '';
-}
-
-async function toggleVariantEnabled(expId, variantId, enabled, btn) {
-  btn.disabled = true;
-  const result = await callApi(`/api/experiments/${expId}/variants/${variantId}/enabled`, {
-    method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ enabled })
-  });
-  btn.disabled = false;
-  if (!result.ok) { alert(`Error: ${result.message}`); return; }
-  loadManageVariants();
-}
-
-async function deleteVariant(expId, variantId, btn) {
-  if (!confirm('Delete this variant permanently? This also deletes its recorded views/conversions and cannot be undone.\n\nIf you just want to stop it running while keeping its history, use Pause instead.')) return;
-  btn.disabled = true;
-  const result = await callApi(`/api/experiments/${expId}/variants/${variantId}`, {
-    method: 'DELETE', headers: authHeaders()
-  });
-  btn.disabled = false;
-  if (!result.ok) { alert(`Error: ${result.message}`); return; }
-  loadManageVariants();
-}
+});
 
 async function updateStatus() {
   const expId = document.getElementById('status-exp-id').value.trim();
   const el = document.getElementById('status-result');
   if (!expId) { el.className = 'error-msg'; el.textContent = 'Select an experiment above first.'; return; }
-
   const status = document.getElementById('status-value').value;
   const result = await callApi(`/api/experiments/${expId}/status`, {
-    method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ status })
+    method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ status }),
   });
   el.className = result.ok ? 'ok-msg' : 'error-msg';
-  el.textContent = result.ok ? `Status updated to "${result.data.status}"` : `Error: ${result.message}`;
-  if (result.ok) loadExperimentList();
+  el.textContent = result.ok ? `Status updated to "${result.data.status}".` : `Error: ${result.message}`;
+  if (result.ok) {
+    if (currentDetail && currentDetail.id === expId) currentDetail = null;
+    loadExperimentList();
+  }
 }
 
-let rateChart, trendChart;
-let currentTrendSeries = [];
-let trendMode = 'cumulative';
-
-// Shared by both the trend-mode toggle and the initial render. Plots conversion
-// rate (not raw visitor count) so it's directly comparable to the Bayesian rate
-// estimate above it. "Cumulative" is a running rate up to that day; "Daily" is
-// that day's own rate in isolation (noisier, but shows what's happening *now*
-// rather than smoothing it into the running average).
-function computeTrendDatasets(series, mode) {
-  const days = [...new Set(series.map((r) => r.day))].sort();
-  const variantNames = [...new Set(series.map((r) => r.variant_name))];
-  const palette = ['#5635FB', '#02DEB5', '#e07a5f', '#131723', '#a3690f'];
-
-  const datasets = variantNames.map((name, i) => {
-    let cumVisitors = 0, cumConversions = 0;
-    const dataByDay = days.map((day) => {
-      const row = series.find((r) => r.day === day && r.variant_name === name);
-      const v = row ? row.visitors : 0;
-      const c = row ? row.conversions : 0;
-      if (mode === 'cumulative') {
-        cumVisitors += v; cumConversions += c;
-        return cumVisitors > 0 ? +(cumConversions / cumVisitors * 100).toFixed(2) : 0;
-      }
-      return v > 0 ? +(c / v * 100).toFixed(2) : 0;
-    });
-    return { label: name, data: dataByDay, borderColor: palette[i % palette.length], backgroundColor: palette[i % palette.length], tension: 0.2, fill: false };
-  });
-
-  return { labels: days.map((d) => new Date(d).toLocaleDateString()), datasets };
+function openStatusSettings() {
+  const expId = document.getElementById('status-exp-id').value.trim();
+  const el = document.getElementById('status-result');
+  if (!expId) { el.className = 'error-msg'; el.textContent = 'Select an experiment above first.'; return; }
+  go(`#experiment/${expId}/settings`);
 }
 
-function renderTrendChart() {
-  const trendCanvas = document.getElementById('trend-chart');
-  document.getElementById('trend-mode-cumulative').classList.toggle('active', trendMode === 'cumulative');
-  document.getElementById('trend-mode-daily').classList.toggle('active', trendMode === 'daily');
+// --- Snippet ---
 
-  if (trendChart) trendChart.destroy();
-  // The wrapper's fixed height is only needed while an actual chart is shown —
-  // otherwise it just reserves an empty-looking gap on the page.
-  if (currentTrendSeries.length === 0) { trendCanvas.style.display = 'none'; trendCanvas.parentElement.style.height = '0'; return; }
+function snippetTag() {
+  const closeTag = '</' + 'script>';
+  return `<script src="${location.origin}/snippet/ab.js" data-api="${location.origin}">${closeTag}`;
+}
 
-  const { labels, datasets } = computeTrendDatasets(currentTrendSeries, trendMode);
-  trendCanvas.style.display = 'block';
-  trendCanvas.parentElement.style.height = '340px';
-  trendChart = new Chart(trendCanvas, {
-    type: 'line',
-    data: { labels, datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false, // let the wrapper's fixed height control shape, so it runs wide/landscape rather than Chart.js's default square-ish ratio
-      plugins: { title: { display: true, text: (trendMode === 'cumulative' ? 'Cumulative' : 'Daily') + ' conversion rate over time' } },
-      scales: {
-        x: { title: { display: true, text: 'Time (days)' } },
-        y: { beginAtZero: true, title: { display: true, text: 'Conversion Rate (%)' }, ticks: { callback: (v) => v + '%' } },
-      },
-    },
+function antiflickerSnippet() {
+  const closeTag = '</' + 'script>';
+  return `<style>html.ab-hide{opacity:0 !important}</style>\n<script>document.documentElement.classList.add('ab-hide');setTimeout(function(){document.documentElement.classList.remove('ab-hide')},3000)${closeTag}`;
+}
+
+function copyText(text, statusId) {
+  const el = document.getElementById(statusId);
+  navigator.clipboard.writeText(text).then(() => {
+    if (!el) return;
+    el.textContent = ' Copied';
+    setTimeout(() => { el.textContent = ''; }, 2000);
+  }).catch(() => {
+    if (el) el.textContent = ' Could not copy — select the text manually.';
   });
 }
+function copySnippet(statusId) { copyText(snippetTag(), statusId || 'snippet-copied'); }
+function copyAntiflicker(statusId) { copyText(antiflickerSnippet(), statusId || 'antiflicker-copied'); }
 
-function setTrendMode(mode) {
-  trendMode = mode;
-  renderTrendChart();
-}
-
-async function loadResults() {
-  const expId = document.getElementById('results-exp-id').value.trim();
-  const msgEl = document.getElementById('results-msg');
-  const refreshBtn = document.getElementById('refresh-results-btn');
-  const exportBtn = document.getElementById('export-results-btn');
-  if (!expId) { msgEl.className = 'error-msg'; msgEl.textContent = 'Select an experiment above first.'; refreshBtn.style.display = 'none'; exportBtn.style.display = 'none'; return; }
-
-  const visitorType = document.getElementById('visitor-type-filter').value;
-  const qs = visitorType ? `?visitor_type=${visitorType}` : '';
-  const result = await callApi(`/api/results/${expId}${qs}`, { headers: authHeaders() });
-
-  if (!result.ok) {
-    msgEl.className = 'error-msg';
-    msgEl.textContent = `Error: ${result.message}`;
-    document.getElementById('results-table').style.display = 'none';
-    document.getElementById('rate-chart').style.display = 'none';
-    document.getElementById('trend-chart').style.display = 'none';
-    refreshBtn.style.display = 'none';
-    exportBtn.style.display = 'none';
+document.addEventListener('click', (e) => {
+  const pop = document.getElementById('snippet-popover');
+  const toggle = e.target.closest('[data-snippet-toggle]');
+  if (toggle) {
+    e.preventDefault();
+    if (pop.style.display === 'block') { pop.style.display = 'none'; return; }
+    const rect = toggle.getBoundingClientRect();
+    pop.style.display = 'block';
+    const width = pop.offsetWidth;
+    const left = Math.min(rect.left, window.innerWidth - width - 12);
+    pop.style.left = Math.max(12, left) + 'px';
+    pop.style.top = (rect.bottom + 8) + 'px';
     return;
   }
-  refreshBtn.style.display = 'inline-block';
-  exportBtn.style.display = 'inline-block';
-  msgEl.textContent = '';
-  const results = result.data.results || [];
-  const tbody = document.getElementById('results-body');
-  tbody.innerHTML = '';
-  results.forEach(r => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${r.variant_name}</td><td>${r.visitors}</td><td>${r.new_visitors}</td><td>${r.returning_visitors}</td><td>${r.clicks}</td><td>${r.conversions}</td><td>${r.conversion_rate}%</td>`;
-    tbody.appendChild(tr);
-  });
-  document.getElementById('results-table').style.display = 'table';
+  if (pop.style.display === 'block' && !pop.contains(e.target)) pop.style.display = 'none';
+});
 
-  // Bar chart: conversion rate per variant — the headline "which one's winning" view.
-  const rateCanvas = document.getElementById('rate-chart');
-  rateCanvas.style.display = results.length ? 'block' : 'none';
-  if (rateChart) rateChart.destroy();
-  if (results.length) {
-    rateChart = new Chart(rateCanvas, {
-      type: 'bar',
-      data: {
-        labels: results.map(r => r.variant_name),
-        datasets: [{ label: 'Conversion rate (%)', data: results.map(r => r.conversion_rate), backgroundColor: '#5635FB' }]
-      },
-      options: { responsive: true, plugins: { title: { display: true, text: 'Conversion rate by variant' } }, scales: { y: { beginAtZero: true } } }
-    });
-  }
-
-  // Line chart: conversion rate over time per variant, in whichever mode
-  // (cumulative running rate, or that day's own rate) is currently selected.
-  const trendResult = await callApi(`/api/results/${expId}/timeseries`, { headers: authHeaders() });
-  currentTrendSeries = (trendResult.ok && trendResult.data.series) ? trendResult.data.series : [];
-  renderTrendChart();
-
-  // Recent activity — raw, unaggregated events, for confirming whether anything
-  // is actually arriving at all, independent of the totals above.
-  const activityEl = document.getElementById('activity-log');
-  const recentResult = await callApi(`/api/results/${expId}/recent`, { headers: authHeaders() });
-  if (!recentResult.ok) {
-    activityEl.textContent = `Error loading activity: ${recentResult.message}`;
-  } else if (!recentResult.data.events || recentResult.data.events.length === 0) {
-    activityEl.innerHTML = '<strong>No events recorded yet for this experiment.</strong> If you\'ve visited the live page normally and expect to see something here, check: the experiment\'s status is "running" (not draft/paused), at least one variant is enabled (not paused) in Manage Variants, the snippet is actually present on the page you\'re testing (view page source), and your browser\'s console/network tab shows no errors calling the snippet or /api/event.';
-  } else {
-    activityEl.innerHTML = recentResult.data.events.map((ev) => `
-      <div class="activity-row">
-        <span><strong>${ev.event_type}</strong> · ${ev.variant_name}${ev.goal_id ? ' · ' + ev.goal_id : ''}</span>
-        <span class="hint">${new Date(ev.created_at).toLocaleString()}</span>
-      </div>
-    `).join('');
-  }
-
-  // Sample Ratio Mismatch check — see src/srm.js for the method. Deliberately
-  // rendered above the Bayesian panel: if the split itself looks broken, the
-  // conversion-rate comparison below it isn't trustworthy regardless of what
-  // it shows, so this is the first thing worth checking.
-  const srmPanel = document.getElementById('srm-panel');
-  const srmResult = await callApi(`/api/results/${expId}/srm`, { headers: authHeaders() });
-  if (!srmResult.ok || !srmResult.data.applicable) {
-    srmPanel.style.display = 'none';
-  } else {
-    const srm = srmResult.data;
-    srmPanel.style.display = 'block';
-    if (srm.srm_detected) {
-      srmPanel.className = 'srm-warning';
-      const splits = srmResult.data.variants.map((v) => `${v.name}: ${v.visitors} visitors (configured ${v.traffic_split}%)`).join(' · ');
-      srmPanel.innerHTML = `<strong>⚠ Sample Ratio Mismatch detected</strong> (p = ${srm.p_value < 0.0001 ? '<0.0001' : srm.p_value.toFixed(4)}). Actual traffic doesn't match the configured split closely enough to be normal random variance — this usually means a bug in assignment, bot/bias contamination, or a caching issue, not a real behavioral difference. <strong>Treat the results below with caution until this is understood.</strong><br><span class="hint" style="color:inherit;">${splits}</span>`;
-    } else {
-      srmPanel.className = 'srm-ok';
-      srmPanel.innerHTML = `✓ Traffic split looks healthy (p = ${srm.p_value.toFixed(3)}) — no sign of a mismatch between configured and actual traffic.`;
-    }
-  }
-
-  // Bayesian analysis — see src/bayesian.js for the model. Renders alongside the
-  // raw table rather than replacing it, since the raw numbers are still useful
-  // on their own (e.g. for the CSV export workflow).
-  const bayesianTable = document.getElementById('bayesian-table');
-  const bayesianWarning = document.getElementById('bayesian-warning');
-  const bayesianResult = await callApi(`/api/results/${expId}/bayesian`, { headers: authHeaders() });
-
-  if (!bayesianResult.ok || !bayesianResult.data.stats || bayesianResult.data.stats.length === 0) {
-    bayesianTable.style.display = 'none';
-    bayesianWarning.style.display = 'none';
-  } else {
-    const stats = bayesianResult.data.stats;
-    if (bayesianResult.data.low_sample_warning) {
-      bayesianWarning.style.display = 'block';
-      bayesianWarning.textContent = '⚠ At least one variant still has under 30 visitors — treat these numbers as indicative, not conclusive. The credible interval (the range after "±") will narrow as more data comes in.';
-    } else {
-      bayesianWarning.style.display = 'none';
-    }
-
-    const bayesianBody = document.getElementById('bayesian-body');
-    bayesianBody.innerHTML = stats.map((s) => {
-      const isLikelyBest = s.probability_best >= 90;
-      return `
-        <tr>
-          <td>${s.variant_name}${isLikelyBest ? ' 🏆' : ''}</td>
-          <td>${s.visitors}</td>
-          <td>${s.conversions}</td>
-          <td>${s.posterior_mean}% <span class="hint">(${s.ci_low}%–${s.ci_high}%)</span></td>
-          <td><strong>${s.probability_best}%</strong></td>
-        </tr>
-      `;
-    }).join('');
-    bayesianTable.style.display = 'table';
-  }
-}
-
-// --- Selector picker bookmarklet ---
-// Built from snippet/picker-bookmarklet.js at page load so the two never drift apart.
-fetch('/snippet/picker-bookmarklet.js').then(r => r.text()).then(src => {
-  document.getElementById('picker-bookmarklet').href = 'javascript:' + encodeURIComponent(src);
+fetch('/snippet/picker-bookmarklet.js').then((r) => r.text()).then((src) => {
+  pickerHref = 'javascript:' + encodeURIComponent(src);
+  document.querySelectorAll('.picker-bookmarklet').forEach((a) => { a.href = pickerHref; });
 }).catch(() => {});
 
-// Gate the whole page on an active owner session before loading anything else.
+document.getElementById('client-login-url').textContent = `${location.origin}/login.html?role=client`;
+
+if (window.Chart) {
+  Chart.defaults.color = '#c5c8d4';
+  Chart.defaults.borderColor = 'rgba(255,255,255,0.08)';
+}
+
 (async () => {
   const ok = await requireOwnerSession();
-  if (ok) {
-    refreshAll();
-    let lastPage = 'page-home';
-    try { lastPage = localStorage.getItem('pivit_last_page') || 'page-home'; } catch (e) {}
-    if (PAGE_IDS.includes(lastPage)) showPage(lastPage);
-  }
+  if (!ok) return;
+  loadWizard();
+  await loadClients();
+  if (!location.hash) history.replaceState(null, '', '#home');
+  applyRoute();
 })();
 </script>
 </body>
