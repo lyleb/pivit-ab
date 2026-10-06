@@ -104,6 +104,11 @@
   .badge.paused { background: #2a2e3c; color: var(--text-muted); }
   .badge.draft { background: #3a2e14; color: var(--warn); }
   .badge.archived { background: #2a2d38; color: #b0b4c4; }
+  .badge.no-domain {
+    background: var(--warn-bg); color: var(--warn); border: 1px solid #6a5420;
+    text-transform: none; letter-spacing: 0; margin-left: 6px; vertical-align: middle;
+  }
+  textarea.hosts { height: 68px; }
   .mono { font-family: "SF Mono", Menlo, monospace; font-size: 0.84em; color: var(--text-muted); }
   .kicker { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 700; }
   .status-big { font-size: 1.55em; font-weight: 750; margin: 6px 0; letter-spacing: -0.02em; }
@@ -280,9 +285,12 @@
           <label for="wizard-url">Page URL match</label>
           <input id="wizard-url" placeholder="https://example.com/about or /about" spellcheck="false">
           <p class="hint">The page address must contain this text. A path such as /about, or the full URL, both work.</p>
+          <label for="wizard-hosts">Site domain(s)</label>
+          <textarea id="wizard-hosts" class="hosts" placeholder="example.com" spellcheck="false"></textarea>
+          <p class="hint">Sites this experiment may run on. Separate extra domains with a comma or a new line. www and the bare domain count as the same.</p>
           <label for="wizard-client">Client (optional)</label>
           <select id="wizard-client"><option value="">None — internal only</option></select>
-          <p id="wizard-lock-hint" class="hint" hidden>Name and URL are fixed once the draft exists. Client can still be changed.</p>
+          <p id="wizard-lock-hint" class="hint" hidden>Name and URL are fixed once the draft exists. Client and site domains can still be changed.</p>
         </div>
 
         <div id="wizard-step-2" class="wizard-step" hidden>
@@ -423,6 +431,7 @@ const WIZARD_LABELS = ['Basics', 'Variants', 'Goals', 'Install', 'Review'];
 
 let clientsCache = [];
 let experimentsCache = [];
+let experimentsLoaded = false;
 let currentDetail = null;
 let currentTab = 'overview';
 let routeToken = 0;
@@ -443,6 +452,8 @@ const wizard = {
   url: '',
   clientId: '',
   pageUrl: '',
+  hosts: '',
+  hostsEdited: false,
   variants: [],
   goalRows: [],
   checks: { snippet: false, preview: false, event: false },
@@ -534,7 +545,12 @@ async function applyRoute() {
   showPage(page);
   setNav(page);
   if (page === 'page-home') { setTitle('Pivit — Experiments'); loadExperimentList(); }
-  if (page === 'page-create') { setTitle('Pivit — Create experiment'); renderWizard(); }
+  if (page === 'page-create') {
+    setTitle('Pivit — Create experiment');
+    if (!experimentsLoaded) await loadExperimentList();
+    if (token !== routeToken) return;
+    renderWizard();
+  }
   if (page === 'page-preview') setTitle('Pivit — Preview');
   if (page === 'page-status') setTitle('Pivit — Start & pause');
   if (token !== routeToken) return;
@@ -739,6 +755,7 @@ async function loadExperimentList() {
   }
   const experiments = result.data.experiments || [];
   experimentsCache = experiments;
+  experimentsLoaded = true;
   populateExperimentSelects(experiments);
   if (experiments.length === 0) {
     msgEl.className = 'hint';
@@ -754,7 +771,7 @@ async function loadExperimentList() {
     return `<tr>
       <td><button type="button" class="name-btn" data-open="${exp.id}">${UI.escapeHtml(exp.name)}</button></td>
       <td><span class="badge ${STATUS_CLASS[exp.status] || 'paused'}">${UI.escapeHtml(exp.status)}</span></td>
-      <td class="mono" title="${UI.escapeHtml(exp.url_match || '')}">${UI.escapeHtml(UI.shortUrl(exp.url_match))}</td>
+      <td class="mono" title="${UI.escapeHtml(exp.url_match || '')}">${UI.escapeHtml(UI.shortUrl(exp.url_match))}${noDomainBadge(exp)}</td>
       <td>${UI.escapeHtml(client)}</td>
       <td>${exp.variant_count}</td>
       <td class="hint" data-signal-for="${exp.id}">${exp.status === 'draft' ? 'No data yet' : '…'}</td>
@@ -880,6 +897,7 @@ function renderDetail() {
         <div class="meta-line">
           <span class="badge ${STATUS_CLASS[exp.status] || 'paused'}">${UI.escapeHtml(exp.status)}</span>
           <span class="mono">${UI.escapeHtml(exp.url_match || '—')}</span>
+          ${noDomainBadge(exp)}
           <span>Client · ${UI.escapeHtml(client)}</span>
           <span>${variants.length} variant${variants.length === 1 ? '' : 's'}</span>
         </div>
@@ -995,6 +1013,10 @@ function renderDetail() {
 
     <div data-tab-panel="settings" hidden>
       <div class="card" style="max-width:640px;">
+        <label for="settings-hosts">Site domain(s)</label>
+        <textarea id="settings-hosts" class="hosts" spellcheck="false" placeholder="example.com">${UI.escapeHtml((exp.allowed_hosts || []).join('\n'))}</textarea>
+        <p class="hint">The experiment only runs on these sites. www and the bare domain are the same. Other subdomains must be listed.</p>
+        <p class="hint" id="settings-seen">Seen on since last deploy: checking…</p>
         <label for="settings-client">Client</label>
         <select id="settings-client"></select>
         <p class="hint">Only this client can see the experiment on their results page.</p>
@@ -1017,6 +1039,7 @@ function renderDetail() {
 
   fillClientSelect(document.getElementById('settings-client'), 'None — internal only', exp.client_id || '');
   document.getElementById('settings-status').value = exp.status;
+  loadSeenHosts(exp.id);
   renderVariantRows();
   renderGoalBlocks();
   document.querySelectorAll('.picker-bookmarklet').forEach((a) => { a.href = pickerHref; });
@@ -1365,10 +1388,42 @@ document.getElementById('page-detail').addEventListener('change', (e) => {
   else value.placeholder = '#cta-button';
 });
 
+function noDomainBadge(exp) {
+  const hosts = exp && exp.allowed_hosts;
+  if (hosts && hosts.length) return '';
+  return '<span class="badge no-domain">No domain</span>';
+}
+
+async function loadSeenHosts(experimentId) {
+  const result = await callApi('/api/experiments/host-report', { headers: authHeaders() });
+  const el = document.getElementById('settings-seen');
+  if (!el || !currentDetail || currentDetail.id !== experimentId) return;
+  if (!result.ok) {
+    el.textContent = 'Seen on since last deploy: unavailable';
+    return;
+  }
+  const rows = (result.data.experiments && result.data.experiments[experimentId]) || [];
+  const names = rows.map((row) => row.host).filter(Boolean);
+  el.textContent = names.length
+    ? `Seen on since last deploy: ${names.join(', ')}`
+    : 'Seen on since last deploy: none yet';
+}
+
 async function saveDetailSettings() {
   const msg = document.getElementById('settings-msg');
+  const hostsField = document.getElementById('settings-hosts');
   const clientId = document.getElementById('settings-client').value || null;
   const status = document.getElementById('settings-status').value;
+  if (currentDetail.status !== status && status === 'archived') {
+    if (!confirm('Archive this experiment? It leaves the live set. You can still read results.')) return;
+  }
+  const hostsResult = await callApi(`/api/experiments/${currentDetail.id}/hosts`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ allowed_hosts: hostsField ? hostsField.value : '' }),
+  });
+  if (!hostsResult.ok) { msg.className = 'error-msg'; msg.textContent = hostsResult.message; return; }
+  currentDetail.allowed_hosts = hostsResult.data.allowed_hosts;
   if ((currentDetail.client_id || null) !== clientId) {
     const clientResult = await callApi(`/api/experiments/${currentDetail.id}/client`, {
       method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ client_id: clientId }),
@@ -1377,7 +1432,6 @@ async function saveDetailSettings() {
     currentDetail.client_id = clientId;
   }
   if (currentDetail.status !== status) {
-    if (status === 'archived' && !confirm('Archive this experiment? It leaves the live set. You can still read results.')) return;
     const statusResult = await callApi(`/api/experiments/${currentDetail.id}/status`, {
       method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ status }),
     });
@@ -1582,6 +1636,8 @@ function resetWizard() {
   wizard.url = '';
   wizard.clientId = '';
   wizard.pageUrl = '';
+  wizard.hosts = '';
+  wizard.hostsEdited = false;
   wizard.variants = [];
   wizard.goalRows = [];
   wizard.checks = { snippet: false, preview: false, event: false };
@@ -1600,8 +1656,38 @@ function wizardMsg(text, ok) {
 function readWizardBasics() {
   wizard.name = document.getElementById('wizard-name').value.trim();
   wizard.url = document.getElementById('wizard-url').value.trim();
+  wizard.hosts = document.getElementById('wizard-hosts').value.trim();
   wizard.clientId = document.getElementById('wizard-client').value;
   saveWizard();
+}
+
+function hostFromPageUrl(value) {
+  const text = String(value || '').trim();
+  if (!/^https?:\/\//i.test(text)) return '';
+  try {
+    let host = new URL(text).hostname.toLowerCase().replace(/\.$/, '');
+    if (host.startsWith('www.')) host = host.slice(4);
+    return host;
+  } catch (e) {
+    return '';
+  }
+}
+
+function suggestedSiteDomains() {
+  const fromUrl = hostFromPageUrl(wizard.url);
+  if (fromUrl) return fromUrl;
+  if (!wizard.clientId) return '';
+  const last = experimentsCache.find((exp) =>
+    exp.client_id === wizard.clientId && Array.isArray(exp.allowed_hosts) && exp.allowed_hosts.length
+  );
+  return last ? last.allowed_hosts.join(', ') : '';
+}
+
+function applyHostSuggestion() {
+  if (wizard.hostsEdited) return;
+  wizard.hosts = suggestedSiteDomains();
+  const field = document.getElementById('wizard-hosts');
+  if (field) field.value = wizard.hosts;
 }
 
 async function renderWizard() {
@@ -1620,6 +1706,8 @@ async function renderWizard() {
 
   document.getElementById('wizard-name').value = wizard.name;
   document.getElementById('wizard-url').value = wizard.url;
+  if (!wizard.hostsEdited) wizard.hosts = suggestedSiteDomains();
+  document.getElementById('wizard-hosts').value = wizard.hosts || '';
   fillClientSelect(document.getElementById('wizard-client'), 'None — internal only', wizard.clientId || '');
   const locked = !!wizard.expId;
   document.getElementById('wizard-name').readOnly = locked;
@@ -1705,16 +1793,29 @@ async function ensureWizardVariants() {
   saveWizard();
 }
 
+function rememberSavedHosts(data) {
+  if (!data || !Array.isArray(data.allowed_hosts)) return;
+  wizard.hosts = data.allowed_hosts.join(', ');
+  wizard.hostsEdited = wizard.hosts.length > 0;
+}
+
 async function persistWizardBasics() {
   readWizardBasics();
   if (!wizard.name || !wizard.url) { wizardMsg('Add a name and a URL match.'); return false; }
+  if (!wizard.hosts) { wizardMsg('Add at least one site domain.'); return false; }
   if (!wizard.expId) {
     const result = await callApi('/api/experiments', {
       method: 'POST', headers: authHeaders(),
-      body: JSON.stringify({ name: wizard.name, url_match: wizard.url, client_id: wizard.clientId || null }),
+      body: JSON.stringify({
+        name: wizard.name,
+        url_match: wizard.url,
+        client_id: wizard.clientId || null,
+        allowed_hosts: wizard.hosts,
+      }),
     });
     if (!result.ok) { wizardMsg(result.message); return false; }
     wizard.expId = result.data.id;
+    rememberSavedHosts(result.data);
     const control = result.data.control_variant;
     wizard.variants = [
       { id: control.id, name: control.name || 'Control', split: control.traffic_split },
@@ -1729,6 +1830,12 @@ async function persistWizardBasics() {
     method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ client_id: wizard.clientId || null }),
   });
   if (!result.ok) { wizardMsg(result.message); return false; }
+  const hostsResult = await callApi(`/api/experiments/${wizard.expId}/hosts`, {
+    method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ allowed_hosts: wizard.hosts }),
+  });
+  if (!hostsResult.ok) { wizardMsg(hostsResult.message); return false; }
+  rememberSavedHosts(hostsResult.data);
+  saveWizard();
   loadExperimentList();
   return true;
 }
@@ -1809,6 +1916,7 @@ function renderWizardSummary() {
   document.getElementById('wizard-summary').innerHTML = `
     <dt>Name</dt><dd>${UI.escapeHtml(wizard.name)}</dd>
     <dt>URL match</dt><dd class="mono">${UI.escapeHtml(wizard.url)}</dd>
+    <dt>Site domain(s)</dt><dd class="mono">${UI.escapeHtml(wizard.hosts || '—')}</dd>
     <dt>Client</dt><dd>${UI.escapeHtml(client)}</dd>
     <dt>Variants</dt><dd>${UI.escapeHtml(variants)}</dd>
     <dt>Goals</dt><dd>${goals.length ? UI.escapeHtml(goals.join(' · ')) : 'None yet'}</dd>
@@ -1857,6 +1965,21 @@ async function wizardAdvance() {
   }
 }
 
+document.getElementById('wizard-url').addEventListener('input', () => {
+  wizard.url = document.getElementById('wizard-url').value.trim();
+  applyHostSuggestion();
+  saveWizard();
+});
+document.getElementById('wizard-client').addEventListener('change', () => {
+  wizard.clientId = document.getElementById('wizard-client').value;
+  applyHostSuggestion();
+  saveWizard();
+});
+document.getElementById('wizard-hosts').addEventListener('input', () => {
+  wizard.hosts = document.getElementById('wizard-hosts').value.trim();
+  wizard.hostsEdited = true;
+  saveWizard();
+});
 document.getElementById('wizard-next').addEventListener('click', wizardAdvance);
 document.getElementById('wizard-save-draft').addEventListener('click', () => {
   if (wizard.expId) finishWizard(false);

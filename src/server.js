@@ -6,6 +6,7 @@ const fs = require('fs');
 const db = require('./db');
 const sessionMiddleware = require('./session');
 
+const { hostScopingMode } = require('./host-scope');
 const experimentsRouter = require('./routes/experiments');
 const eventsRouter = require('./routes/events');
 const resultsRouter = require('./routes/results');
@@ -75,7 +76,31 @@ async function runMigrations() {
   }
 }
 
+async function logHostScoping() {
+  const configured = (process.env.HOST_SCOPING || '').trim();
+  const mode = hostScopingMode();
+  if (configured && configured.toLowerCase() !== mode) {
+    console.warn(`HOST_SCOPING=${configured} is not recognised; using ${mode}.`);
+  }
+  console.log(`HOST_SCOPING=${mode}`);
+  try {
+    const { rows } = await db.query(
+      `SELECT id, name, status
+       FROM experiments
+       WHERE status IN ('running', 'paused')
+         AND cardinality(allowed_hosts) = 0
+       ORDER BY created_at`
+    );
+    if (rows.length === 0) return;
+    console.warn(`${rows.length} running or paused experiment(s) have no site domain:`);
+    rows.forEach((row) => console.warn(`  ${row.status} ${row.id} ${row.name}`));
+  } catch (err) {
+    console.error('Could not list experiments with no site domain:', err.message);
+  }
+}
+
 const PORT = process.env.PORT || 3000;
-runMigrations().then(() => {
+runMigrations().then(async () => {
+  await logHostScoping();
   app.listen(PORT, () => console.log(`AB platform running on port ${PORT}`));
 });
