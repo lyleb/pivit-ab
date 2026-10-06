@@ -111,7 +111,13 @@ If **none** of the above are present at all, the snippet runs as it always has (
 
 ## Running experiments across multiple sites
 
-One deployment of this app can run experiments on as many different domains as you like at once. `url_match` is just a substring check against whatever page the snippet loads on — it has nothing to do with which site it's running on. Install the same snippet tag (see "Your Snippet" at the top of the dashboard) once per site, and the server figures out which experiments apply based on the current page's URL every time it loads. No per-site configuration needed beyond pasting the tag in.
+One deployment can still run experiments on many domains, and the snippet tag is the same on every site. `url_match` is unchanged: it is a substring check against the page URL the snippet already sends (`?url=`). You do not reinstall the snippet for this.
+
+Each experiment also has one or more **site domains**. The server only returns that experiment when the page's host is one of those domains, after lower-casing and removing a port, a trailing dot, and a single leading `www.`. `shop.example.com` does not match `example.com` — list every host the test should run on. Set them in the create wizard (required to continue) or later under Settings. Starting or resuming an experiment with no domain is refused.
+
+Experiments saved with an empty list are **not scoped**. `HOST_SCOPING=transition` (the default) still serves them, and logs them at startup and the first time each one is served for a host. Set `HOST_SCOPING=enforce` once every live experiment has a domain: unscoped experiments are then never served, and their events are dropped. An experiment that already has domains is strict in both modes.
+
+Settings shows **Seen on since last deploy** — hosts that have asked for that experiment since the process started — so you can see what to add before you turn enforce on. The list is in memory and resets when the server restarts.
 
 ## Visual editor
 
@@ -248,7 +254,9 @@ A second, separate login exists for clients — read-only, scoped to only the ex
 
 ## Admin authentication
 
-The public snippet endpoints (`GET /api/experiments`, `POST /api/event`, `GET /api/experiments/by-ids`) stay open on purpose — they're called from any visitor's browser and have no sensitive data to protect (just "which experiments run on this URL" and "log this event"). Everything else requires an active session with the right role (`owner` or `client`), enforced per-route.
+The public snippet endpoints (`GET /api/experiments`, `POST /api/event`, `GET /api/experiments/by-ids`) stay open on purpose — they're called from any visitor's browser and have no sensitive data to protect (just "which experiments run on this URL" and "log this event"). Those responses do not include the site-domain list. A public fetch is filtered by the page host (the `url` query, then `Origin`, then `Referer` — never this server's own hostname). `POST /api/event` checks that the variant belongs to the experiment, then drops the event with a normal 204 when the `Origin` or `Referer` host is known and not in the experiment's domains, and drops events for an experiment with no domains when `HOST_SCOPING=enforce`.
+
+`GET /api/experiments/host-report` and `PATCH /api/experiments/:id/hosts` are owner-only. Everything else requires an active session with the right role (`owner` or `client`), enforced per-route.
 
 ## What's NOT in v1 (by design)
 

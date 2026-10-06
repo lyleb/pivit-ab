@@ -67,3 +67,30 @@ CREATE TABLE IF NOT EXISTS clients (
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS client_id UUID REFERENCES clients(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_experiments_client ON experiments(client_id);
 
+-- Site domains this experiment may run on. Empty means not scoped yet:
+-- HOST_SCOPING=transition (the default) still serves it; HOST_SCOPING=enforce does not.
+-- A non-empty list is strict in both modes. www and the bare domain are stored the same.
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS allowed_hosts TEXT[] NOT NULL DEFAULT '{}';
+
+-- Idempotent backfill from a full-URL url_match only. Path or substring matches stay
+-- empty so a human chooses the domain. Rows that already have a domain are left alone,
+-- and re-running this on startup does not overwrite them.
+UPDATE experiments AS e
+SET allowed_hosts = ARRAY[h.host]
+FROM (
+  SELECT id,
+    regexp_replace(
+      regexp_replace(
+        lower(split_part(split_part(split_part(split_part(
+          regexp_replace(btrim(url_match), '^[Hh][Tt][Tt][Pp][Ss]?://', ''),
+        '/', 1), '?', 1), '#', 1), ':', 1)),
+      '\.$', ''),
+    '^www\.', '') AS host
+  FROM experiments
+  WHERE cardinality(allowed_hosts) = 0
+    AND btrim(url_match) ~* '^https?://[^/\s]+'
+) AS h
+WHERE e.id = h.id
+  AND h.host <> ''
+  AND (h.host = 'localhost' OR h.host ~ '\.');
+

@@ -1,7 +1,19 @@
 const express = require('express');
 const db = require('../db');
 const { isLikelyBot, isRateLimited } = require('../bot-filter');
+const { checkHost, originHostFromRequest, hostScopingMode } = require('../host-scope');
 const router = express.Router();
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const dropLogged = new Set();
+
+function warnDrop(experimentId, host, reason) {
+  const key = `${experimentId}|${host || ''}|${reason}`;
+  if (dropLogged.has(key)) return;
+  if (dropLogged.size > 2000) dropLogged.clear();
+  dropLogged.add(key);
+  console.warn(`[host-scope] dropped event for ${experimentId} (${reason}) host=${host || 'unknown'}`);
+}
 
 // POST /api/event
 // body: { experiment_id, variant_id, visitor_id, event_type, goal_id? }
@@ -14,6 +26,9 @@ router.post('/', async (req, res) => {
   if (!['view', 'click', 'convert'].includes(event_type)) {
     return res.status(400).json({ error: 'event_type must be view, click, or convert' });
   }
+  if (!UUID_RE.test(experiment_id) || !UUID_RE.test(variant_id)) {
+    return res.status(400).json({ error: 'experiment_id and variant_id must be UUIDs' });
+  }
 
   // Basic bot/abuse filtering — dropped silently (still 204) rather than
   // erroring, since a sendBeacon caller never looks at the response anyway and
@@ -24,6 +39,29 @@ router.post('/', async (req, res) => {
   }
 
   try {
+    const { rows } = await db.query(
+      `SELECT e.allowed_hosts
+       FROM variants v
+       JOIN experiments e ON e.id = v.experiment_id
+       WHERE v.id = $1 AND v.experiment_id = $2`,
+      [variant_id, experiment_id]
+    );
+    if (rows.length === 0) {
+      return res.status(400).json({ error: 'variant does not belong to experiment' });
+    }
+
+    // Origin/Referer only. A known host outside the list is dropped. An
+    // unknown host on a scoped experiment is still stored (the beacon often
+    // has no page URL). Unscoped experiments are dropped only in enforce.
+    // Status is not checked here — that is PIV-017.
+    const pageHost = originHostFromRequest(req);
+    const decision = checkHost(rows[0].allowed_hosts, pageHost, hostScopingMode());
+    const drop = !decision.serve && decision.reason !== 'host-unknown';
+    if (drop) {
+      warnDrop(experiment_id, pageHost, decision.reason);
+      return res.status(204).end();
+    }
+
     await db.query(
       `INSERT INTO events (experiment_id, variant_id, visitor_id, event_type, goal_id)
        VALUES ($1, $2, $3, $4, $5)`,

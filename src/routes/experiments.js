@@ -3,7 +3,39 @@ const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { recordGoalUsage } = require('./goals');
 const { createEditToken } = require('../edit-token');
+const {
+  checkHost,
+  pageHostFromRequest,
+  recordSeen,
+  seenReport,
+  parseHostList,
+  hostScopingMode,
+} = require('../host-scope');
 const router = express.Router();
+
+// url_match stays in SQL. Domain rules depend on HOST_SCOPING and on whether
+// the experiment has a list yet, so they are applied in JS. allowed_hosts is
+// never copied onto the public payload.
+const unscopedLogged = new Set();
+
+function applyHostScope(rows, req) {
+  const pageHost = pageHostFromRequest(req);
+  const mode = hostScopingMode();
+  const kept = [];
+  for (const exp of rows) {
+    if (pageHost) recordSeen(exp.id, pageHost);
+    const decision = checkHost(exp.allowed_hosts, pageHost, mode);
+    if (decision.reason === 'unscoped-transition') {
+      const key = `${exp.id}|${pageHost || ''}`;
+      if (!unscopedLogged.has(key)) {
+        unscopedLogged.add(key);
+        console.warn(`[host-scope] serving ${exp.id} with no site domain (HOST_SCOPING=transition)${pageHost ? ` host=${pageHost}` : ''}`);
+      }
+    }
+    if (decision.serve) kept.push(exp);
+  }
+  return kept;
+}
 
 // GET /api/experiments?url=https://client-site.com/pricing[&preview=1]
 // PUBLIC — called by the snippet from any visitor's browser. No auth.
@@ -17,14 +49,15 @@ router.get('/', async (req, res) => {
   try {
     const statusClause = preview ? '' : `AND status = 'running'`;
     const { rows: experiments } = await db.query(
-      `SELECT id, name, url_match FROM experiments
+      `SELECT id, name, url_match, allowed_hosts FROM experiments
        WHERE $1 ILIKE '%' || url_match || '%' ${statusClause}`,
       [url]
     );
 
-    if (experiments.length === 0) return res.json({ experiments: [] });
+    const visible = applyHostScope(experiments, req);
+    if (visible.length === 0) return res.json({ experiments: [] });
 
-    const experimentIds = experiments.map((e) => e.id);
+    const experimentIds = visible.map((e) => e.id);
     const enabledClause = preview ? '' : 'AND enabled = true';
     const { rows: variants } = await db.query(
       `SELECT id, experiment_id, name, traffic_split, changes, goals
@@ -32,8 +65,10 @@ router.get('/', async (req, res) => {
       [experimentIds]
     );
 
-    const result = experiments.map((exp) => ({
-      ...exp,
+    const result = visible.map((exp) => ({
+      id: exp.id,
+      name: exp.name,
+      url_match: exp.url_match,
       variants: variants.filter((v) => v.experiment_id === exp.id),
     }));
 
@@ -58,18 +93,21 @@ router.get('/by-ids', async (req, res) => {
 
   try {
     const { rows: experiments } = await db.query(
-      `SELECT id, name FROM experiments WHERE id = ANY($1::uuid[])`,
+      `SELECT id, name, allowed_hosts FROM experiments WHERE id = ANY($1::uuid[])`,
       [idList]
     );
-    if (experiments.length === 0) return res.json({ experiments: [] });
+    const visible = applyHostScope(experiments, req);
+    if (visible.length === 0) return res.json({ experiments: [] });
 
+    const visibleIds = visible.map((e) => e.id);
     const { rows: variants } = await db.query(
       `SELECT id, experiment_id, name, goals FROM variants WHERE experiment_id = ANY($1::uuid[])`,
-      [idList]
+      [visibleIds]
     );
 
-    const result = experiments.map((exp) => ({
-      ...exp,
+    const result = visible.map((exp) => ({
+      id: exp.id,
+      name: exp.name,
       variants: variants.filter((v) => v.experiment_id === exp.id),
     }));
 
@@ -82,6 +120,13 @@ router.get('/by-ids', async (req, res) => {
 
 // Everything below is admin-only, requires x-api-key.
 router.use(requireAuth(['owner']));
+
+// Hosts the snippet has asked about since this process started. In-memory, so
+// it resets on deploy — that is what Settings calls "since last deploy".
+// Registered before /:id so "host-report" is not captured as an id.
+router.get('/host-report', (req, res) => {
+  res.json(seenReport());
+});
 
 // GET /api/experiments/all — every experiment regardless of status, with a variant
 // count, for the dashboard's "Your Experiments" list. Must be registered before
@@ -130,8 +175,15 @@ router.get('/:id', async (req, res) => {
 // (e.g. a 100%-rollout). Both inserts happen in one transaction, so a failure
 // partway through never leaves an experiment with no Control at all.
 router.post('/', async (req, res) => {
-  const { name, url_match, client_id } = req.body;
+  const { name, url_match, client_id, allowed_hosts } = req.body;
   if (!name || !url_match) return res.status(400).json({ error: 'name and url_match are required' });
+
+  let hosts = [];
+  if (allowed_hosts !== undefined) {
+    const parsed = parseHostList(allowed_hosts);
+    if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+    hosts = parsed.hosts;
+  }
 
   let client;
   try {
@@ -139,8 +191,8 @@ router.post('/', async (req, res) => {
     await client.query('BEGIN');
 
     const { rows: expRows } = await client.query(
-      `INSERT INTO experiments (name, url_match, client_id) VALUES ($1, $2, $3) RETURNING *`,
-      [name, url_match, client_id || null]
+      `INSERT INTO experiments (name, url_match, client_id, allowed_hosts) VALUES ($1, $2, $3, $4::text[]) RETURNING *`,
+      [name, url_match, client_id || null, hosts]
     );
     const experiment = expRows[0];
 
@@ -318,6 +370,29 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// PATCH /api/experiments/:id/hosts  { allowed_hosts: ["example.com"] | "example.com, shop.example.com" }
+// Owner-only. An empty list is allowed on a draft; starting still requires one domain.
+router.patch('/:id/hosts', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!req.body || req.body.allowed_hosts === undefined) {
+      return res.status(400).json({ error: 'allowed_hosts is required' });
+    }
+    const parsed = parseHostList(req.body.allowed_hosts);
+    if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+
+    const { rows } = await db.query(
+      `UPDATE experiments SET allowed_hosts = $1::text[] WHERE id = $2 RETURNING *`,
+      [parsed.hosts, id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
 router.patch('/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
@@ -325,6 +400,18 @@ router.patch('/:id/status', async (req, res) => {
     if (!id) return res.status(400).json({ error: 'experiment id is required in the URL' });
     const allowed = ['draft', 'running', 'paused', 'archived'];
     if (!allowed.includes(status)) return res.status(400).json({ error: `status must be one of ${allowed.join(', ')}` });
+
+    if (status === 'running') {
+      const { rows: existing } = await db.query(
+        `SELECT allowed_hosts FROM experiments WHERE id = $1`,
+        [id]
+      );
+      if (existing.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
+      const hosts = existing[0].allowed_hosts || [];
+      if (hosts.length === 0) {
+        return res.status(400).json({ error: 'Add at least one site domain in Settings before starting this experiment.' });
+      }
+    }
 
     const { rows } = await db.query(
       `UPDATE experiments SET status = $1 WHERE id = $2 RETURNING *`,
