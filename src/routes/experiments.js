@@ -3,7 +3,7 @@ const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { recordGoalUsage } = require('./goals');
 const { createEditToken } = require('../edit-token');
-const { authorisePreview, buildPublicExperimentList, createPreviewToken, previewUrl } = require('../preview-access');
+const { authorisePreview, buildPublicExperimentList, createPreviewToken, previewUrl, editUrl, cacheControlForExperimentsQuery } = require('../preview-access');
 const {
   checkHost,
   pageHostFromRequest,
@@ -46,6 +46,10 @@ function applyHostScope(rows, req) {
 // A bare preview=1 (no token) is ignored, so it cannot leak drafts.
 router.get('/', async (req, res) => {
   const { url } = req.query;
+  // Preview JSON is per variant and must not be stored. A normal snippet fetch
+  // (no preview=1) keeps the previous cache behaviour — no Cache-Control here.
+  const cacheControl = cacheControlForExperimentsQuery(req.query);
+  if (cacheControl) res.set('Cache-Control', cacheControl);
   if (!url) return res.status(400).json({ error: 'url query param is required' });
 
   const previewAuth = authorisePreview({
@@ -351,9 +355,7 @@ router.post('/:id/variants/:variantId/edit-link', async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id on that experiment' });
 
     const token = createEditToken(req.params.variantId);
-    const sep = page_url.includes('?') ? '&' : '?';
-    const editUrl = `${page_url}${sep}ab_edit=${req.params.variantId}&token=${token}`;
-    res.json({ edit_url: editUrl });
+    res.json({ edit_url: editUrl(page_url, req.params.variantId, token) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });

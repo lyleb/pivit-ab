@@ -93,7 +93,7 @@ function buildPublicExperimentList({ running, variants, previewExperiment, previ
     const owned = byExperiment.get(previewExperiment.id) || [];
     const forced = owned.find((variant) => variant.id === previewVariantId);
     if (forced) {
-      preview = { variant_id: previewVariantId };
+      preview = { variant_id: previewVariantId, experiment_id: previewExperiment.id };
       let exp = experiments.find((item) => item.id === previewExperiment.id);
       if (!exp) {
         exp = {
@@ -113,9 +113,48 @@ function buildPublicExperimentList({ running, variants, previewExperiment, previ
   return { experiments, preview };
 }
 
+// A page URL copied from an earlier preview or edit still carries ab_preview,
+// ab_preview_token, ab_edit and token. Appending another pair leaves the old
+// values first, and the snippet used to read the first one. Strip ours, then
+// set the new pair. A site's own ?token= is removed only when it was sitting
+// next to ab_edit (that token is the edit link). The hash stays on the URL.
+function withPivitParams(pageUrl, entries) {
+  let url;
+  try {
+    url = new URL(pageUrl);
+  } catch (err) {
+    const sep = String(pageUrl).includes('?') ? '&' : '?';
+    const extra = entries.map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join('&');
+    return `${pageUrl}${sep}${extra}`;
+  }
+  const hadEdit = url.searchParams.has('ab_edit');
+  url.searchParams.delete('ab_preview');
+  url.searchParams.delete('ab_preview_token');
+  url.searchParams.delete('ab_edit');
+  if (hadEdit) url.searchParams.delete('token');
+  for (const [key, value] of entries) url.searchParams.set(key, value);
+  return url.toString();
+}
+
 function previewUrl(pageUrl, variantId, token) {
-  const sep = String(pageUrl).includes('?') ? '&' : '?';
-  return `${pageUrl}${sep}ab_preview=${encodeURIComponent(variantId)}&ab_preview_token=${encodeURIComponent(token)}`;
+  return withPivitParams(pageUrl, [
+    ['ab_preview', variantId],
+    ['ab_preview_token', token],
+  ]);
+}
+
+function editUrl(pageUrl, variantId, token) {
+  return withPivitParams(pageUrl, [
+    ['ab_edit', variantId],
+    ['token', token],
+  ]);
+}
+
+// Live GET /api/experiments is left uncached-by-us (no Cache-Control change).
+// A preview response is tied to one variant and must not be reused for the next.
+function cacheControlForExperimentsQuery(query) {
+  const preview = query && (query.preview === '1' || query.preview === 'true' || query.preview === true);
+  return preview ? 'no-store' : null;
 }
 
 module.exports = {
@@ -125,4 +164,6 @@ module.exports = {
   authorisePreview,
   buildPublicExperimentList,
   previewUrl,
+  editUrl,
+  cacheControlForExperimentsQuery,
 };

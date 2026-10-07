@@ -70,7 +70,7 @@ const draft = preview.buildPublicExperimentList({
   previewExperiment: { id: 'exp-draft', name: 'Draft', url_match: '/pricing', status: 'draft', allowed_hosts: ['client.example'] },
   previewVariantId: variantId,
 });
-assert.deepStrictEqual(draft.preview, { variant_id: variantId });
+assert.deepStrictEqual(draft.preview, { variant_id: variantId, experiment_id: 'exp-draft' });
 assert.strictEqual(draft.experiments.length, 1);
 assert.strictEqual(draft.experiments[0].id, 'exp-draft');
 assert.deepStrictEqual(draft.experiments[0].variants.map((v) => v.id), [variantId]);
@@ -92,12 +92,44 @@ assert.ok(url.startsWith('https://client.example/pricing?x=1&'));
 assert.ok(url.includes(`ab_preview=${variantId}`));
 assert.ok(url.includes('ab_preview_token='));
 
+const polluted = preview.previewUrl(
+  `https://cantsaythat.co.uk/pricing?ab_preview=${otherId}&ab_preview_token=old-token&utm=1#cta`,
+  variantId,
+  token
+);
+const pollutedUrl = new URL(polluted);
+assert.strictEqual(pollutedUrl.searchParams.getAll('ab_preview').length, 1);
+assert.strictEqual(pollutedUrl.searchParams.get('ab_preview'), variantId);
+assert.strictEqual(pollutedUrl.searchParams.get('ab_preview_token'), token);
+assert.strictEqual(pollutedUrl.searchParams.get('utm'), '1');
+assert.strictEqual(pollutedUrl.hash, '#cta');
+
+const edited = preview.editUrl(
+  `https://cantsaythat.co.uk/pricing?ab_edit=${otherId}&token=old-edit&ab_preview=${otherId}&ab_preview_token=old-token`,
+  variantId,
+  token
+);
+const editedUrl = new URL(edited);
+assert.strictEqual(editedUrl.searchParams.getAll('ab_edit').length, 1);
+assert.strictEqual(editedUrl.searchParams.get('ab_edit'), variantId);
+assert.strictEqual(editedUrl.searchParams.get('token'), token);
+assert.strictEqual(editedUrl.searchParams.get('ab_preview'), null);
+assert.strictEqual(editedUrl.searchParams.get('ab_preview_token'), null);
+
+const siteToken = preview.previewUrl('https://cantsaythat.co.uk/pricing?token=site-token', variantId, token);
+assert.strictEqual(new URL(siteToken).searchParams.get('token'), 'site-token');
+
+assert.strictEqual(preview.cacheControlForExperimentsQuery({ url: 'https://cantsaythat.co.uk' }), null);
+assert.strictEqual(preview.cacheControlForExperimentsQuery({ preview: '1', preview_variant: variantId }), 'no-store');
+
 const experimentsSrc = fs.readFileSync(path.join(__dirname, '../src/routes/experiments.js'), 'utf8');
 assert.ok(experimentsSrc.includes("AND status = 'running'"));
 assert.ok(!experimentsSrc.includes('statusClause'));
 assert.ok(experimentsSrc.includes('authorisePreview'));
 assert.ok(experimentsSrc.includes('applyHostScope(previewRows, req)'));
 assert.ok(experimentsSrc.includes('checkHost') || experimentsSrc.includes('applyHostScope'));
+assert.ok(experimentsSrc.includes('cacheControlForExperimentsQuery(req.query)'));
+assert.ok(experimentsSrc.includes('editUrl(page_url'));
 
 const snippet = fs.readFileSync(path.join(__dirname, '../snippet/ab.js'), 'utf8');
 assert.ok(snippet.includes('ab_preview_token'));

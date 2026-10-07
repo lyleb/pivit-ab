@@ -5,6 +5,13 @@ const { createPreviewToken } = require('../preview-access');
 const { recordGoalUsage } = require('./goals');
 const router = express.Router();
 
+// The editor reads one variant at a time. A cached GET would keep showing the
+// previous test after the owner switches experiments.
+router.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 // Every route here is token-scoped to one specific variant — not session-based —
 // since the visual editor runs on the client's own domain. See src/edit-token.js.
 function requireValidEditToken(req, res, next) {

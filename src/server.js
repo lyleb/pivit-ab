@@ -40,6 +40,14 @@ app.use(sessionMiddleware);
 // is excluded inside the middleware. A counter failure is logged and ignored.
 app.use(hostHitMiddleware);
 
+// editor.js is only loaded for an editing session. no-store stops a cached
+// copy from keeping an old variant id. The live snippet (ab.js) stays on the
+// static handler's default caching — do not set no-store for all of /snippet.
+app.use('/snippet/editor.js', (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 // Serve the built snippet + the admin dashboard as static files
 app.use('/snippet', express.static(path.join(__dirname, '../snippet')));
 app.use(express.static(path.join(__dirname, '../public')));
