@@ -9,6 +9,7 @@ const sessionMiddleware = require('./session');
 const { hostScopingMode } = require('./host-scope');
 const { configuredAppOrigin, sendPublicConfig } = require('./app-origin');
 const { hostHitMiddleware } = require('./host-hits');
+const { hstsMiddleware } = require('./hsts');
 const { PUBLIC_ERROR } = require('./public-error');
 const experimentsRouter = require('./routes/experiments');
 const eventsRouter = require('./routes/events');
@@ -26,6 +27,9 @@ const app = express();
 // hop), so a cookie flagged secure: true would silently never get set — and
 // req.ip (used for the login throttle) would show the proxy's IP for everyone.
 app.set('trust proxy', 1);
+
+// HSTS on every HTTPS response (pages, /snippet, /api, /health). See src/hsts.js.
+app.use(hstsMiddleware());
 
 // origin: true reflects whatever site is actually calling (rather than a fixed
 // wildcard '*'), and credentials: true allows it — both are required together
