@@ -235,7 +235,7 @@
     styleReset(title);
     title.style.fontWeight = '700';
     title.style.marginBottom = '2px';
-    title.textContent = 'Pivit editor';
+    title.textContent = 'pivitlab editor';
     toolbar.appendChild(title);
 
     statusEl = document.createElement('div');
@@ -914,7 +914,7 @@
         position: 'fixed', top: '0', left: '0', right: '0', zIndex: String(Z), background: '#fdeaea',
         color: '#8a2d2d', padding: '14px', textAlign: 'center', fontFamily: '-apple-system, sans-serif', fontSize: '14px',
       });
-      banner.textContent = `Pivit editor couldn't start: ${err.message}`;
+      banner.textContent = `pivitlab editor couldn't start: ${err.message}`;
       document.body.appendChild(banner);
     }
   }

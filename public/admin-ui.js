@@ -149,6 +149,12 @@
     return `${origin}/login.html?role=client`;
   }
 
+  // Whether the Make edits desktop note should appear. `matches` is the
+  // narrow-or-touch media query; `stored` is the dismissal flag ('1' hides it).
+  function shouldShowSignpost(matches, stored) {
+    return !!matches && stored !== '1';
+  }
+
   return {
     escapeHtml,
     shortUrl,
@@ -163,5 +169,6 @@
     displayOrigin,
     snippetTag,
     clientLoginUrl,
+    shouldShowSignpost,
   };
 });

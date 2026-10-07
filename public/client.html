@@ -2,114 +2,165 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pivit — Results</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- TODO(favicon): add the square pivitlab icon + apple-touch-icon when Lyle supplies it -->
+<title>pivitlab — Results</title>
+<link rel="stylesheet" href="/assets/pivit.css?v=1">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="/admin-ui.js"></script>
 <style>
-  :root {
-    --ink: #131723; --indigo: #5635FB; --mint: #02DEB5; --mint-dark: #02b895;
-    --bg: #f5f6fb; --card: #ffffff; --border: #e6e7f0; --text-muted: #6b6f83;
-    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  .portal-top {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    background: var(--sidebar); border-bottom: 1px solid var(--border);
+    padding: calc(12px + env(safe-area-inset-top)) 20px 12px;
   }
-  * { box-sizing: border-box; }
-  body { max-width: 900px; margin: 0 auto; padding: 32px 20px 80px; background: var(--bg); color: var(--ink); line-height: 1.5; }
-  h1, h2, h3 { color: var(--ink); font-weight: 700; letter-spacing: -0.01em; }
-  h2 { font-size: 1.05em; margin: 0 0 4px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
-  h3 { font-size: 0.9em; margin: 20px 0 8px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
-  section { margin-bottom: 24px; padding: 24px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 1px 2px rgba(19,23,35,0.04); }
-  .topbar { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; padding: 8px 4px 20px; }
-  .topbar img.logo { height: 56px; display: block; }
-  .tagline { font-size: 0.78em; color: var(--text-muted); font-weight: 600; margin-top: 4px; font-style: italic; }
-  .topbar-link { color: var(--ink); font-weight: 600; text-decoration: none; font-size: 0.88em; cursor: pointer; padding: 8px 14px; border-radius: 8px; background: #f0f0f7; }
-  .topbar-link:hover { background: #e6e6f2; }
+  .portal-top .brand-logo { height: 36px; }
+  .portal-top-actions { display: flex; align-items: center; gap: 12px; }
   .welcome { font-size: 0.85em; color: var(--text-muted); }
-  .experiment-row {
-    display: flex; justify-content: space-between; align-items: center; padding: 14px 16px;
-    margin-top: 8px; background: #fafafe; border: 1px solid var(--border); border-radius: 8px;
-    cursor: pointer; transition: border-color 0.15s ease;
+  .portal-wrap { max-width: 1040px; margin: 0 auto; padding: 24px 20px 48px; }
+  .portal-grid {
+    display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 14px; align-items: start;
   }
-  .experiment-row:hover { border-color: var(--indigo); }
-  .experiment-row.selected { border-color: var(--indigo); background: #f4f2fe; }
-  .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.72em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
-  .badge.live { background: rgba(2,222,181,0.15); color: var(--mint-dark); }
-  .badge.paused { background: #f0f0f7; color: var(--text-muted); }
-  .badge.draft { background: #fff4e0; color: #a3690f; }
-  .badge.archived { background: #eceef5; color: #5a5d70; }
-  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-  th { text-align: left; padding: 10px 8px; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); border-bottom: 2px solid var(--border); }
-  td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 0.92em; }
-  .hint { color: var(--text-muted); font-size: 0.85em; }
-  .url-group { margin-top: 20px; }
-  .url-group:first-child { margin-top: 0; }
-  .url-group-label { font-size: 0.8em; color: var(--text-muted); font-family: "SF Mono", Menlo, monospace; margin-bottom: 6px; }
-  .chart-wrap { max-width: 100%; margin-top: 20px; }
-  .chart-wrap.trend-wrap { height: 340px; }
-  .trend-toggle-btn.active { background: var(--indigo); color: white; }
-  .bayesian-summary { background: #f4f2fe; border: 1px solid var(--indigo); border-radius: 8px; padding: 14px 16px; margin-top: 20px; font-size: 0.92em; }
+  .portal-grid > .card { margin-top: 0; }
+  .url-group { margin-top: 16px; }
+  .url-group:first-child { margin-top: 4px; }
+  .url-group-label { display: block; margin: 0 0 6px; }
+  button.exp-row {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    width: 100%; min-height: var(--tap); margin-top: 8px; padding: 10px 12px; text-align: left;
+    background: var(--card-2); color: var(--ink); border: 1px solid var(--border); border-radius: 8px;
+    font-weight: 650;
+  }
+  button.exp-row:hover { background: #222633; }
+  button.exp-row.selected { border-color: var(--indigo); background: rgba(86,53,251,0.16); }
+  button.exp-row .exp-name { overflow-wrap: anywhere; }
+  .results-meta { margin: -4px 0 14px; }
+  .trend-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+  .portal-foot { margin: 22px 0 0; }
+  @media (max-width: 860px) {
+    .portal-grid { grid-template-columns: minmax(0, 1fr); }
+    .portal-top .welcome { display: none; }
+    .portal-top .brand-logo { height: 28px; }
+    .portal-wrap { padding: 16px 16px 40px; }
+  }
 </style>
 </head>
 <body>
-<div class="topbar">
-  <div>
-    <img src="/assets/logo.png" alt="Pivit" class="logo">
-    <div class="tagline">Put your money where your data is</div>
-  </div>
-  <div>
+<header class="portal-top">
+  <span class="brand-logo" role="img" aria-label="pivitlab"></span>
+  <div class="portal-top-actions">
     <span class="welcome" id="welcome-msg"></span>
-    <a class="topbar-link" onclick="logout()" style="margin-left:12px;">🚪 Log out</a>
+    <button type="button" class="btn-ghost" id="logout-btn">Log out</button>
   </div>
+</header>
+
+<div class="portal-wrap">
+  <div class="portal-grid">
+    <section class="card" id="list-card">
+      <h2>Your experiments</h2>
+      <p id="exp-msg" class="hint">Loading…</p>
+      <div id="experiments-list"></div>
+    </section>
+
+    <section class="card" id="results-section" hidden>
+      <h2 id="results-title">Results</h2>
+      <p id="results-meta" class="hint results-meta"></p>
+      <p id="results-msg" class="hint"></p>
+      <div id="results-live" hidden>
+        <div id="bayesian-summary" class="result-summary" hidden></div>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Results by variant (scrolls sideways)">
+          <table id="results-table">
+            <thead><tr>
+              <th>Variant</th>
+              <th class="num">Visitors</th>
+              <th class="num">New</th>
+              <th class="num">Returning</th>
+              <th class="num">Conversions</th>
+              <th class="num">Rate</th>
+            </tr></thead>
+            <tbody id="results-body"></tbody>
+          </table>
+        </div>
+        <p class="hint table-scroll-hint">Swipe the table sideways for more columns.</p>
+        <div class="chart-wrap rate-wrap" id="rate-chart-wrap"><canvas id="rate-chart"></canvas></div>
+        <div class="trend-row" id="trend-toggle">
+          <span class="hint">Trend:</span>
+          <button type="button" class="btn-ghost trend-toggle-btn active" id="trend-mode-cumulative">Cumulative</button>
+          <button type="button" class="btn-ghost trend-toggle-btn" id="trend-mode-daily">Daily</button>
+        </div>
+        <div class="chart-wrap trend-wrap"><canvas id="trend-chart"></canvas></div>
+      </div>
+    </section>
+  </div>
+  <p class="hint portal-foot">Questions about a result? Contact the person who set up your tests.</p>
 </div>
 
-<section>
-  <h2>Your Experiments</h2>
-  <p id="exp-msg" class="hint">Loading…</p>
-  <div id="experiments-list"></div>
-</section>
-
-<section id="results-section" style="display:none;">
-  <h2 id="results-title">Results</h2>
-  <p id="results-msg" class="hint"></p>
-  <table id="results-table" style="display:none">
-    <thead><tr><th>Variant</th><th>Visitors</th><th>New</th><th>Returning</th><th>Conversions</th><th>Rate</th></tr></thead>
-    <tbody id="results-body"></tbody>
-  </table>
-  <div class="chart-wrap"><canvas id="rate-chart" style="display:none"></canvas></div>
-  <div style="margin-top:16px; display:flex; gap:8px; align-items:center;">
-    <span class="hint">Trend:</span>
-    <button type="button" class="secondary trend-toggle-btn" id="trend-mode-cumulative" onclick="setTrendMode('cumulative')" style="padding:6px 12px; border:1px solid var(--border); background:#f0f0f7; border-radius:8px; cursor:pointer; font-size:0.85em;">Cumulative</button>
-    <button type="button" class="secondary trend-toggle-btn" id="trend-mode-daily" onclick="setTrendMode('daily')" style="padding:6px 12px; border:1px solid var(--border); background:#f0f0f7; border-radius:8px; cursor:pointer; font-size:0.85em;">Daily</button>
-  </div>
-  <div class="chart-wrap trend-wrap"><canvas id="trend-chart" style="display:none"></canvas></div>
-  <div id="bayesian-summary" class="bayesian-summary" style="display:none;"></div>
-</section>
-
 <script>
+const UI = window.PivitUI;
 const STATUS_CLASS = { running: 'live', draft: 'draft', paused: 'paused', archived: 'archived' };
-let rateChart, trendChart;
+const STATUS_LABEL = { running: 'Running', paused: 'Paused', archived: 'Finished', draft: 'Not started' };
+const LOAD_ERROR = 'Something went wrong loading your results. Please refresh, or contact the person who set up your tests.';
+const DRAFT_GATE = "This test hasn't started yet. Results appear once it's running.";
+const EMPTY_GATE = "This test hasn't collected visitors yet. Results appear once it's running.";
+
+let rateChart;
+let trendChart;
 let currentTrendSeries = [];
 let trendMode = 'cumulative';
 
-async function logout() {
+function statusLabel(status) {
+  return STATUS_LABEL[status] || status || '';
+}
+
+function formatSince(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+document.getElementById('logout-btn').addEventListener('click', async () => {
   await fetch('/api/auth/logout', { method: 'POST' });
   window.location.href = '/login.html';
-}
+});
 
 async function callApi(path) {
   let res;
   try {
     res = await fetch(path);
   } catch (err) {
-    return { ok: false, message: `Network error — ${err.message}` };
+    console.error('Client API error', path, err);
+    return { ok: false, message: "Couldn't reach pivitlab. Check your connection and try again." };
   }
-  if (res.status === 401) { window.location.href = '/login.html'; return { ok: false, message: 'not authenticated' }; }
+  if (res.status === 401) {
+    window.location.href = '/login.html';
+    return { ok: false, message: 'not authenticated' };
+  }
   const raw = await res.text();
   let data = null;
   try { data = raw ? JSON.parse(raw) : null; } catch (e) {}
   if (!res.ok) {
-    const detail = data && (data.detail || data.error) ? (data.detail ? `${data.error} — ${data.detail}` : data.error) : `HTTP ${res.status}`;
-    return { ok: false, message: detail };
+    const detail = data && (data.detail || data.error)
+      ? (data.detail ? `${data.error} — ${data.detail}` : data.error)
+      : (raw || `HTTP ${res.status}`);
+    console.error('Client API error', path, detail);
+    return { ok: false, message: LOAD_ERROR };
   }
   return { ok: true, data };
+}
+
+function hideLiveResults() {
+  document.getElementById('results-live').hidden = true;
+  document.getElementById('bayesian-summary').hidden = true;
+  document.getElementById('results-meta').textContent = '';
+  if (rateChart) { rateChart.destroy(); rateChart = null; }
+  if (trendChart) { trendChart.destroy(); trendChart = null; }
+  currentTrendSeries = [];
+  const trendCanvas = document.getElementById('trend-chart');
+  if (trendCanvas) {
+    trendCanvas.style.display = 'none';
+    trendCanvas.parentElement.classList.remove('has-data');
+  }
 }
 
 async function init() {
@@ -120,17 +171,15 @@ async function init() {
 
   const result = await callApi('/api/client/experiments');
   const msgEl = document.getElementById('exp-msg');
-  if (!result.ok) { msgEl.textContent = `Error: ${result.message}`; return; }
+  if (!result.ok) { msgEl.textContent = result.message; return; }
 
   const experiments = result.data.experiments || [];
   if (experiments.length === 0) { msgEl.textContent = 'No experiments have been shared with you yet.'; return; }
   msgEl.textContent = '';
 
-  // Group by url_match, as a rough stand-in for "which page/site" — clients
-  // typically think in terms of pages, not experiment names.
   const groups = {};
   experiments.forEach((exp) => {
-    const key = exp.url_match || '(no URL set)';
+    const key = exp.url_match || '';
     (groups[key] = groups[key] || []).push(exp);
   });
 
@@ -139,28 +188,25 @@ async function init() {
   Object.entries(groups).forEach(([url, exps]) => {
     const group = document.createElement('div');
     group.className = 'url-group';
-    group.innerHTML = `<div class="url-group-label">${url}</div>`;
+    const label = url ? UI.shortUrl(url) : 'Other tests';
+    group.innerHTML = `<div class="kicker url-group-label">${UI.escapeHtml(label)}</div>`;
     exps.forEach((exp) => {
-      const row = document.createElement('div');
-      row.className = 'experiment-row';
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'exp-row';
       row.id = `exp-row-${exp.id}`;
-      row.innerHTML = `
-        <div><strong>${exp.name}</strong> <span class="badge ${STATUS_CLASS[exp.status] || 'paused'}">${exp.status}</span></div>
-        <span class="hint">View results →</span>
-      `;
-      row.addEventListener('click', () => loadResults(exp.id, exp.name));
+      row.innerHTML = `<span class="exp-name">${UI.escapeHtml(exp.name)}</span> <span class="badge ${STATUS_CLASS[exp.status] || 'paused'}">${UI.escapeHtml(statusLabel(exp.status))}</span>`;
+      row.addEventListener('click', () => loadResults(exp));
       group.appendChild(row);
     });
     listEl.appendChild(group);
   });
 }
 
-// Same model as the admin dashboard's trend chart (see index.html for the
-// identical function) — conversion rate over time, either cumulative or daily.
 function computeTrendDatasets(series, mode) {
   const days = [...new Set(series.map((r) => r.day))].sort();
   const variantNames = [...new Set(series.map((r) => r.variant_name))];
-  const palette = ['#5635FB', '#02DEB5', '#e07a5f', '#131723', '#a3690f'];
+  const palette = ['#5635FB', '#02DEB5', '#e07a5f', '#c4b6ff', '#a3690f'];
 
   const datasets = variantNames.map((name, i) => {
     let cumVisitors = 0, cumConversions = 0;
@@ -177,7 +223,10 @@ function computeTrendDatasets(series, mode) {
     return { label: name, data: dataByDay, borderColor: palette[i % palette.length], backgroundColor: palette[i % palette.length], tension: 0.2, fill: false };
   });
 
-  return { labels: days.map((d) => new Date(d).toLocaleDateString()), datasets };
+  return {
+    labels: days.map((d) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })),
+    datasets,
+  };
 }
 
 function renderTrendChart() {
@@ -186,83 +235,121 @@ function renderTrendChart() {
   document.getElementById('trend-mode-daily').classList.toggle('active', trendMode === 'daily');
 
   if (trendChart) trendChart.destroy();
-  if (currentTrendSeries.length === 0) { trendCanvas.style.display = 'none'; return; }
+  if (currentTrendSeries.length === 0) {
+    trendCanvas.style.display = 'none';
+    trendCanvas.parentElement.classList.remove('has-data');
+    return;
+  }
 
   const { labels, datasets } = computeTrendDatasets(currentTrendSeries, trendMode);
   trendCanvas.style.display = 'block';
+  trendCanvas.parentElement.classList.add('has-data');
   trendChart = new Chart(trendCanvas, {
     type: 'line',
     data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { title: { display: true, text: (trendMode === 'cumulative' ? 'Cumulative' : 'Daily') + ' conversion rate over time' } },
+      plugins: {
+        title: { display: true, text: (trendMode === 'cumulative' ? 'Cumulative' : 'Daily') + ' conversion rate over time', color: '#e8e9f0' },
+        legend: { labels: { color: '#e8e9f0' } },
+      },
       scales: {
-        x: { title: { display: true, text: 'Time (days)' } },
-        y: { beginAtZero: true, title: { display: true, text: 'Conversion Rate (%)' }, ticks: { callback: (v) => v + '%' } },
+        x: { title: { display: true, text: 'Time (days)', color: '#e8e9f0' }, ticks: { color: '#9398ab' }, grid: { color: 'rgba(255,255,255,0.06)' } },
+        y: {
+          beginAtZero: true,
+          title: { display: true, text: 'Conversion rate (%)', color: '#e8e9f0' },
+          ticks: { callback: (v) => v + '%', color: '#9398ab' },
+          grid: { color: 'rgba(255,255,255,0.06)' },
+        },
       },
     },
   });
 }
 
-function setTrendMode(mode) {
-  trendMode = mode;
-  renderTrendChart();
-}
+document.getElementById('trend-mode-cumulative').addEventListener('click', () => { trendMode = 'cumulative'; renderTrendChart(); });
+document.getElementById('trend-mode-daily').addEventListener('click', () => { trendMode = 'daily'; renderTrendChart(); });
 
-async function loadResults(expId, expName) {
-  document.querySelectorAll('.experiment-row').forEach((el) => el.classList.remove('selected'));
-  document.getElementById(`exp-row-${expId}`).classList.add('selected');
+async function loadResults(exp) {
+  document.querySelectorAll('.exp-row').forEach((el) => el.classList.remove('selected'));
+  const row = document.getElementById(`exp-row-${exp.id}`);
+  if (row) row.classList.add('selected');
 
   const section = document.getElementById('results-section');
-  section.style.display = 'block';
-  document.getElementById('results-title').textContent = `Results — ${expName}`;
+  section.hidden = false;
+  document.getElementById('results-title').textContent = exp.name;
   const msgEl = document.getElementById('results-msg');
-  msgEl.textContent = 'Loading…';
+  hideLiveResults();
   section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
-  const result = await callApi(`/api/client/results/${expId}`);
-  if (!result.ok) {
-    msgEl.textContent = `Error: ${result.message}`;
-    document.getElementById('results-table').style.display = 'none';
-    document.getElementById('rate-chart').style.display = 'none';
-    document.getElementById('trend-chart').style.display = 'none';
-    document.getElementById('bayesian-summary').style.display = 'none';
+  if (exp.status === 'draft') {
+    msgEl.textContent = DRAFT_GATE;
     return;
   }
-  msgEl.textContent = '';
+
+  msgEl.textContent = 'Loading…';
+  const result = await callApi(`/api/client/results/${exp.id}`);
+  if (!result.ok) {
+    msgEl.textContent = result.message;
+    return;
+  }
 
   const results = result.data.results || [];
-  const tbody = document.getElementById('results-body');
-  tbody.innerHTML = '';
-  results.forEach((r) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${r.variant_name}</td><td>${r.visitors}</td><td>${r.new_visitors}</td><td>${r.returning_visitors}</td><td>${r.conversions}</td><td>${r.conversion_rate}%</td>`;
-    tbody.appendChild(tr);
-  });
-  document.getElementById('results-table').style.display = results.length ? 'table' : 'none';
+  const visitors = results.reduce((sum, item) => sum + Number(item.visitors || 0), 0);
+  if (UI.resultsGated(exp.status, visitors)) {
+    msgEl.textContent = exp.status === 'draft' ? DRAFT_GATE : EMPTY_GATE;
+    return;
+  }
 
+  msgEl.textContent = '';
+  const since = formatSince(exp.created_at);
+  const count = visitors.toLocaleString('en-GB');
+  const meta = document.getElementById('results-meta');
+  if (exp.status === 'running' && since) meta.textContent = `Running since ${since} · ${count} visitors`;
+  else if (since) meta.textContent = `${statusLabel(exp.status)} · since ${since} · ${count} visitors`;
+  else meta.textContent = `${count} visitors`;
+
+  document.getElementById('results-live').hidden = false;
+  const tbody = document.getElementById('results-body');
+  tbody.innerHTML = results.map((item) => `<tr>
+    <td>${UI.escapeHtml(item.variant_name)}</td>
+    <td class="num">${item.visitors}</td>
+    <td class="num">${item.new_visitors}</td>
+    <td class="num">${item.returning_visitors}</td>
+    <td class="num">${item.conversions}</td>
+    <td class="num">${item.conversion_rate}%</td>
+  </tr>`).join('');
+
+  const rateWrap = document.getElementById('rate-chart-wrap');
   const rateCanvas = document.getElementById('rate-chart');
-  rateCanvas.style.display = results.length ? 'block' : 'none';
-  if (rateChart) rateChart.destroy();
-  if (results.length) {
+  rateWrap.hidden = !results.length;
+  if (results.length && window.Chart) {
     rateChart = new Chart(rateCanvas, {
       type: 'bar',
-      data: { labels: results.map((r) => r.variant_name), datasets: [{ label: 'Conversion rate (%)', data: results.map((r) => r.conversion_rate), backgroundColor: '#5635FB' }] },
-      options: { responsive: true, plugins: { title: { display: true, text: 'Conversion rate by variant' } }, scales: { y: { beginAtZero: true } } },
+      data: {
+        labels: results.map((item) => item.variant_name),
+        datasets: [{ label: 'Conversion rate (%)', data: results.map((item) => item.conversion_rate), backgroundColor: '#5635FB' }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { title: { display: true, text: 'Conversion rate by variant', color: '#e8e9f0' }, legend: { labels: { color: '#e8e9f0' } } },
+        scales: {
+          x: { ticks: { color: '#9398ab' }, grid: { color: 'rgba(255,255,255,0.06)' } },
+          y: { beginAtZero: true, ticks: { color: '#9398ab' }, grid: { color: 'rgba(255,255,255,0.06)' } },
+        },
+      },
     });
   }
 
-  const trendResult = await callApi(`/api/client/results/${expId}/timeseries`);
+  const trendResult = await callApi(`/api/client/results/${exp.id}/timeseries`);
   currentTrendSeries = (trendResult.ok && trendResult.data.series) ? trendResult.data.series : [];
   renderTrendChart();
 
-  // Short, plain-English Bayesian summary — one sentence, not a table. Uses the
-  // same model as the admin dashboard's full Bayesian panel (src/bayesian.js).
   const summaryEl = document.getElementById('bayesian-summary');
-  const bayesianResult = await callApi(`/api/client/results/${expId}/bayesian`);
+  const bayesianResult = await callApi(`/api/client/results/${exp.id}/bayesian`);
   if (!bayesianResult.ok || !bayesianResult.data.stats || bayesianResult.data.stats.length < 2) {
-    summaryEl.style.display = 'none';
+    summaryEl.hidden = true;
   } else {
     const stats = bayesianResult.data.stats;
     const best = stats.reduce((a, b) => (b.probability_best > a.probability_best ? b : a));
@@ -274,9 +361,14 @@ async function loadResults(expId, expName) {
     } else {
       sentence = `No clear winner yet — "${best.variant_name}" is currently ahead with a ${best.probability_best}% probability of being best, but it's not a strong enough lead to be confident.`;
     }
-    summaryEl.style.display = 'block';
+    summaryEl.hidden = false;
     summaryEl.textContent = sentence;
   }
+}
+
+if (window.Chart) {
+  Chart.defaults.color = '#c5c8d4';
+  Chart.defaults.borderColor = 'rgba(255,255,255,0.08)';
 }
 
 init();
