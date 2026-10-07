@@ -7,7 +7,7 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "migrate": "node scripts/migrate.js",
-    "test": "node scripts/admin-ui.test.js && node scripts/host-scope.test.js && node scripts/app-origin.test.js && node scripts/metrics.test.js && node scripts/preview.test.js && node scripts/preview-switch.test.js && node scripts/session-secret.test.js && node scripts/host-hits.test.js && node scripts/copy.test.js && node scripts/selector.test.js && node scripts/apply.test.js"
+    "test": "node scripts/admin-ui.test.js && node scripts/host-scope.test.js && node scripts/app-origin.test.js && node scripts/metrics.test.js && node scripts/preview.test.js && node scripts/preview-switch.test.js && node scripts/session-secret.test.js && node scripts/host-hits.test.js && node scripts/copy.test.js && node scripts/selector.test.js && node scripts/apply.test.js && node scripts/hsts.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
