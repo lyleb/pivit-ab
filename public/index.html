@@ -2310,9 +2310,41 @@ function openStatusSettings() {
 
 // --- Snippet ---
 
+// APP_ORIGIN, when the server accepts it, replaces location.origin in the
+// snippet tag and the client login link. Unset or invalid keeps today's host.
+let configuredAppOrigin = null;
+let appOriginRequest = null;
+
+function publicOrigin() {
+  return UI.displayOrigin(configuredAppOrigin, location.origin);
+}
+
+function loadAppOrigin() {
+  if (!appOriginRequest) {
+    appOriginRequest = fetch('/api/config')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && Object.prototype.hasOwnProperty.call(data, 'appOrigin')) {
+          configuredAppOrigin = data.appOrigin;
+        }
+      })
+      .catch(() => {});
+  }
+  return appOriginRequest;
+}
+
+function applyDisplayedOrigins() {
+  const origin = publicOrigin();
+  const login = document.getElementById('client-login-url');
+  if (login) login.textContent = UI.clientLoginUrl(origin);
+  ['wizard-snippet-code', 'snippet-code'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = UI.snippetTag(origin);
+  });
+}
+
 function snippetTag() {
-  const closeTag = '</' + 'script>';
-  return `<script src="${location.origin}/snippet/ab.js" data-api="${location.origin}">${closeTag}`;
+  return UI.snippetTag(publicOrigin());
 }
 
 function antiflickerSnippet() {
@@ -2355,7 +2387,7 @@ fetch('/snippet/picker-bookmarklet.js').then((r) => r.text()).then((src) => {
   document.querySelectorAll('.picker-bookmarklet').forEach((a) => { a.href = pickerHref; });
 }).catch(() => {});
 
-document.getElementById('client-login-url').textContent = `${location.origin}/login.html?role=client`;
+loadAppOrigin().then(applyDisplayedOrigins);
 
 if (window.Chart) {
   Chart.defaults.color = '#c5c8d4';
@@ -2363,7 +2395,8 @@ if (window.Chart) {
 }
 
 (async () => {
-  const ok = await requireOwnerSession();
+  const [, ok] = await Promise.all([loadAppOrigin(), requireOwnerSession()]);
+  applyDisplayedOrigins();
   if (!ok) return;
   loadWizard();
   await loadClients();

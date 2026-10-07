@@ -7,6 +7,7 @@ const db = require('./db');
 const sessionMiddleware = require('./session');
 
 const { hostScopingMode } = require('./host-scope');
+const { configuredAppOrigin, sendPublicConfig } = require('./app-origin');
 const experimentsRouter = require('./routes/experiments');
 const eventsRouter = require('./routes/events');
 const resultsRouter = require('./routes/results');
@@ -45,6 +46,11 @@ app.use('/api/goals', goalsRouter);
 app.use('/api/clients', clientsRouter);
 app.use('/api/client', clientRouter);
 app.use('/api/editor', editorRouter);
+
+// Optional public origin for the admin UI. Null when APP_ORIGIN is unset or
+// invalid, in which case the page keeps using location.origin. Does not
+// redirect or change how /snippet, /api, or /health are served.
+app.get('/api/config', sendPublicConfig);
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
@@ -99,7 +105,16 @@ async function logHostScoping() {
   }
 }
 
+function logAppOrigin() {
+  const raw = process.env.APP_ORIGIN;
+  if (raw == null || String(raw).trim() === '') return;
+  const origin = configuredAppOrigin();
+  if (!origin) console.warn('APP_ORIGIN is set but is not a valid http(s) origin; ignoring it.');
+  else console.log(`APP_ORIGIN=${origin}`);
+}
+
 const PORT = process.env.PORT || 3000;
+logAppOrigin();
 runMigrations().then(async () => {
   await logHostScoping();
   app.listen(PORT, () => console.log(`AB platform running on port ${PORT}`));

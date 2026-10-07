@@ -47,4 +47,37 @@ assert.strictEqual(ui.shortUrl('https://cantsaythat.co.uk/about'), 'cantsaythat.
 assert.strictEqual(ui.describeGoal({ type: 'click', selector: '.hero-cta', id: 'CTA click' }), 'CTA click → .hero-cta');
 assert.strictEqual(ui.escapeHtml(`<b class="x">'`), '&lt;b class=&quot;x&quot;&gt;&#39;');
 
+const here = 'https://pivit.click';
+assert.strictEqual(ui.displayOrigin('https://pivitlab.com', here), 'https://pivitlab.com');
+assert.strictEqual(ui.displayOrigin('https://pivitlab.com/', here), 'https://pivitlab.com');
+assert.strictEqual(ui.displayOrigin('  https://pivitlab.com///  ', here), 'https://pivitlab.com');
+assert.strictEqual(ui.displayOrigin(null, here), here);
+assert.strictEqual(ui.displayOrigin(undefined, here), here);
+assert.strictEqual(ui.displayOrigin('', here), here);
+assert.strictEqual(ui.displayOrigin('   ', here), here);
+assert.strictEqual(ui.displayOrigin('https://pivitlab.com/snippet', here), here);
+assert.strictEqual(ui.displayOrigin('https://user:pass@pivitlab.com', here), here);
+assert.strictEqual(ui.displayOrigin('javascript:alert(1)', here), here);
+assert.strictEqual(ui.displayOrigin('pivitlab.com', here), here);
+assert.strictEqual(ui.displayOrigin('https://evil.com"', here), here);
+assert.strictEqual(ui.displayOrigin('https://pivitlab.com:443', here), 'https://pivitlab.com');
+assert.strictEqual(ui.displayOrigin('http://localhost:3000/', here), 'http://localhost:3000');
+
+assert.strictEqual(
+  ui.snippetTag(ui.displayOrigin('https://pivitlab.com', here)),
+  '<script src="https://pivitlab.com/snippet/ab.js" data-api="https://pivitlab.com"></script>'
+);
+assert.strictEqual(
+  ui.snippetTag(ui.displayOrigin(null, here)),
+  '<script src="https://pivit.click/snippet/ab.js" data-api="https://pivit.click"></script>'
+);
+assert.strictEqual(
+  ui.clientLoginUrl(ui.displayOrigin('https://pivitlab.com/', here)),
+  'https://pivitlab.com/login.html?role=client'
+);
+assert.strictEqual(
+  ui.clientLoginUrl(ui.displayOrigin(null, here)),
+  'https://pivit.click/login.html?role=client'
+);
+
 console.log('admin-ui tests passed');

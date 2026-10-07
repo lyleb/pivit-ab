@@ -115,6 +115,40 @@
     return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   }
 
+  // scheme://host[:port] only. Blocks quotes and other characters that would
+  // break out of the snippet tag's src and data-api attributes.
+  const SAFE_ORIGIN = /^https?:\/\/(?:(?:[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?)|\[[a-f0-9:]+\])(?::\d+)?$/i;
+
+  // Server-configured public origin for the snippet tag and client login link.
+  // Empty or anything that is not an http(s) origin falls back to the page host,
+  // which is what the admin UI used before APP_ORIGIN existed.
+  function displayOrigin(configured, fallback) {
+    if (typeof configured !== 'string') return fallback;
+    const value = configured.trim();
+    if (!value) return fallback;
+    let url;
+    try {
+      url = new URL(value);
+    } catch (err) {
+      return fallback;
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return fallback;
+    if (url.username || url.password) return fallback;
+    if (url.search || url.hash) return fallback;
+    if (url.pathname !== '/' && url.pathname !== '' && !/^\/+$/.test(url.pathname)) return fallback;
+    if (!SAFE_ORIGIN.test(url.origin)) return fallback;
+    return url.origin;
+  }
+
+  function snippetTag(origin) {
+    const closeTag = '</' + 'script>';
+    return `<script src="${origin}/snippet/ab.js" data-api="${origin}">${closeTag}`;
+  }
+
+  function clientLoginUrl(origin) {
+    return `${origin}/login.html?role=client`;
+  }
+
   return {
     escapeHtml,
     shortUrl,
@@ -126,5 +160,8 @@
     statusAction,
     describeGoal,
     formatCreated,
+    displayOrigin,
+    snippetTag,
+    clientLoginUrl,
   };
 });
