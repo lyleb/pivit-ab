@@ -94,3 +94,14 @@ WHERE e.id = h.id
   AND h.host <> ''
   AND (h.host = 'localhost' OR h.host ~ '\.');
 
+-- Daily rollup of hits to the snippet and the public API (not /health).
+-- One row per UTC day, request host and customer-site origin. Rows are kept
+-- until removed; the admin view reads the last 30 days.
+CREATE TABLE IF NOT EXISTS host_hits (
+  day DATE NOT NULL,
+  host TEXT NOT NULL,
+  referrer_origin TEXT NOT NULL DEFAULT '',
+  hit_count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, host, referrer_origin)
+);
+

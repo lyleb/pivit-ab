@@ -3,6 +3,7 @@ const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { computeBayesianStats } = require('../bayesian');
 const { detectSRM } = require('../srm');
+const { getVariantResults, getGoalBreakdown, getTimeseries, getPrimaryVariantData, annotateUniqueConversions } = require('../metrics');
 const router = express.Router();
 
 router.use(requireAuth(['owner'])); // results are for your eyes only, not the public snippet
@@ -20,51 +21,26 @@ const FIRST_SEEN_CTE = `
   )
 `;
 
-function visitorTypeClause(visitorType) {
-  if (visitorType === 'new') return "AND e.created_at::date = fs.first_day";
-  if (visitorType === 'returning') return "AND e.created_at::date > fs.first_day";
-  return '';
-}
-
 // GET /api/results/:experimentId?visitor_type=new|returning
-// Returns per-variant counts: unique visitors, views, clicks, conversions, conversion
-// rate, plus a new/returning visitor breakdown. visitor_type optionally restricts
-// the visitors/clicks/conversions/rate figures to just that segment.
+// conversions is unique converting visitors (rate cannot exceed 100%).
+// conversion_events is the raw goal-hit count, including repeats.
+// goals breaks the same unique count out per goal when an experiment has several.
 router.get('/:experimentId', async (req, res) => {
   const { experimentId } = req.params;
-  const filterClause = visitorTypeClause(req.query.visitor_type);
 
   try {
-    const { rows } = await db.query(
-      `${FIRST_SEEN_CTE}
-       SELECT
-         v.id AS variant_id,
-         v.name AS variant_name,
-         COUNT(DISTINCT e.visitor_id) FILTER (WHERE e.event_type = 'view' ${filterClause}) AS visitors,
-         COUNT(DISTINCT e.visitor_id) FILTER (WHERE e.event_type = 'view' AND e.created_at::date = fs.first_day) AS new_visitors,
-         COUNT(DISTINCT e.visitor_id) FILTER (WHERE e.event_type = 'view' AND e.created_at::date > fs.first_day) AS returning_visitors,
-         COUNT(*) FILTER (WHERE e.event_type = 'click' ${filterClause}) AS clicks,
-         COUNT(*) FILTER (WHERE e.event_type = 'convert' ${filterClause}) AS conversions
-       FROM variants v
-       LEFT JOIN events e ON e.variant_id = v.id
-       LEFT JOIN first_seen fs ON fs.visitor_id = e.visitor_id
-       WHERE v.experiment_id = $1
-       GROUP BY v.id, v.name
-       ORDER BY v.name`,
-      [experimentId]
-    );
+    const [{ results, primaryKey }, breakdown] = await Promise.all([
+      getVariantResults(experimentId, req.query.visitor_type),
+      getGoalBreakdown(experimentId),
+    ]);
 
-    const results = rows.map((r) => ({
-      ...r,
-      visitors: Number(r.visitors),
-      new_visitors: Number(r.new_visitors),
-      returning_visitors: Number(r.returning_visitors),
-      clicks: Number(r.clicks),
-      conversions: Number(r.conversions),
-      conversion_rate: r.visitors > 0 ? +(r.conversions / r.visitors * 100).toFixed(2) : 0,
-    }));
-
-    res.json({ experiment_id: experimentId, visitor_type: req.query.visitor_type || 'all', results });
+    res.json({
+      experiment_id: experimentId,
+      visitor_type: req.query.visitor_type || 'all',
+      primary_goal: primaryKey,
+      results,
+      goals: breakdown.goals,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });
@@ -72,34 +48,14 @@ router.get('/:experimentId', async (req, res) => {
 });
 
 // GET /api/results/:experimentId/timeseries
-// Daily visitor + conversion counts per variant, for the trend chart.
+// Daily unique visitors and unique same-day converters, plus running unique
+// totals (cumulative_visitors / cumulative_conversions) for the trend chart.
+// Cumulative is not a sum of the daily rows.
 router.get('/:experimentId/timeseries', async (req, res) => {
   const { experimentId } = req.params;
 
   try {
-    const { rows } = await db.query(
-      `SELECT
-         date_trunc('day', e.created_at) AS day,
-         v.id AS variant_id,
-         v.name AS variant_name,
-         COUNT(DISTINCT e.visitor_id) FILTER (WHERE e.event_type = 'view') AS visitors,
-         COUNT(*) FILTER (WHERE e.event_type = 'convert') AS conversions
-       FROM events e
-       JOIN variants v ON v.id = e.variant_id
-       WHERE e.experiment_id = $1
-       GROUP BY day, v.id, v.name
-       ORDER BY day`,
-      [experimentId]
-    );
-
-    const series = rows.map((r) => ({
-      day: r.day,
-      variant_id: r.variant_id,
-      variant_name: r.variant_name,
-      visitors: Number(r.visitors),
-      conversions: Number(r.conversions),
-    }));
-
+    const series = await getTimeseries(experimentId);
     res.json({ experiment_id: experimentId, series });
   } catch (err) {
     console.error(err);
@@ -154,9 +110,11 @@ router.get('/:experimentId/export', async (req, res) => {
       [experimentId]
     );
 
-    const header = ['created_at', 'event_type', 'variant_name', 'goal_id', 'visitor_id', 'visitor_type'];
+    const header = ['created_at', 'event_type', 'variant_name', 'goal_id', 'visitor_id', 'visitor_type', 'unique_conversion'];
     const lines = [header.join(',')];
-    rows.forEach((r) => {
+    // unique_conversion is 1 only on the first convert for that visitor, variant
+    // and goal. Later repeats are 0, so a sum of the column is unique converters.
+    annotateUniqueConversions(rows).forEach((r) => {
       lines.push(header.map((col) => csvField(r[col])).join(','));
     });
 
@@ -176,27 +134,7 @@ router.get('/:experimentId/export', async (req, res) => {
 router.get('/:experimentId/bayesian', async (req, res) => {
   const { experimentId } = req.params;
   try {
-    const { rows } = await db.query(
-      `SELECT
-         v.id AS variant_id,
-         v.name AS variant_name,
-         COUNT(DISTINCT e.visitor_id) FILTER (WHERE e.event_type = 'view') AS visitors,
-         COUNT(*) FILTER (WHERE e.event_type = 'convert') AS conversions
-       FROM variants v
-       LEFT JOIN events e ON e.variant_id = v.id
-       WHERE v.experiment_id = $1
-       GROUP BY v.id, v.name
-       ORDER BY v.name`,
-      [experimentId]
-    );
-
-    const variantData = rows.map((r) => ({
-      variant_id: r.variant_id,
-      variant_name: r.variant_name,
-      visitors: Number(r.visitors),
-      conversions: Number(r.conversions),
-    }));
-
+    const { variantData } = await getPrimaryVariantData(experimentId);
     const stats = computeBayesianStats(variantData);
     const totalVisitors = variantData.reduce((sum, v) => sum + v.visitors, 0);
     const lowSample = variantData.some((v) => v.visitors < 30);

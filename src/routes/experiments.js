@@ -3,6 +3,7 @@ const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { recordGoalUsage } = require('./goals');
 const { createEditToken } = require('../edit-token');
+const { authorisePreview, buildPublicExperimentList, createPreviewToken, previewUrl } = require('../preview-access');
 const {
   checkHost,
   pageHostFromRequest,
@@ -37,42 +38,68 @@ function applyHostScope(rows, req) {
   return kept;
 }
 
-// GET /api/experiments?url=https://client-site.com/pricing[&preview=1]
+// GET /api/experiments?url=https://client-site.com/pricing
 // PUBLIC — called by the snippet from any visitor's browser. No auth.
-// Normally returns only *running* experiments with only their *enabled* variants.
-// With preview=1 (set by the snippet when it sees an ?ab_preview= param), status
-// and enabled are ignored so you can preview a draft/paused experiment or a paused variant.
+// Returns only running experiments, and only their enabled variants.
+// Draft and paused experiments are added only when preview=1 is accompanied
+// by a signed preview_token for preview_variant. Host scoping still applies.
+// A bare preview=1 (no token) is ignored, so it cannot leak drafts.
 router.get('/', async (req, res) => {
-  const { url, preview } = req.query;
+  const { url } = req.query;
   if (!url) return res.status(400).json({ error: 'url query param is required' });
 
+  const previewAuth = authorisePreview({
+    preview: req.query.preview,
+    previewVariant: req.query.preview_variant,
+    previewToken: req.query.preview_token,
+  });
+
   try {
-    const statusClause = preview ? '' : `AND status = 'running'`;
     const { rows: experiments } = await db.query(
       `SELECT id, name, url_match, allowed_hosts FROM experiments
-       WHERE $1 ILIKE '%' || url_match || '%' ${statusClause}`,
+       WHERE $1 ILIKE '%' || url_match || '%' AND status = 'running'`,
       [url]
     );
 
     const visible = applyHostScope(experiments, req);
-    if (visible.length === 0) return res.json({ experiments: [] });
 
-    const experimentIds = visible.map((e) => e.id);
-    const enabledClause = preview ? '' : 'AND enabled = true';
+    let previewExperiment = null;
+    if (previewAuth.ok) {
+      const { rows: previewRows } = await db.query(
+        `SELECT e.id, e.name, e.url_match, e.allowed_hosts, e.status
+         FROM variants v
+         JOIN experiments e ON e.id = v.experiment_id
+         WHERE v.id = $1
+           AND $2 ILIKE '%' || e.url_match || '%'`,
+        [previewAuth.variantId, url]
+      );
+      if (previewRows[0]) {
+        const already = visible.find((exp) => exp.id === previewRows[0].id);
+        previewExperiment = already || applyHostScope(previewRows, req)[0] || null;
+      }
+    }
+
+    const experimentIds = visible.map((exp) => exp.id);
+    if (previewExperiment && !experimentIds.includes(previewExperiment.id)) {
+      experimentIds.push(previewExperiment.id);
+    }
+    if (experimentIds.length === 0) return res.json({ experiments: [] });
+
     const { rows: variants } = await db.query(
-      `SELECT id, experiment_id, name, traffic_split, changes, goals
-       FROM variants WHERE experiment_id = ANY($1::uuid[]) ${enabledClause}`,
+      `SELECT id, experiment_id, name, traffic_split, changes, goals, enabled
+       FROM variants WHERE experiment_id = ANY($1::uuid[])`,
       [experimentIds]
     );
 
-    const result = visible.map((exp) => ({
-      id: exp.id,
-      name: exp.name,
-      url_match: exp.url_match,
-      variants: variants.filter((v) => v.experiment_id === exp.id),
-    }));
+    const payload = buildPublicExperimentList({
+      running: visible,
+      variants,
+      previewExperiment,
+      previewVariantId: previewAuth.ok ? previewAuth.variantId : null,
+    });
 
-    res.json({ experiments: result });
+    if (payload.preview) return res.json({ experiments: payload.experiments, preview: payload.preview });
+    res.json({ experiments: payload.experiments });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });
@@ -278,6 +305,28 @@ router.patch('/:id/variants/:variantId', async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id on that experiment' });
     await recordGoalUsage(goals);
     res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
+// POST /api/experiments/:id/variants/:variantId/preview-link  { page_url }
+// Owner-only. Mints a signed preview URL the snippet will accept on the
+// customer's origin, where the session cookie is not sent.
+router.post('/:id/variants/:variantId/preview-link', async (req, res) => {
+  try {
+    const { page_url } = req.body || {};
+    if (!page_url) return res.status(400).json({ error: 'page_url is required' });
+
+    const { rows } = await db.query(
+      `SELECT id FROM variants WHERE id = $1 AND experiment_id = $2`,
+      [req.params.variantId, req.params.id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id on that experiment' });
+
+    const token = createPreviewToken(req.params.variantId);
+    res.json({ preview_url: previewUrl(page_url, req.params.variantId, token) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });

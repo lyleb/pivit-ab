@@ -235,6 +235,18 @@
           <tbody id="exp-list-body"></tbody>
         </table>
       </div>
+      <div class="card" id="host-hits-card">
+        <h2>Snippet traffic</h2>
+        <p class="hint" style="margin-top:0;">Hits to the snippet and the public API over the last 30 days, by the host that was called and the customer site that sent them. Health checks are not counted.</p>
+        <p id="host-hits-summary" class="hint"></p>
+        <p id="host-hits-msg" class="hint">Loading…</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Snippet traffic by host (scrolls sideways)">
+          <table id="host-hits-table" style="display:none">
+            <thead><tr><th>Day</th><th>API host</th><th>Customer site</th><th class="num">Hits</th></tr></thead>
+            <tbody id="host-hits-body"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <div id="page-detail" class="page">
@@ -526,7 +538,7 @@ async function applyRoute() {
   const page = pages[hash] || 'page-home';
   showPage(page);
   setNav(page);
-  if (page === 'page-home') { setTitle('pivitlab — Experiments'); loadExperimentList(); }
+  if (page === 'page-home') { setTitle('pivitlab — Experiments'); loadExperimentList(); loadHostHits(); }
   if (page === 'page-create') {
     setTitle('pivitlab — Create experiment');
     if (!experimentsLoaded) await loadExperimentList();
@@ -991,12 +1003,14 @@ function renderDetail() {
             <option value="returning">Returning only</option>
           </select>
           <p id="results-msg" class="hint"></p>
+          <p class="hint">Conversions are unique visitors. Conversion events count every goal hit, including repeats from the same visitor. The rate uses conversions, so it cannot go above 100%.</p>
           <div class="table-scroll" tabindex="0" role="region" aria-label="Results by variant (scrolls sideways)">
             <table id="results-table" style="display:none">
-              <thead><tr><th>Variant</th><th class="num">Visitors</th><th class="num">New</th><th class="num">Returning</th><th class="num">Clicks</th><th class="num">Conversions</th><th class="num">Rate</th></tr></thead>
+              <thead><tr><th>Variant</th><th class="num">Visitors</th><th class="num">New</th><th class="num">Returning</th><th class="num">Clicks</th><th class="num">Conversions</th><th class="num">Conversion events</th><th class="num">Rate</th></tr></thead>
               <tbody id="results-body"></tbody>
             </table>
           </div>
+          <div id="goal-breakdown" hidden></div>
           <p class="hint table-scroll-hint">Swipe the table sideways for more columns.</p>
           <div class="chart-wrap rate-wrap" id="rate-chart-wrap" hidden><canvas id="rate-chart"></canvas></div>
           <div style="margin-top:16px;" class="inline-actions">
@@ -1119,9 +1133,18 @@ function pickPreviewVariant(variants) {
   return enabled.find((v) => !/^control$/i.test(v.name)) || enabled[0] || list[0] || null;
 }
 
-function buildPreviewUrl(pageUrl, variantId) {
-  const sep = pageUrl.includes('?') ? '&' : '?';
-  return `${pageUrl}${sep}ab_preview=${variantId}`;
+async function openPreviewLink(expId, variantId, pageUrl) {
+  const result = await callApi(`/api/experiments/${expId}/variants/${variantId}/preview-link`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ page_url: pageUrl }),
+  });
+  if (!result.ok) {
+    if (document.getElementById('page-detail').classList.contains('active')) detailError(result.message);
+    else alert(result.message);
+    return;
+  }
+  window.open(result.data.preview_url, '_blank');
 }
 
 async function loadOverview() {
@@ -1298,13 +1321,13 @@ document.getElementById('page-detail').addEventListener('click', async (e) => {
     if (!pageUrl) return;
     const variant = pickPreviewVariant(currentDetail.variants);
     if (!variant) { detailError('Add a variant before previewing.'); return; }
-    window.open(buildPreviewUrl(pageUrl, variant.id), '_blank');
+    await openPreviewLink(currentDetail.id, variant.id, pageUrl);
     return;
   }
   if (action === 'preview-variant') {
     const pageUrl = requirePageUrl();
     if (!pageUrl) return;
-    window.open(buildPreviewUrl(pageUrl, id), '_blank');
+    await openPreviewLink(currentDetail.id, id, pageUrl);
     return;
   }
   if (action === 'make-edits') {
@@ -1465,6 +1488,13 @@ async function saveDetailSettings() {
 
 // --- Results (detail tab; hidden for draft or zero visitors) ---
 
+function boundedRate(visitors, conversions) {
+  const v = Number(visitors) || 0;
+  const c = Number(conversions) || 0;
+  if (v <= 0 || c <= 0) return 0;
+  return +(Math.min(c, v) / v * 100).toFixed(2);
+}
+
 function computeTrendDatasets(series, mode) {
   const days = [...new Set(series.map((r) => r.day))].sort();
   const variantNames = [...new Set(series.map((r) => r.variant_name))];
@@ -1472,14 +1502,17 @@ function computeTrendDatasets(series, mode) {
   const datasets = variantNames.map((name, i) => {
     let cumVisitors = 0, cumConversions = 0;
     const dataByDay = days.map((day) => {
-      const row = series.find((r) => r.day === day && r.variant_name === name);
-      const v = row ? Number(row.visitors) : 0;
-      const c = row ? Number(row.conversions) : 0;
+      const row = series.find((r) => r.day === day && r.variant_name === name) || {};
+      if (mode === 'cumulative' && row.cumulative_visitors != null) {
+        return boundedRate(row.cumulative_visitors, row.cumulative_conversions);
+      }
+      const v = Number(row.visitors) || 0;
+      const c = Number(row.conversions) || 0;
       if (mode === 'cumulative') {
         cumVisitors += v; cumConversions += c;
-        return cumVisitors > 0 ? +(cumConversions / cumVisitors * 100).toFixed(2) : 0;
+        return boundedRate(cumVisitors, cumConversions);
       }
-      return v > 0 ? +(c / v * 100).toFixed(2) : 0;
+      return boundedRate(v, c);
     });
     return { label: name, data: dataByDay, borderColor: palette[i % palette.length], backgroundColor: palette[i % palette.length], tension: 0.2, fill: false };
   });
@@ -1570,7 +1603,8 @@ async function loadResults() {
   const msgEl = document.getElementById('results-msg');
   msgEl.textContent = '';
   const tbody = document.getElementById('results-body');
-  tbody.innerHTML = results.map((r) => `<tr><td>${UI.escapeHtml(r.variant_name)}</td><td class="num">${r.visitors}</td><td class="num">${r.new_visitors}</td><td class="num">${r.returning_visitors}</td><td class="num">${r.clicks}</td><td class="num">${r.conversions}</td><td class="num">${r.conversion_rate}%</td></tr>`).join('');
+  tbody.innerHTML = results.map((r) => `<tr><td>${UI.escapeHtml(r.variant_name)}</td><td class="num">${r.visitors}</td><td class="num">${r.new_visitors}</td><td class="num">${r.returning_visitors}</td><td class="num">${r.clicks}</td><td class="num">${r.conversions}</td><td class="num">${r.conversion_events != null ? r.conversion_events : ''}</td><td class="num">${r.conversion_rate}%</td></tr>`).join('');
+  renderGoalBreakdown(result.data.goals, result.data.primary_goal);
   document.getElementById('results-table').style.display = 'table';
 
   const rateWrap = document.getElementById('rate-chart-wrap');
@@ -1640,6 +1674,56 @@ async function loadResults() {
     `).join('');
     bayesianTable.style.display = 'table';
   }
+}
+
+function renderGoalBreakdown(goals, primaryGoal) {
+  const mount = document.getElementById('goal-breakdown');
+  if (!mount) return;
+  if (!goals || goals.length < 2) { mount.hidden = true; mount.innerHTML = ''; return; }
+  const blocks = goals.map((goal) => {
+    const rows = (goal.variants || []).map((v) => `<tr><td>${UI.escapeHtml(v.variant_name)}</td><td class="num">${v.conversions}</td><td class="num">${v.conversion_events}</td><td class="num">${v.conversion_rate}%</td></tr>`).join('');
+    const primary = goal.primary || goal.key === primaryGoal ? ' · primary' : '';
+    return `<h3 style="margin-top:18px;">${UI.escapeHtml(goal.label || goal.key)}${primary ? `<span class="hint">${UI.escapeHtml(primary)}</span>` : ''}</h3>
+      <div class="table-scroll"><table><thead><tr><th>Variant</th><th class="num">Conversions</th><th class="num">Conversion events</th><th class="num">Rate</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }).join('');
+  mount.hidden = false;
+  mount.innerHTML = `<p class="hint" style="margin-top:18px;">Each goal counts a visitor once, even if they trigger it several times.${primaryGoal ? ' The headline rate above uses the primary goal.' : ' The headline rate above counts a visitor once if they hit any goal.'}</p>${blocks}`;
+}
+
+async function loadHostHits() {
+  const msg = document.getElementById('host-hits-msg');
+  const summary = document.getElementById('host-hits-summary');
+  const table = document.getElementById('host-hits-table');
+  const body = document.getElementById('host-hits-body');
+  if (!msg || !body) return;
+  const result = await callApi('/api/host-hits', { headers: authHeaders() });
+  if (!result.ok) {
+    msg.className = 'error-msg';
+    msg.textContent = 'Could not load snippet traffic.';
+    if (table) table.style.display = 'none';
+    return;
+  }
+  const rows = result.data.rows || [];
+  const byHost = result.data.by_host || [];
+  if (summary) {
+    summary.textContent = byHost.length
+      ? byHost.map((item) => `${item.host}: ${item.hit_count.toLocaleString('en-GB')}`).join(' · ')
+      : '';
+  }
+  if (rows.length === 0) {
+    msg.className = 'hint';
+    msg.textContent = 'No snippet or public API hits in the last 30 days.';
+    if (table) table.style.display = 'none';
+    body.innerHTML = '';
+    return;
+  }
+  msg.textContent = '';
+  body.innerHTML = rows.map((row) => {
+    const day = row.day ? new Date(row.day + 'T00:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '';
+    const site = row.referrer_origin || 'Unknown';
+    return `<tr><td>${UI.escapeHtml(day)}</td><td class="mono">${UI.escapeHtml(row.host)}</td><td class="mono">${UI.escapeHtml(site)}</td><td class="num">${row.hit_count}</td></tr>`;
+  }).join('');
+  if (table) table.style.display = 'table';
 }
 
 document.addEventListener('change', (e) => {
@@ -2321,7 +2405,7 @@ document.getElementById('manage-variants-list').addEventListener('click', async 
   const pageUrl = document.getElementById('manage-page-url').value.trim();
   if (btn.dataset.manage === 'preview') {
     if (!pageUrl) { alert('Enter a page URL above first.'); return; }
-    window.open(buildPreviewUrl(pageUrl, btn.dataset.id), '_blank');
+    await openPreviewLink(currentManageExpId, btn.dataset.id, pageUrl);
   } else if (btn.dataset.manage === 'edit') {
     await makeEdits(currentManageExpId, btn.dataset.id, btn, pageUrl);
   } else if (btn.dataset.manage === 'open') {

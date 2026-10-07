@@ -18,7 +18,7 @@ Basic A/B testing platform: snippet + API + results dashboard.
 1. Push this repo to GitHub
 2. Create a new Railway project → "Deploy from GitHub repo" → select this repo
 3. Add a Postgres database: in your Railway project, click "+ New" → "Database" → "Add PostgreSQL". Railway auto-connects it and injects `DATABASE_URL` into your app service.
-4. On your app service, set `NODE_ENV=production` and `ADMIN_API_KEY` (a generated secret — see step 3 in Local setup) in the Variables tab
+4. On your app service, set `NODE_ENV=production`, `ADMIN_API_KEY` (a generated secret — see step 3 in Local setup) and `SESSION_SECRET` (at least 32 characters, any character set — see `.env.example`) in the Variables tab. If `NODE_ENV=production` and `SESSION_SECRET` is missing or shorter than 32 characters, the process exits at startup and the site will not boot. Set it before deploying. Do not rotate an existing secret that is already long enough.
 5. Deploy — tables are created automatically on first startup, no manual migration step
 
 ## How it works
@@ -107,7 +107,7 @@ Before doing anything, the snippet checks for consent in this order:
 3. **OneTrust** — checks `window.OnetrustActiveGroups` for the `C0002` (Performance Cookies) category, OneTrust's standard default template ID. A custom OneTrust template with different category IDs won't be caught by this — use the manual override instead
 4. **CookieYes** — checks the `cookieyes-consent` cookie for `analytics:yes`
 
-If **none** of the above are present at all, the snippet runs as it always has (unchanged behavior) — there's no consent signal to gate on, and whether that's appropriate is a call for whoever runs the site. If consent is denied (or not yet decided, for a CMP that's installed but hasn't recorded an answer), the snippet does nothing at all for that visitor — no localStorage write, no experiments fetched, no DOM changes applied, no events sent. They simply see the page as if the snippet weren't there. Preview mode (`?ab_preview=`) bypasses this check entirely, since no real tracking happens during a preview regardless.
+If **none** of the above are present at all, the snippet runs as it always has (unchanged behavior) — there's no consent signal to gate on, and whether that's appropriate is a call for whoever runs the site. If consent is denied (or not yet decided, for a CMP that's installed but hasn't recorded an answer), the snippet does nothing at all for that visitor — no localStorage write, no experiments fetched, no DOM changes applied, no events sent. They simply see the page as if the snippet weren't there. An authorised preview (a signed `ab_preview_token`) skips the consent check because it does not track. A preview parameter without a valid token does not.
 
 ## Running experiments across multiple sites
 
@@ -131,7 +131,7 @@ Settings shows **Seen on since last deploy** — hosts that have asked for that 
 - **💾 Save** persists everything to that variant's `changes`, same data model the dashboard's own "Make Changes" step produces — this is a different way to author the same thing, not a separate system
 - **Changes (N)** expands a list of every change on the variant, saved earlier or made this session, each described in plain English ("Duplicate #cta-button", "Insert HTML below #headline"). **Remove** is on every entry; **Edit** appears on the insert-HTML entries (the only type with a simple editable value so far) and reopens the HTML panel pre-filled
 - The toolbar shows **● Unsaved changes** or **✓ All changes saved**, based on a comparison with what's actually on the server
-- **Desktop / Tablet / Mobile** buttons open the live preview (`?ab_preview=`) in appropriately-sized new windows, reflecting the last *saved* state — not unsaved edits still sitting in the current tab
+- **Desktop / Tablet / Mobile** buttons open the live preview (`?ab_preview=` plus a signed token minted from the edit link) in appropriately-sized new windows, reflecting the last *saved* state — not unsaved edits still sitting in the current tab
 
 **Why editing or removing an existing change reloads the page**: there's no generic way to reverse an arbitrary DOM mutation (an innerHTML overwrite or a removed node can't be reliably restored in place). So Edit/Remove on an existing entry updates the change list, reloads onto a clean copy of the page, and replays the updated list. The working list is kept in `sessionStorage` (per variant) across that reload, so unsaved work isn't lost; it's cleared on a successful Save, after which the editor loads from the server again. Adding a *new* change doesn't need a reload and applies live.
 
@@ -155,7 +155,7 @@ If a given test genuinely doesn't need a Control (e.g. a 100%-traffic rollout), 
 
 ## Previewing a variant
 
-Use the **"Preview & Manage Variants"** section: enter the Experiment ID and the actual page URL you're testing on, click Load, then hit **Preview** on any variant. It opens that variant in a new tab via `?ab_preview=<variant_id>` appended to the URL. This works even for a draft/paused experiment or a paused variant, and it never logs a view/conversion event — previewing never touches your real results.
+Use the **"Preview & Manage Variants"** section: enter the Experiment ID and the actual page URL you're testing on, click Load, then hit **Preview** on any variant. The server mints a signed link, `?ab_preview=<variant_id>&ab_preview_token=<token>`, because the preview opens on the customer's site and the login cookie is not sent there. The token lasts about an hour and is scoped to that variant. It works for a draft or paused experiment, and for a paused variant. Previewing never logs a view or a conversion, and it does not assign the visitor. A link with no token, or an expired token, does not serve draft or paused experiments — those stay hidden, and a running experiment on the same page behaves as a normal visit. Host scoping still applies: the page's domain has to be allowed.
 
 ## Pausing or deleting a variant
 
@@ -181,7 +181,7 @@ There's no caching or batch/polling delay anywhere — every view and conversion
 
 ## Exporting and deleting an experiment
 
-Once an experiment is **archived**, "Your Experiments" shows two extra buttons on that row: **Export CSV** (every raw event — timestamp, type, variant, goal, visitor id, and new/returning label) and **Delete** (permanent — removes the experiment, its variants, and all events; the server refuses this unless the experiment is archived, as a guard rail). Export first if you want to keep the data before deleting.
+Once an experiment is **archived**, "Your Experiments" shows two extra buttons on that row: **Export CSV** (every raw event — timestamp, type, variant, goal, visitor id, new/returning label, and `unique_conversion`) and **Delete** (permanent — removes the experiment, its variants, and all events; the server refuses this unless the experiment is archived, as a guard rail). `unique_conversion` is `1` on the first convert for that visitor, variant and goal, and `0` on repeats, so summing the column is the unique-converter count. Export first if you want to keep the data before deleting.
 
 ## New vs returning visitors
 
@@ -221,10 +221,10 @@ A low-traffic warning appears whenever any variant has under 30 visitors, since 
 
 ## The trend chart
 
-The line chart under the bar chart plots **conversion rate over time**, not raw visitor count, with a toggle between two modes:
+The line chart under the bar chart plots **conversion rate over time**, not raw visitor count, with a toggle between two modes. Both use unique converting visitors, so the rate does not go above 100%.
 
-- **Cumulative** — a running rate up to that day (smoother, shows the overall trend)
-- **Daily** — that day's own rate in isolation (noisier, but shows what's happening *right now* rather than smoothing it into the average)
+- **Cumulative** — running unique visitors and unique converters up to that day (not a sum of each day's uniques, which would count a returning visitor twice)
+- **Daily** — that day's own unique visitors and the ones who also converted that day
 
 Same chart, same toggle, on both the admin dashboard and the client dashboard.
 
@@ -238,7 +238,7 @@ There's a real login screen now at `/login.html` (branded, matching the dashboar
 
 - Your login password is your existing `ADMIN_API_KEY` value — no need to change it, its role just shifted from "header value" to "login password."
 - Sessions are signed cookies stored in Postgres (not memory), so logging in survives a Railway redeploy — you won't get logged out just because you shipped a change.
-- A new env var is required: `SESSION_SECRET` (see `.env.example` for how to generate one). If it's missing, the server still starts (fails toward staying up, like everywhere else in this app) but logs a warning and logs everyone out on every restart until you set it.
+- A new env var is required: `SESSION_SECRET` (see `.env.example`). It must be at least 32 characters. Any character set is accepted — it does not have to be hex or base64. When `NODE_ENV=production`, a missing or shorter secret aborts startup with a log line and the process does not boot. Outside production, a dev-only fallback is used and a warning is logged. Set the production value on the host before deploying, and do not rotate one that is already long enough.
 - 5 failed login attempts locks that IP out for 60 seconds — a basic brute-force throttle, not a full rate-limiter.
 - Every admin route now requires an active owner session; the old `x-api-key` header no longer does anything.
 
@@ -256,7 +256,9 @@ A second, separate login exists for clients — read-only, scoped to only the ex
 
 The public snippet endpoints (`GET /api/experiments`, `POST /api/event`, `GET /api/experiments/by-ids`) stay open on purpose — they're called from any visitor's browser and have no sensitive data to protect (just "which experiments run on this URL" and "log this event"). Those responses do not include the site-domain list. A public fetch is filtered by the page host (the `url` query, then `Origin`, then `Referer` — never this server's own hostname). `POST /api/event` checks that the variant belongs to the experiment, then drops the event with a normal 204 when the `Origin` or `Referer` host is known and not in the experiment's domains, and drops events for an experiment with no domains when `HOST_SCOPING=enforce`.
 
-`GET /api/experiments/host-report` and `PATCH /api/experiments/:id/hosts` are owner-only. Everything else requires an active session with the right role (`owner` or `client`), enforced per-route.
+`GET /api/experiments/host-report` and `PATCH /api/experiments/:id/hosts` are owner-only. `GET /api/host-hits` is owner-only too: a daily rollup of hits to the snippet and the public API (`/snippet`, `GET /api/experiments`, `GET /api/experiments/by-ids`, `POST /api/event`), keyed by the request host and the customer-site origin. `/health` is not counted. The counter is an upsert and never blocks or fails the request. The home page shows the last 30 days. Rows are kept until you delete them. Everything else requires an active session with the right role (`owner` or `client`), enforced per-route.
+
+A conversion in results, the Bayesian panel, the client portal, the trend chart and the CSV `unique_conversion` column is a unique visitor per variant (and per goal, when goals are listed separately). Repeat clicks stay visible on the owner results table as **Conversion events**. The rate uses the unique count, so it cannot exceed 100%. The Bayesian calculation itself is unchanged; it is only fed that unique count.
 
 ## What's NOT in v1 (by design)
 

@@ -8,6 +8,8 @@ const sessionMiddleware = require('./session');
 
 const { hostScopingMode } = require('./host-scope');
 const { configuredAppOrigin, sendPublicConfig } = require('./app-origin');
+const { hostHitMiddleware } = require('./host-hits');
+const { PUBLIC_ERROR } = require('./public-error');
 const experimentsRouter = require('./routes/experiments');
 const eventsRouter = require('./routes/events');
 const resultsRouter = require('./routes/results');
@@ -16,6 +18,7 @@ const authRouter = require('./routes/auth');
 const clientsRouter = require('./routes/clients');
 const clientRouter = require('./routes/client');
 const editorRouter = require('./routes/editor');
+const hostHitsRouter = require('./routes/host-hits');
 
 const app = express();
 // Railway (like most hosts) sits behind a reverse proxy. Without this, Express
@@ -33,6 +36,9 @@ app.set('trust proxy', 1);
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(sessionMiddleware);
+// Count snippet and public API hits without delaying the response. /health
+// is excluded inside the middleware. A counter failure is logged and ignored.
+app.use(hostHitMiddleware);
 
 // Serve the built snippet + the admin dashboard as static files
 app.use('/snippet', express.static(path.join(__dirname, '../snippet')));
@@ -46,6 +52,7 @@ app.use('/api/goals', goalsRouter);
 app.use('/api/clients', clientsRouter);
 app.use('/api/client', clientRouter);
 app.use('/api/editor', editorRouter);
+app.use('/api/host-hits', hostHitsRouter);
 
 // Optional public origin for the admin UI. Null when APP_ORIGIN is unset or
 // invalid, in which case the page keeps using location.origin. Does not
@@ -59,6 +66,10 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 // crashing the whole process — see the process-level handlers below).
 app.use((err, req, res, next) => {
   console.error('Unhandled route error:', err);
+  const path = req.path || '';
+  if (path.startsWith('/api/client') || path.startsWith('/api/auth')) {
+    return res.status(500).json({ error: PUBLIC_ERROR });
+  }
   res.status(500).json({ error: 'internal error', detail: err.message });
 });
 
