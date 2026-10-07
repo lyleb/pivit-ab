@@ -47,4 +47,11 @@ assert.strictEqual(ui.shortUrl('https://cantsaythat.co.uk/about'), 'cantsaythat.
 assert.strictEqual(ui.describeGoal({ type: 'click', selector: '.hero-cta', id: 'CTA click' }), 'CTA click → .hero-cta');
 assert.strictEqual(ui.escapeHtml(`<b class="x">'`), '&lt;b class=&quot;x&quot;&gt;&#39;');
 
+assert.strictEqual(ui.shouldShowSignpost(true, null), true);
+assert.strictEqual(ui.shouldShowSignpost(true, ''), true);
+assert.strictEqual(ui.shouldShowSignpost(true, '0'), true);
+assert.strictEqual(ui.shouldShowSignpost(true, '1'), false);
+assert.strictEqual(ui.shouldShowSignpost(false, null), false);
+assert.strictEqual(ui.shouldShowSignpost(false, '1'), false);
+
 console.log('admin-ui tests passed');

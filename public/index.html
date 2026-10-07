@@ -2,42 +2,21 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pivit</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- TODO(favicon): add the square pivitlab icon + apple-touch-icon when Lyle supplies it -->
+<title>pivitlab</title>
+<link rel="stylesheet" href="/assets/pivit.css?v=1">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="/admin-ui.js"></script>
 <style>
-  :root {
-    --ink: #e8e9f0;
-    --indigo: #5635FB;
-    --indigo-dark: #4527d6;
-    --mint: #02DEB5;
-    --mint-dark: #7dffe2;
-    --bg: #0c0e14;
-    --sidebar: #10131a;
-    --card: #171a22;
-    --card-2: #1e222c;
-    --border: #2c3140;
-    --text-muted: #9398ab;
-    --danger: #f07178;
-    --warn: #e6c27a;
-    --warn-bg: #2a2416;
-    --ok: #8ee4c7;
-    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.5; }
-  button, input, select, textarea { font-family: inherit; }
   .app-shell { display: flex; min-height: 100vh; align-items: stretch; }
   .sidebar {
     width: 232px; flex-shrink: 0; background: var(--sidebar);
     border-right: 1px solid var(--border); padding: 18px 12px 16px;
     display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; height: 100vh;
   }
-  .brand {
-    padding: 2px 8px 14px; margin: 0 4px 8px;
-  }
-  .brand img.logo { height: 46px; width: auto; max-width: 100%; display: block; }
+  .sidebar-nav { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+  .brand { padding: 2px 8px 14px; margin: 0 4px 8px; }
   .nav-item {
     display: flex; align-items: center; width: 100%; text-align: left; gap: 10px;
     padding: 10px 12px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.9em;
@@ -47,86 +26,37 @@
   .nav-item.active { background: rgba(86,53,251,0.16); color: #c4b6ff; }
   .sidebar-foot { margin-top: auto; padding-top: 12px; }
   .main-area { flex: 1; min-width: 0; padding: 28px 36px 80px; }
-  .page { display: none; }
+  .page { display: none; min-width: 0; }
   .page.active { display: block; }
   .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
-  .page-head h1 { margin: 0; font-size: 1.45em; letter-spacing: -0.02em; }
   .page-actions, .header-actions, .wizard-actions .right, .inline-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  h1, h2, h3 { color: var(--ink); font-weight: 700; letter-spacing: -0.01em; }
-  h2 { font-size: 1.05em; margin: 0 0 12px; }
-  h3 { font-size: 0.95em; margin: 0 0 8px; }
-  .card, section.card {
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px;
-  }
-  .card + .card { margin-top: 14px; }
   .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
-  label { display: block; margin-top: 14px; font-weight: 600; font-size: 0.85em; }
+  label { margin-top: 14px; }
   .card label:first-child, .stack label:first-child { margin-top: 0; }
-  input, textarea, select {
-    width: 100%; padding: 9px 11px; margin-top: 5px; box-sizing: border-box;
-    font-size: 0.95em; border: 1px solid #3a4054; border-radius: 8px;
-    background: #10131a; color: var(--ink);
-  }
-  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(86,53,251,0.25); }
-  input[readonly] { opacity: 0.75; }
   textarea { height: 90px; font-family: "SF Mono", Menlo, monospace; font-size: 0.85em; }
-  button, .btn {
-    margin: 0; padding: 9px 16px; background: var(--indigo); color: white;
-    border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.9em;
-  }
-  button:hover, .btn:hover { background: var(--indigo-dark); }
-  button:disabled { background: #3a3e50; color: #9aa0b4; cursor: not-allowed; }
-  .btn-ghost, button.secondary {
-    background: transparent; color: var(--ink); border: 1px solid var(--border);
-  }
-  .btn-ghost:hover, button.secondary:hover { background: #222633; }
-  .btn-danger { background: transparent; color: var(--danger); border: 1px solid rgba(240,113,120,0.4); }
-  .btn-danger:hover { background: rgba(240,113,120,0.12); }
+  textarea.hosts { height: 68px; }
   button.remove-row { background: transparent; color: var(--danger); padding: 4px 8px; font-size: 1em; }
   button.remove-row:hover { background: rgba(240,113,120,0.12); }
-  table { width: 100%; border-collapse: collapse; }
-  th { text-align: left; padding: 10px 8px; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); border-bottom: 1px solid var(--border); }
-  td { text-align: left; padding: 12px 8px; border-bottom: 1px solid var(--border); font-size: 0.92em; vertical-align: middle; }
-  tr:last-child td { border-bottom: none; }
   tbody tr:hover td { background: rgba(255,255,255,0.02); }
-  .hint { color: var(--text-muted); font-size: 0.85em; }
-  .error-msg { color: var(--danger); font-weight: 600; font-size: 0.88em; }
-  .ok-msg { color: var(--ok); font-weight: 600; font-size: 0.88em; }
-  pre { background: #10131a; border: 1px solid var(--border); padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 0.8em; white-space: pre-wrap; word-break: break-all; }
+  .table-scroll tbody tr:hover td:first-child { background: var(--card); }
   .name-btn, .linkish {
     background: none; border: none; color: var(--ink); padding: 0; font-weight: 700; cursor: pointer; text-align: left;
   }
   .name-btn:hover, .linkish:hover { color: #c4b6ff; background: none; }
-  .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.72em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
-  .badge.live { background: rgba(2,222,181,0.15); color: var(--mint-dark); }
-  .badge.paused { background: #2a2e3c; color: var(--text-muted); }
-  .badge.draft { background: #3a2e14; color: var(--warn); }
-  .badge.archived { background: #2a2d38; color: #b0b4c4; }
-  .badge.no-domain {
-    background: var(--warn-bg); color: var(--warn); border: 1px solid #6a5420;
-    text-transform: none; letter-spacing: 0; margin-left: 6px; vertical-align: middle;
-  }
-  textarea.hosts { height: 68px; }
-  .mono { font-family: "SF Mono", Menlo, monospace; font-size: 0.84em; color: var(--text-muted); }
-  .kicker { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 700; }
   .status-big { font-size: 1.55em; font-weight: 750; margin: 6px 0; letter-spacing: -0.02em; }
   .crumb { color: var(--text-muted); font-size: 0.85em; margin-bottom: 8px; }
   .crumb button { background: none; border: none; color: var(--text-muted); padding: 0; font-weight: 600; }
   .crumb button:hover { color: var(--ink); background: none; }
   .detail-top { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 8px; }
   .meta-line { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; color: var(--text-muted); font-size: 0.88em; margin-top: 6px; }
-  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 18px 0 16px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 18px 0 16px; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
   .tabs button {
     background: none; color: var(--text-muted); border: none; border-bottom: 2px solid transparent;
-    border-radius: 0; padding: 10px 14px; margin: 0;
+    border-radius: 0; padding: 10px 14px; margin: 0; flex-shrink: 0; white-space: nowrap;
   }
   .tabs button:hover { background: none; color: var(--ink); }
   .tabs button.active { color: #fff; border-bottom-color: var(--indigo); }
-  .banner {
-    display: flex; justify-content: space-between; gap: 12px; align-items: center;
-    background: var(--warn-bg); border: 1px solid #6a5420; color: #f0e2c0;
-    border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; font-size: 0.92em;
-  }
   .checklist { margin: 8px 0 0; padding-left: 18px; }
   .checklist li { margin: 4px 0; }
   .activity-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.88em; }
@@ -158,11 +88,13 @@
     display: flex; justify-content: space-between; gap: 10px; align-items: center;
     padding: 12px 0; border-bottom: 1px solid var(--border);
   }
-  .var-row .grow, .split-input { display: flex; gap: 8px; align-items: center; flex: 1; }
+  .var-row .grow, .split-input { display: flex; gap: 8px; align-items: center; flex: 1; min-width: 0; }
+  .var-row input.var-name { margin: 0; flex: 1; min-width: 0; max-width: 240px; }
+  #wizard-variants .var-row input.var-name { max-width: none; }
   .var-row input[type="text"], .add-row input[type="text"] { margin: 0; }
-  .split-input input, .add-row input[type="number"] { width: 88px; margin: 0; }
+  .split-input input, .add-row input[type="number"] { width: 88px; flex: 0 0 88px; margin: 0; }
   .add-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
-  .add-row input[type="text"] { flex: 1; min-width: 160px; margin: 0; }
+  .add-row input[type="text"] { flex: 1; min-width: 160px; width: auto; margin: 0; }
   .goal-row {
     display: grid; grid-template-columns: 1.2fr 1fr auto; gap: 10px; padding: 12px;
     margin-top: 10px; background: var(--card-2); border: 1px solid var(--border); border-radius: 8px;
@@ -181,44 +113,81 @@
   .vc-meta { font-size: 0.85em; color: var(--text-muted); margin-top: 4px; }
   .vc-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
   .vc-actions button { margin: 0; }
+  .client-card {
+    display: flex; flex-direction: column; align-items: stretch; padding: 14px; margin-top: 10px;
+    background: var(--card-2); border: 1px solid var(--border); border-radius: 8px; border-left: 4px solid var(--indigo);
+  }
+  .client-card-main { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+  .reset-pw-row { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .reset-pw-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .reset-pw-actions input { flex: 1 1 12em; min-width: 0; margin: 0; width: auto; }
   .check { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; font-weight: 600; }
   .check input { width: auto; margin-top: 3px; }
-  .chart-wrap { max-width: 100%; margin-top: 16px; }
-  .chart-wrap.trend-wrap { height: 0; overflow: hidden; }
-  .trend-toggle-btn.active { background: var(--indigo); color: white; border-color: transparent; }
-  .modal-backdrop {
-    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55);
-    z-index: 100; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 40px 20px;
-  }
-  .modal-backdrop.active { display: flex; }
-  .modal-box {
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px;
-    width: 560px; max-width: 100%;
-  }
-  .modal-box-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-  .modal-close-btn { background: none; border: none; color: var(--text-muted); font-size: 1.2em; padding: 4px 8px; }
   .snippet-popover {
     display: none; position: fixed; background: var(--card); border: 1px solid var(--border);
-    border-radius: 10px; padding: 16px; box-shadow: 0 12px 40px rgba(0,0,0,0.4);
-    z-index: 80; width: 380px; max-width: calc(100vw - 24px);
+    border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+    z-index: 80; width: 420px; max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow: auto;
+  }
+  .snippet-popover.open { display: block; }
+  .snippet-popover .snippet-body { padding: 4px 16px 16px; }
+  .snippet-popover.open.is-sheet {
+    display: flex; flex-direction: column; inset: 0; width: 100%; max-width: none;
+    height: 100dvh; max-height: none; border-radius: 0; border: none; overflow: hidden; z-index: 120;
+  }
+  .snippet-popover.open.is-sheet .modal-head {
+    position: sticky; top: 0; background: var(--card); padding-top: calc(12px + env(safe-area-inset-top));
+  }
+  .snippet-popover.open.is-sheet .snippet-body {
+    flex: 1; overflow-y: auto; overscroll-behavior: contain; padding-bottom: calc(16px + env(safe-area-inset-bottom));
   }
   details { border: 1px solid var(--border); border-radius: 10px; margin-top: 12px; overflow: hidden; }
   details summary {
     padding: 12px 14px; font-weight: 700; cursor: pointer; background: #1a1e28; font-size: 0.9em;
   }
   details .accordion-body { padding: 14px; }
-  .srm-ok { background: rgba(2,222,181,0.08); border: 1px solid rgba(2,184,149,0.45); border-radius: 8px; padding: 14px 16px; font-size: 0.92em; color: #c8ffe9; }
-  .srm-warning { background: rgba(240,113,120,0.1); border: 1px solid rgba(240,113,120,0.5); border-radius: 8px; padding: 14px 16px; font-size: 0.92em; color: #ffd0d3; }
   .warn-text { color: var(--warn); font-weight: 650; white-space: pre-line; }
   .empty { padding: 28px 8px; color: var(--text-muted); }
-  code { font-family: "SF Mono", Menlo, monospace; font-size: 0.88em; }
   @media (max-width: 860px) {
     .app-shell { flex-direction: column; }
-    .sidebar { width: 100%; height: auto; position: relative; border-right: none; border-bottom: 1px solid var(--border); }
-    .sidebar-foot { margin-top: 8px; }
+    .sidebar {
+      width: 100%; max-width: 100%; min-width: 0; height: auto; position: sticky; top: 0; z-index: 40;
+      display: grid; grid-template-columns: 1fr auto; grid-template-areas: "brand logout" "nav nav";
+      gap: 4px 8px; padding: calc(8px + env(safe-area-inset-top)) 12px 10px;
+      border-right: none; border-bottom: 1px solid var(--border);
+    }
+    .brand { grid-area: brand; margin: 0; padding: 0; align-self: center; }
+    .sidebar .brand-logo { height: 28px; }
+    .sidebar-foot { grid-area: logout; margin: 0; padding: 0; align-self: center; }
+    .sidebar-foot .nav-item {
+      width: auto; border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; min-height: 40px; color: var(--ink);
+    }
+    .sidebar-nav {
+      grid-area: nav; flex-direction: row; gap: 4px; overflow-x: auto; scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+    }
+    .sidebar-nav::-webkit-scrollbar { display: none; }
+    .sidebar-nav .nav-item { width: auto; flex: 0 0 auto; min-height: 40px; white-space: nowrap; }
     .main-area { padding: 20px 16px 64px; }
     .grid-2, .detail-top, .page-head { grid-template-columns: 1fr; display: flex; flex-direction: column; }
     .goal-row { grid-template-columns: 1fr; }
+    .activity-row { flex-wrap: wrap; }
+    .page-actions button, .header-actions button { min-height: 44px; }
+    .detail-top .header-actions button { flex: 1 1 auto; }
+    details summary { display: flex; align-items: center; }
+    input, select, textarea { font-size: 16px; }
+  }
+  @media (max-width: 640px) {
+    .var-row { flex-direction: column; align-items: stretch; }
+    .var-row .grow { flex-wrap: wrap; width: 100%; }
+    .var-row input.var-name { flex: 1 1 100%; max-width: none; width: 100%; }
+    .var-row .vc-actions { width: 100%; justify-content: flex-start; }
+    .var-row .vc-actions button { flex: 1 1 calc(50% - 6px); min-height: 44px; }
+    .client-card-main { flex-direction: column; align-items: stretch; }
+    .client-card .vc-actions { justify-content: flex-start; }
+    .client-card .vc-actions button, .reset-pw-actions button { min-height: 44px; flex: 1 1 auto; }
+    .variant-card { flex-direction: column; align-items: stretch; }
+    .variant-card .vc-actions { justify-content: flex-start; }
+    .variant-card .vc-actions button { min-height: 44px; flex: 1 1 auto; }
   }
 </style>
 </head>
@@ -226,12 +195,14 @@
 <div class="app-shell">
   <aside class="sidebar">
     <div class="brand">
-      <img src="/assets/logo-white.png" alt="Pivit" class="logo">
+      <span class="brand-logo" role="img" aria-label="pivitlab"></span>
     </div>
-    <button type="button" class="nav-item active" id="nav-page-home" data-go="#home">Home</button>
-    <button type="button" class="nav-item" id="nav-page-create" data-go="#create">Create experiment</button>
-    <button type="button" class="nav-item" id="nav-page-preview" data-go="#preview">Preview &amp; manage</button>
-    <button type="button" class="nav-item" id="nav-page-status" data-go="#status">Start &amp; pause</button>
+    <nav class="sidebar-nav">
+      <button type="button" class="nav-item active" id="nav-page-home" data-go="#home">Home</button>
+      <button type="button" class="nav-item" id="nav-page-create" data-go="#create">Create experiment</button>
+      <button type="button" class="nav-item" id="nav-page-preview" data-go="#preview">Preview &amp; manage</button>
+      <button type="button" class="nav-item" id="nav-page-status" data-go="#status">Start &amp; pause</button>
+    </nav>
     <div class="sidebar-foot">
       <button type="button" class="nav-item" onclick="logout()">Log out</button>
     </div>
@@ -252,7 +223,7 @@
       </div>
       <div class="card">
         <p id="exp-list-msg" class="hint">Loading…</p>
-        <table id="exp-list-table" style="display:none">
+        <table id="exp-list-table" class="table-cards">
           <thead>
             <tr>
               <th>Name</th><th>Status</th><th>URL match</th><th>Client</th><th>Variants</th><th>Signal</th><th></th>
@@ -383,39 +354,50 @@
   </div>
 </div>
 
-<div id="snippet-popover" class="snippet-popover">
-  <p class="hint" style="margin-top:0; font-weight:700; color:var(--ink);">1. Add to &lt;head&gt; <span class="hint" style="font-weight:400;">(reduces flicker — recommended)</span></p>
-  <pre id="antiflicker-code"></pre>
-  <button type="button" class="btn-ghost" onclick="copyAntiflicker('antiflicker-copied')">Copy</button>
-  <span id="antiflicker-copied" class="hint"></span>
-  <p class="hint" style="margin-top:16px; font-weight:700; color:var(--ink);">2. Add just before &lt;/body&gt;</p>
-  <pre id="snippet-code"></pre>
-  <button type="button" class="btn-ghost" onclick="copySnippet('snippet-copied')">Copy</button>
-  <span id="snippet-copied" class="hint"></span>
+<div id="snippet-popover" class="snippet-popover" role="dialog" aria-labelledby="snippet-title">
+  <div class="modal-head">
+    <h2 id="snippet-title">Install snippet</h2>
+    <button type="button" class="modal-close" id="snippet-close" aria-label="Close">✕</button>
+  </div>
+  <div class="snippet-body">
+    <p class="hint" style="margin-top:0; font-weight:700; color:var(--ink);">1. Add to &lt;head&gt; <span class="hint" style="font-weight:400;">(reduces flicker — recommended)</span></p>
+    <pre id="antiflicker-code"></pre>
+    <button type="button" class="btn-ghost" onclick="copyAntiflicker('antiflicker-copied')">Copy</button>
+    <span id="antiflicker-copied" class="hint"></span>
+    <p class="hint" style="margin-top:16px; font-weight:700; color:var(--ink);">2. Add just before &lt;/body&gt;</p>
+    <pre id="snippet-code"></pre>
+    <button type="button" class="btn-ghost" onclick="copySnippet('snippet-copied')">Copy</button>
+    <span id="snippet-copied" class="hint"></span>
+  </div>
 </div>
 
 <div id="clients-modal" class="modal-backdrop">
-  <div class="modal-box">
-    <div class="modal-box-header">
-      <h2 style="margin:0;">Clients</h2>
-      <button type="button" class="modal-close-btn" onclick="closeClientsModal()" aria-label="Close">✕</button>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="clients-title">
+    <div class="modal-head">
+      <h2 id="clients-title">Clients</h2>
+      <button type="button" class="modal-close" id="clients-close" aria-label="Close">✕</button>
     </div>
-    <p class="hint">Create a login, then assign that client on an experiment’s Settings tab. They only see their own results at <code id="client-login-url"></code>.</p>
-    <details>
-      <summary>Add a client</summary>
-      <div class="accordion-body">
-        <label for="new-client-name">Display name</label>
-        <input id="new-client-name" placeholder="Can't Say That?">
-        <label for="new-client-username">Username</label>
-        <input id="new-client-username" placeholder="cantsaythat">
-        <label for="new-client-password">Password</label>
-        <input id="new-client-password" type="password" placeholder="At least 8 characters">
-        <div style="margin-top:12px;"><button type="button" onclick="createClient()">Create client</button></div>
-        <p id="client-result" class="hint"></p>
-        <div id="new-client-credentials"></div>
-      </div>
-    </details>
-    <div id="clients-list" style="margin-top:12px;"></div>
+    <div class="modal-body">
+      <p class="hint">Create a login, then assign that client on an experiment’s Settings tab. They only see their own results at <code id="client-login-url"></code>.</p>
+      <details>
+        <summary>Add a client</summary>
+        <div class="accordion-body">
+          <label for="new-client-name">Display name</label>
+          <input id="new-client-name" placeholder="Can't Say That?">
+          <label for="new-client-username">Username</label>
+          <input id="new-client-username" placeholder="cantsaythat">
+          <label for="new-client-password">Password</label>
+          <input id="new-client-password" type="password" placeholder="At least 8 characters">
+          <div style="margin-top:12px;"><button type="button" onclick="createClient()">Create client</button></div>
+          <p id="client-result" class="hint"></p>
+          <div id="new-client-credentials"></div>
+        </div>
+      </details>
+      <div id="clients-list" style="margin-top:12px;"></div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn-ghost" id="clients-done">Done</button>
+    </div>
   </div>
 </div>
 
@@ -533,7 +515,7 @@ async function applyRoute() {
   if (expMatch) {
     showPage('page-detail');
     setNav('page-home');
-    setTitle('Pivit — Experiment');
+    setTitle('pivitlab — Experiment');
     await openExperiment(expMatch[1], expMatch[2] || 'overview', { token });
     return;
   }
@@ -541,15 +523,15 @@ async function applyRoute() {
   const page = pages[hash] || 'page-home';
   showPage(page);
   setNav(page);
-  if (page === 'page-home') { setTitle('Pivit — Experiments'); loadExperimentList(); }
+  if (page === 'page-home') { setTitle('pivitlab — Experiments'); loadExperimentList(); }
   if (page === 'page-create') {
-    setTitle('Pivit — Create experiment');
+    setTitle('pivitlab — Create experiment');
     if (!experimentsLoaded) await loadExperimentList();
     if (token !== routeToken) return;
     renderWizard();
   }
-  if (page === 'page-preview') setTitle('Pivit — Preview');
-  if (page === 'page-status') setTitle('Pivit — Start & pause');
+  if (page === 'page-preview') setTitle('pivitlab — Preview');
+  if (page === 'page-status') setTitle('pivitlab — Start & pause');
   if (token !== routeToken) return;
 }
 
@@ -568,15 +550,42 @@ window.addEventListener('hashchange', () => applyRoute());
 
 // --- Clients ---
 
+let clientsReturnFocus = null;
+
+function syncModalScrollLock() {
+  const clientsOpen = document.getElementById('clients-modal').classList.contains('active');
+  const pop = document.getElementById('snippet-popover');
+  const snippetSheet = pop.classList.contains('open') && pop.classList.contains('is-sheet');
+  document.body.classList.toggle('modal-open', clientsOpen || snippetSheet);
+}
+
 function openClientsModal() {
+  clientsReturnFocus = document.activeElement;
   document.getElementById('clients-modal').classList.add('active');
+  syncModalScrollLock();
+  const closeBtn = document.getElementById('clients-close');
+  if (closeBtn) closeBtn.focus();
   loadClients();
 }
 function closeClientsModal() {
   document.getElementById('clients-modal').classList.remove('active');
+  syncModalScrollLock();
+  const back = clientsReturnFocus;
+  clientsReturnFocus = null;
+  if (back && typeof back.focus === 'function') {
+    try { back.focus(); } catch (e) {}
+  }
 }
 document.getElementById('clients-modal').addEventListener('click', (e) => {
   if (e.target.id === 'clients-modal') closeClientsModal();
+});
+document.getElementById('clients-close').addEventListener('click', closeClientsModal);
+document.getElementById('clients-done').addEventListener('click', closeClientsModal);
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const pop = document.getElementById('snippet-popover');
+  if (pop.classList.contains('open')) { closeSnippetPopover(); return; }
+  if (document.getElementById('clients-modal').classList.contains('active')) closeClientsModal();
 });
 
 function fillClientSelect(select, blankLabel, selected) {
@@ -609,12 +618,15 @@ async function loadClients() {
     listEl.innerHTML = '<p class="hint">No clients yet — add one above.</p>';
     return;
   }
-  listEl.innerHTML = clientsCache.map((c) => `
-    <div class="variant-card" style="flex-direction:column; align-items:stretch;">
-      <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
+  listEl.innerHTML = clientsCache.map((c) => {
+    const count = Number(c.experiment_count) || 0;
+    const assigned = `${count} experiment${count === 1 ? '' : 's'} assigned`;
+    return `
+    <div class="client-card">
+      <div class="client-card-main">
         <div>
           <strong>${UI.escapeHtml(c.name)}</strong>
-          <div class="vc-meta">username: ${UI.escapeHtml(c.username)} · ${c.experiment_count} experiment(s) assigned</div>
+          <div class="vc-meta">username: ${UI.escapeHtml(c.username)} · ${assigned}</div>
         </div>
         <div class="vc-actions">
           <button type="button" class="btn-ghost" data-client-action="rename" data-id="${c.id}" data-name="${UI.escapeHtml(c.name)}">Rename</button>
@@ -622,16 +634,16 @@ async function loadClients() {
           <button type="button" class="btn-danger" data-client-action="delete" data-id="${c.id}">Delete</button>
         </div>
       </div>
-      <div id="reset-pw-row-${c.id}" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
-        <div style="display:flex; gap:8px; align-items:center;">
-          <input type="password" id="reset-pw-input-${c.id}" placeholder="New password (min 8 characters)" style="flex:1; margin:0;">
+      <div id="reset-pw-row-${c.id}" class="reset-pw-row" style="display:none;">
+        <div class="reset-pw-actions">
+          <input type="password" id="reset-pw-input-${c.id}" placeholder="New password (min 8 characters)">
           <button type="button" data-client-action="save-password" data-id="${c.id}" data-username="${UI.escapeHtml(c.username)}">Save</button>
           <button type="button" class="btn-ghost" data-client-action="reset" data-id="${c.id}">Cancel</button>
         </div>
         <div id="reset-pw-credentials-${c.id}" style="margin-top:8px;"></div>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 document.getElementById('clients-list').addEventListener('click', (e) => {
@@ -747,7 +759,7 @@ async function loadExperimentList() {
   if (!result.ok) {
     msgEl.className = 'error-msg';
     msgEl.textContent = `Error: ${result.message}`;
-    table.style.display = 'none';
+    table.classList.remove('is-visible');
     return;
   }
   const experiments = result.data.experiments || [];
@@ -757,7 +769,7 @@ async function loadExperimentList() {
   if (experiments.length === 0) {
     msgEl.className = 'hint';
     msgEl.textContent = 'No experiments yet. Create one to get a draft and an install snippet.';
-    table.style.display = 'none';
+    table.classList.remove('is-visible');
     document.getElementById('exp-list-body').innerHTML = '';
     return;
   }
@@ -766,16 +778,16 @@ async function loadExperimentList() {
   tbody.innerHTML = experiments.map((exp) => {
     const client = exp.client_name || '—';
     return `<tr>
-      <td><button type="button" class="name-btn" data-open="${exp.id}">${UI.escapeHtml(exp.name)}</button></td>
-      <td><span class="badge ${STATUS_CLASS[exp.status] || 'paused'}">${UI.escapeHtml(exp.status)}</span></td>
-      <td class="mono" title="${UI.escapeHtml(exp.url_match || '')}">${UI.escapeHtml(UI.shortUrl(exp.url_match))}${noDomainBadge(exp)}</td>
-      <td>${UI.escapeHtml(client)}</td>
-      <td>${exp.variant_count}</td>
-      <td class="hint" data-signal-for="${exp.id}">${exp.status === 'draft' ? 'No data yet' : '…'}</td>
-      <td><button type="button" class="btn-ghost" data-open="${exp.id}">Open</button></td>
+      <td class="card-title" data-label="Name"><button type="button" class="name-btn" data-open="${exp.id}">${UI.escapeHtml(exp.name)}</button></td>
+      <td class="card-status" data-label="Status"><span class="badge ${STATUS_CLASS[exp.status] || 'paused'}">${UI.escapeHtml(exp.status)}</span></td>
+      <td class="mono" data-label="URL match" title="${UI.escapeHtml(exp.url_match || '')}">${UI.escapeHtml(UI.shortUrl(exp.url_match))}${noDomainBadge(exp)}</td>
+      <td data-label="Client">${UI.escapeHtml(client)}</td>
+      <td data-label="Variants">${exp.variant_count}</td>
+      <td class="hint" data-label="Signal" data-signal-for="${exp.id}">${exp.status === 'draft' ? 'No data yet' : '…'}</td>
+      <td class="card-action" data-label="Open"><button type="button" class="btn-ghost" data-open="${exp.id}">Open</button></td>
     </tr>`;
   }).join('');
-  table.style.display = 'table';
+  table.classList.add('is-visible');
   fillSignals(experiments);
 }
 
@@ -863,7 +875,7 @@ async function openExperiment(id, tab, { token, force } = {}) {
   currentTab = tab || 'overview';
   renderDetail();
   showDetailTab(currentTab);
-  setTitle(`Pivit — ${currentDetail.name}`);
+  setTitle(`pivitlab — ${currentDetail.name}`);
 }
 
 async function reloadDetail() {
@@ -976,11 +988,14 @@ function renderDetail() {
             <option value="returning">Returning only</option>
           </select>
           <p id="results-msg" class="hint"></p>
-          <table id="results-table" style="display:none">
-            <thead><tr><th>Variant</th><th>Visitors</th><th>New</th><th>Returning</th><th>Clicks</th><th>Conversions</th><th>Rate</th></tr></thead>
-            <tbody id="results-body"></tbody>
-          </table>
-          <div class="chart-wrap"><canvas id="rate-chart" style="display:none"></canvas></div>
+          <div class="table-scroll" tabindex="0" role="region" aria-label="Results by variant (scrolls sideways)">
+            <table id="results-table" style="display:none">
+              <thead><tr><th>Variant</th><th class="num">Visitors</th><th class="num">New</th><th class="num">Returning</th><th class="num">Clicks</th><th class="num">Conversions</th><th class="num">Rate</th></tr></thead>
+              <tbody id="results-body"></tbody>
+            </table>
+          </div>
+          <p class="hint table-scroll-hint">Swipe the table sideways for more columns.</p>
+          <div class="chart-wrap rate-wrap" id="rate-chart-wrap" hidden><canvas id="rate-chart"></canvas></div>
           <div style="margin-top:16px;" class="inline-actions">
             <span class="hint">Trend:</span>
             <button type="button" class="btn-ghost trend-toggle-btn" id="trend-mode-cumulative" data-action="trend" data-mode="cumulative">Cumulative</button>
@@ -1000,10 +1015,13 @@ function renderDetail() {
             <div class="accordion-body hint">Each variant’s true conversion rate is treated as uncertain, and that range narrows as data comes in. Probability best is the chance that variant is genuinely ahead, not just lucky.</div>
           </details>
           <div id="bayesian-warning" class="hint" style="display:none; color:var(--warn); font-weight:650;"></div>
-          <table id="bayesian-table" style="display:none">
-            <thead><tr><th>Variant</th><th>Visitors</th><th>Conversions</th><th>Est. rate (95% range)</th><th>Probability best</th></tr></thead>
-            <tbody id="bayesian-body"></tbody>
-          </table>
+          <div class="table-scroll" tabindex="0" role="region" aria-label="Bayesian analysis (scrolls sideways)">
+            <table id="bayesian-table" style="display:none">
+              <thead><tr><th>Variant</th><th class="num">Visitors</th><th class="num">Conversions</th><th class="num">Est. rate (95% range)</th><th class="num">Probability best</th></tr></thead>
+              <tbody id="bayesian-body"></tbody>
+            </table>
+          </div>
+          <p class="hint table-scroll-hint">Swipe the table sideways for more columns.</p>
         </div>
       </div>
     </div>
@@ -1055,6 +1073,9 @@ function showDetailTab(tab) {
     const on = btn.dataset.tab === currentTab;
     btn.classList.toggle('active', on);
     btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    if (on && typeof btn.scrollIntoView === 'function') {
+      btn.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+    }
   });
   if (currentTab === 'overview') loadOverview();
   if (currentTab === 'results') loadResults();
@@ -1165,7 +1186,7 @@ function renderVariantRows() {
   mount.innerHTML = variants.map((v) => `
     <div class="var-row">
       <div class="grow">
-        <input type="text" value="${UI.escapeHtml(v.name)}" data-var-name="${v.id}" aria-label="Variant name" style="max-width:240px;">
+        <input type="text" class="var-name" value="${UI.escapeHtml(v.name)}" data-var-name="${v.id}" aria-label="Variant name">
         <span class="split-input"><input type="number" value="${Number(v.traffic_split)}" data-var-split="${v.id}" aria-label="Traffic split">%</span>
         <span class="badge ${v.enabled ? 'live' : 'paused'}">${v.enabled ? 'enabled' : 'paused'}</span>
       </div>
@@ -1470,10 +1491,16 @@ function renderTrendChart() {
   cumBtn.classList.toggle('active', trendMode === 'cumulative');
   dayBtn.classList.toggle('active', trendMode === 'daily');
   if (trendChart) trendChart.destroy();
-  if (currentTrendSeries.length === 0) { trendCanvas.style.display = 'none'; trendCanvas.parentElement.style.height = '0'; return; }
+  if (currentTrendSeries.length === 0) {
+    trendCanvas.style.display = 'none';
+    trendCanvas.parentElement.classList.remove('has-data');
+    trendCanvas.parentElement.style.height = '';
+    return;
+  }
   const { labels, datasets } = computeTrendDatasets(currentTrendSeries, trendMode);
   trendCanvas.style.display = 'block';
-  trendCanvas.parentElement.style.height = '340px';
+  trendCanvas.parentElement.style.height = '';
+  trendCanvas.parentElement.classList.add('has-data');
   trendChart = new Chart(trendCanvas, {
     type: 'line',
     data: { labels, datasets },
@@ -1501,6 +1528,10 @@ function showResultsGate(text) {
   if (live) live.hidden = true;
   const label = document.getElementById('results-gate-text');
   if (label) label.textContent = text;
+  const rateWrap = document.getElementById('rate-chart-wrap');
+  if (rateWrap) rateWrap.hidden = true;
+  const trendCanvas = document.getElementById('trend-chart');
+  if (trendCanvas && trendCanvas.parentElement) trendCanvas.parentElement.classList.remove('has-data');
   if (rateChart) { rateChart.destroy(); rateChart = null; }
   if (trendChart) { trendChart.destroy(); trendChart = null; }
   currentTrendSeries = [];
@@ -1536,11 +1567,12 @@ async function loadResults() {
   const msgEl = document.getElementById('results-msg');
   msgEl.textContent = '';
   const tbody = document.getElementById('results-body');
-  tbody.innerHTML = results.map((r) => `<tr><td>${UI.escapeHtml(r.variant_name)}</td><td>${r.visitors}</td><td>${r.new_visitors}</td><td>${r.returning_visitors}</td><td>${r.clicks}</td><td>${r.conversions}</td><td>${r.conversion_rate}%</td></tr>`).join('');
+  tbody.innerHTML = results.map((r) => `<tr><td>${UI.escapeHtml(r.variant_name)}</td><td class="num">${r.visitors}</td><td class="num">${r.new_visitors}</td><td class="num">${r.returning_visitors}</td><td class="num">${r.clicks}</td><td class="num">${r.conversions}</td><td class="num">${r.conversion_rate}%</td></tr>`).join('');
   document.getElementById('results-table').style.display = 'table';
 
+  const rateWrap = document.getElementById('rate-chart-wrap');
   const rateCanvas = document.getElementById('rate-chart');
-  rateCanvas.style.display = results.length ? 'block' : 'none';
+  if (rateWrap) rateWrap.hidden = !results.length;
   if (rateChart) rateChart.destroy();
   if (results.length && window.Chart) {
     rateChart = new Chart(rateCanvas, {
@@ -1551,6 +1583,7 @@ async function loadResults() {
       },
       options: {
         responsive: true,
+        maintainAspectRatio: false,
         plugins: { title: { display: true, text: 'Conversion rate by variant', color: '#e8e9f0' }, legend: { labels: { color: '#e8e9f0' } } },
         scales: {
           x: { ticks: { color: '#9398ab' }, grid: { color: 'rgba(255,255,255,0.06)' } },
@@ -1596,10 +1629,10 @@ async function loadResults() {
     document.getElementById('bayesian-body').innerHTML = stats.map((s) => `
       <tr>
         <td>${UI.escapeHtml(s.variant_name)}${s.probability_best >= 90 ? ' ★' : ''}</td>
-        <td>${s.visitors}</td>
-        <td>${s.conversions}</td>
-        <td>${s.posterior_mean}% <span class="hint">(${s.ci_low}%–${s.ci_high}%)</span></td>
-        <td><strong>${s.probability_best}%</strong></td>
+        <td class="num">${s.visitors}</td>
+        <td class="num">${s.conversions}</td>
+        <td class="num">${s.posterior_mean}% <span class="hint">(${s.ci_low}%–${s.ci_high}%)</span></td>
+        <td class="num"><strong>${s.probability_best}%</strong></td>
       </tr>
     `).join('');
     bayesianTable.style.display = 'table';
@@ -1738,14 +1771,7 @@ async function renderWizard() {
     });
   }
   if (wizard.step === 5) renderWizardSummary();
-  ['wizard-antiflicker-code', 'antiflicker-code'].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = antiflickerSnippet();
-  });
-  ['wizard-snippet-code', 'snippet-code'].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = snippetTag();
-  });
+  fillInstallSnippets();
 }
 
 function renderWizardVariants() {
@@ -1753,7 +1779,7 @@ function renderWizardVariants() {
   mount.innerHTML = wizard.variants.map((row, index) => {
     return `<div class="var-row">
       <div class="grow">
-        <input type="text" value="${UI.escapeHtml(row.name)}" data-wiz-name="${index}" aria-label="Variant name" ${index === 0 ? 'readonly' : ''}>
+        <input type="text" class="var-name" value="${UI.escapeHtml(row.name)}" data-wiz-name="${index}" aria-label="Variant name" ${index === 0 ? 'readonly' : ''}>
         <span class="split-input"><input type="number" value="${Number(row.split)}" data-wiz-split="${index}" aria-label="Traffic split">%</span>
       </div>
       <div class="vc-actions">
@@ -2058,8 +2084,12 @@ document.getElementById('wizard-variants').addEventListener('click', async (e) =
     edit.disabled = false;
     if (!ok) return;
     wizardMsg('');
-    await makeEdits(wizard.expId, wizard.variants[index].id, edit, wizard.pageUrl);
+    const opened = await makeEdits(wizard.expId, wizard.variants[index].id, edit, wizard.pageUrl);
     renderWizardVariants();
+    if (opened) {
+      const again = document.querySelector(`[data-wiz-edit="${index}"]`);
+      if (again) showEditingSignpost(again);
+    }
   }
   if (remove) {
     const index = Number(remove.dataset.wizRemove);
@@ -2206,16 +2236,44 @@ document.getElementById('manage-exp-id').addEventListener('change', (e) => {
   if (e.target.value) loadManageVariants();
 });
 
+const EDITING_SIGNPOST_KEY = 'pivit_signpost_dismissed_editing';
+
+function showEditingSignpost(btn) {
+  if (!btn) return;
+  let matches = false;
+  try { matches = window.matchMedia('(max-width: 860px), (pointer: coarse)').matches; } catch (e) {}
+  let stored = null;
+  try { stored = localStorage.getItem(EDITING_SIGNPOST_KEY); } catch (e) {}
+  if (!UI.shouldShowSignpost(matches, stored)) return;
+  const row = btn.closest('.var-row, .variant-card');
+  if (!row || (row.nextElementSibling && row.nextElementSibling.classList.contains('desktop-signpost'))) return;
+  const note = document.createElement('div');
+  note.className = 'desktop-signpost show';
+  note.dataset.signpost = 'editing';
+  note.setAttribute('role', 'note');
+  note.innerHTML = '<p><strong>Making edits works best on desktop.</strong> The editor has opened in a new tab, but it needs a mouse and a wide screen. Results, starting and pausing work fine here.</p><button type="button" class="btn-ghost" data-dismiss-signpost>Got it</button>';
+  row.insertAdjacentElement('afterend', note);
+}
+
+document.addEventListener('click', (e) => {
+  const dismiss = e.target.closest('[data-dismiss-signpost]');
+  if (!dismiss) return;
+  try { localStorage.setItem(EDITING_SIGNPOST_KEY, '1'); } catch (err) {}
+  document.querySelectorAll('.desktop-signpost').forEach((el) => el.remove());
+});
+
 async function makeEdits(expId, variantId, btn, pageUrl) {
   const url = (pageUrl || (document.getElementById('manage-page-url') || {}).value || '').trim();
-  if (!url) { alert('Enter a page URL first.'); return; }
+  if (!url) { alert('Enter a page URL first.'); return false; }
+  showEditingSignpost(btn);
   if (btn) btn.disabled = true;
   const result = await callApi(`/api/experiments/${expId}/variants/${variantId}/edit-link`, {
     method: 'POST', headers: authHeaders(), body: JSON.stringify({ page_url: url }),
   });
   if (btn) btn.disabled = false;
-  if (!result.ok) { alert(`Error: ${result.message}`); return; }
+  if (!result.ok) { alert(`Error: ${result.message}`); return false; }
   window.open(result.data.edit_url, '_blank');
+  return true;
 }
 
 async function loadManageVariants() {
@@ -2333,21 +2391,82 @@ function copyText(text, statusId) {
 function copySnippet(statusId) { copyText(snippetTag(), statusId || 'snippet-copied'); }
 function copyAntiflicker(statusId) { copyText(antiflickerSnippet(), statusId || 'antiflicker-copied'); }
 
+function fillInstallSnippets() {
+  const anti = antiflickerSnippet();
+  const tag = snippetTag();
+  [['antiflicker-code', anti], ['wizard-antiflicker-code', anti], ['snippet-code', tag], ['wizard-snippet-code', tag]].forEach(([id, text]) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  });
+}
+
+let snippetReturnFocus = null;
+
+function snippetIsPhone() {
+  try { return window.matchMedia('(max-width: 640px)').matches; } catch (e) { return false; }
+}
+
+function closeSnippetPopover() {
+  const pop = document.getElementById('snippet-popover');
+  pop.classList.remove('open', 'is-sheet');
+  pop.style.left = '';
+  pop.style.top = '';
+  syncModalScrollLock();
+  const back = snippetReturnFocus;
+  snippetReturnFocus = null;
+  if (back && typeof back.focus === 'function') {
+    try { back.focus(); } catch (e) {}
+  }
+}
+
+function openSnippetPopover(toggle) {
+  const pop = document.getElementById('snippet-popover');
+  fillInstallSnippets();
+  snippetReturnFocus = toggle || null;
+  pop.classList.add('open');
+  pop.classList.remove('is-sheet');
+  pop.style.left = '';
+  pop.style.top = '';
+  if (snippetIsPhone()) {
+    pop.classList.add('is-sheet');
+    syncModalScrollLock();
+    const closeBtn = document.getElementById('snippet-close');
+    if (closeBtn) closeBtn.focus();
+    return;
+  }
+  syncModalScrollLock();
+  pop.style.left = '0px';
+  pop.style.top = '0px';
+  const width = pop.offsetWidth;
+  const height = pop.offsetHeight;
+  const rect = (toggle || pop).getBoundingClientRect();
+  const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+  let top = rect.bottom + 8;
+  const maxTop = Math.max(12, window.innerHeight - height - 12);
+  if (top > maxTop) top = maxTop;
+  pop.style.left = left + 'px';
+  pop.style.top = top + 'px';
+}
+
 document.addEventListener('click', (e) => {
   const pop = document.getElementById('snippet-popover');
+  if (e.target.closest('#snippet-close')) { closeSnippetPopover(); return; }
   const toggle = e.target.closest('[data-snippet-toggle]');
   if (toggle) {
     e.preventDefault();
-    if (pop.style.display === 'block') { pop.style.display = 'none'; return; }
-    const rect = toggle.getBoundingClientRect();
-    pop.style.display = 'block';
-    const width = pop.offsetWidth;
-    const left = Math.min(rect.left, window.innerWidth - width - 12);
-    pop.style.left = Math.max(12, left) + 'px';
-    pop.style.top = (rect.bottom + 8) + 'px';
+    if (pop.classList.contains('open')) { closeSnippetPopover(); return; }
+    openSnippetPopover(toggle);
     return;
   }
-  if (pop.style.display === 'block' && !pop.contains(e.target)) pop.style.display = 'none';
+  if (pop.classList.contains('open') && !pop.classList.contains('is-sheet') && !pop.contains(e.target)) closeSnippetPopover();
+});
+
+window.addEventListener('resize', () => {
+  const pop = document.getElementById('snippet-popover');
+  if (!pop.classList.contains('open')) return;
+  const phone = snippetIsPhone();
+  if (phone === pop.classList.contains('is-sheet')) return;
+  if (snippetReturnFocus) openSnippetPopover(snippetReturnFocus);
 });
 
 fetch('/snippet/picker-bookmarklet.js').then((r) => r.text()).then((src) => {
