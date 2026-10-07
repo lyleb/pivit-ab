@@ -4,7 +4,7 @@
      may also show on touch screens wider than this via (pointer: coarse).
    - ≤640px (phone): entity lists become cards, comparison tables scroll sideways,
      modals become full-height sheets.
-   The logo file is named only here, so a later SVG swap is one line. */
+   The logo file is named only here. */
 
 :root {
   --ink: #e8e9f0;
@@ -24,8 +24,8 @@
   --ok: #8ee4c7;
   --radius: 12px;
   --tap: 44px;
-  --logo-white: url('/assets/pivitlab-logo-white.png'); /* later: url('/assets/pivitlab-logo-white.svg') */
-  --logo-ratio: 3.01; /* width ÷ height; change only if the SVG differs */
+  --logo-white: url('/assets/pivitlab-logo-white.svg');
+  --logo-ratio: 1963.6 / 461.3; /* tightly cropped wordmark, about 4.26:1 */
   font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
