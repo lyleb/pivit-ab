@@ -1,5 +1,5 @@
 /**
- * Pivit visual editor — v0.4 (Edit element with HTML/CSS/JS, Remove, Duplicate,
+ * Pivit visual editor — v0.5 (similar-element selector, custom CSS, HTML/CSS/JS)
  * Add above/below, Set as goal, plus Changes and Goals lists)
  *
  * Loaded by ab.js only when it sees ?ab_edit=<variant_id>&token=<token> in the
@@ -84,7 +84,7 @@
       case 'hide': return `Hide ${sel}`;
       case 'show': return `Show ${sel}`;
       case 'style': return `Inline styles on ${sel}`;
-      case 'stylesheet': return sel ? `Add CSS rules (for ${sel})` : 'Add CSS rules';
+      case 'stylesheet': return sel ? `Add CSS rules (for ${sel})` : 'Custom CSS for this variant';
       case 'replace': return `Replace element ${sel}`;
       case 'attr': return `Set ${change.attr || 'attribute'} on ${sel}`;
       case 'js': return `Custom JS on ${sel}`;
@@ -117,7 +117,10 @@
   function cssEscape(str) {
     return window.CSS && CSS.escape ? CSS.escape(str) : str.replace(/([^a-zA-Z0-9_-])/g, '\\$1');
   }
+  // The visitor snippet owns this, so a selector confirmed here is the one
+  // that gets saved and applied. The copy below is only if that script is missing.
   function getSelector(el) {
+    if (window.PivitRuntime) return window.PivitRuntime.uniqueSelector(el);
     if (el.id) return '#' + cssEscape(el.id);
     const path = [];
     let node = el;
@@ -197,7 +200,11 @@
 
   // --- UI: a single floating root element, all children styled inline to stay
   // insulated from whatever CSS the host page already has. ---
-  let root, toolbar, statusEl, countEl, actionPopup, panelEl, changesListEl, goalsListEl;
+  let root, toolbar, statusEl, countEl, actionPopup, panelEl, changesListEl, goalsListEl, customCssBtn;
+  let editorApplier = null;
+  let scopePanelEl = null;
+  let similarHits = [];
+  const SIMILAR_CLASS = 'pivit-similar-hit';
 
   // Deliberately NOT `style.all = 'initial'` — that resets `display` to CSS's
   // initial value (inline), not a div's normal block default, which silently
@@ -249,6 +256,13 @@
     pickBtn.style.width = '100%';
     pickBtn.id = 'pivit-pick-btn';
     toolbar.appendChild(pickBtn);
+
+    customCssBtn = makeButton('Custom CSS', '#f0f0f7', () => openCustomCssPanel());
+    customCssBtn.style.width = '100%';
+    customCssBtn.style.color = COLORS.ink;
+    customCssBtn.style.marginTop = '6px';
+    customCssBtn.id = 'pivit-custom-css';
+    toolbar.appendChild(customCssBtn);
 
     // --- Changes list (collapsible) ---
     const listToggle = makeButton('Changes (0)', '#f0f0f7', toggleChangesList);
@@ -444,6 +458,9 @@
 
   function editChangeAtIndex(idx) {
     const change = allChanges[idx];
+    // Variant-level custom CSS has no element selector. Element stylesheet
+    // entries still open with the HTML / CSS / JS set.
+    if (change.type === 'stylesheet' && !String(change.selector || '').trim()) { openCustomCssPanel(); return; }
     // The replace / stylesheet / js entries made together by "Edit element" are
     // edited together too, so tweaking one part never means re-adding the others.
     if (EDIT_SET_TYPES.indexOf(change.type) !== -1) { openEditSetPanel(null, change.selector, idx); return; }
@@ -461,8 +478,13 @@
     });
   }
 
+  function variantStylesheetIndex() {
+    return allChanges.findIndex((c) => c && c.type === 'stylesheet' && !String(c.selector || '').trim());
+  }
+
   function refreshToolbarState() {
     countEl.textContent = isDirty() ? '● Unsaved changes' : '✓ All changes saved';
+    if (customCssBtn) customCssBtn.textContent = variantStylesheetIndex() === -1 ? 'Custom CSS' : 'Edit custom CSS';
     renderChangesList();
     renderGoalsList();
   }
@@ -530,8 +552,14 @@
     e.preventDefault();
     e.stopPropagation();
     const target = e.target;
+    const x = e.clientX;
+    const y = e.clientY;
     stopPicking();
-    showActionPopup(target, e.clientX, e.clientY);
+    if (!window.PivitRuntime) {
+      showActionPopup(target, x, y, getSelector(target), 'element');
+      return;
+    }
+    showScopePanel(target, x, y);
   }
 
   // --- Quick-actions popup ---
@@ -540,25 +568,242 @@
     if (actionPopup) { actionPopup.remove(); actionPopup = null; }
   }
 
-  function showActionPopup(el, x, y) {
+  function pageQuery(selector) {
+    return Array.from(document.querySelectorAll(selector));
+  }
+
+  function ensureSimilarStyle() {
+    if (document.getElementById('pivit-similar-style')) return;
+    const style = document.createElement('style');
+    style.id = 'pivit-similar-style';
+    style.textContent = '.pivit-similar-hit{outline:2px solid #02DEB5 !important;outline-offset:2px !important;}';
+    document.head.appendChild(style);
+  }
+
+  function clearSimilarHits() {
+    similarHits.forEach((el) => { if (el.classList) el.classList.remove(SIMILAR_CLASS); });
+    similarHits = [];
+  }
+
+  function closeScopePanel() {
+    clearSimilarHits();
+    if (scopePanelEl) { scopePanelEl.remove(); scopePanelEl = null; }
+  }
+
+  function matchesFor(selector) {
+    let nodes;
+    try { nodes = Array.from(document.querySelectorAll(selector)); }
+    catch (e) { return { valid: false, nodes: [] }; }
+    nodes = nodes.filter((n) => !(root && root.contains(n)) && !(scopePanelEl && scopePanelEl.contains(n)));
+    return { valid: true, nodes };
+  }
+
+  function paintSimilarHits(nodes) {
+    clearSimilarHits();
+    nodes.slice(0, 200).forEach((el) => {
+      if (!el.classList) return;
+      el.classList.add(SIMILAR_CLASS);
+      similarHits.push(el);
+    });
+  }
+
+  function matchLabel(n) {
+    return n === 1 ? '1 element matches' : `${n} elements match`;
+  }
+
+  // After a pick: confirm a shared-class selector, or keep the positional one.
+  // The count and highlight follow whatever is in the field, including hand edits.
+  function showScopePanel(el, x, y) {
     closeActionPopup();
-    const selector = getSelector(el);
+    closeScopePanel();
+    ensureSimilarStyle();
+    const unique = getSelector(el);
+    const suggested = window.PivitRuntime.generaliseSelector(el, pageQuery);
+
+    scopePanelEl = document.createElement('div');
+    styleReset(scopePanelEl);
+    // Docked to the top-left so the highlighted matches stay visible behind it.
+    Object.assign(scopePanelEl.style, {
+      position: 'fixed', top: '16px', left: '16px',
+      zIndex: String(Z), background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: '12px',
+      boxShadow: '0 12px 40px rgba(19,23,35,0.25)', padding: '20px', width: '420px', maxWidth: '92vw',
+      maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', color: COLORS.ink, fontSize: '13px',
+    });
+    ['keydown', 'keyup', 'keypress'].forEach((evt) => scopePanelEl.addEventListener(evt, (e) => e.stopPropagation()));
+    document.body.appendChild(scopePanelEl);
+
+    const title = document.createElement('div');
+    styleReset(title);
+    title.style.fontWeight = '700';
+    title.style.fontSize = '15px';
+    title.textContent = 'Which elements should this change?';
+    scopePanelEl.appendChild(title);
+
+    const intro = document.createElement('div');
+    styleReset(intro);
+    Object.assign(intro.style, { fontSize: '12px', color: '#6b6f83', marginTop: '6px', lineHeight: '1.45' });
+    intro.textContent = 'The picked element has a positional selector, so a change would hit only that one spot. Similar elements — every NEW badge in a set, for example — usually share a class. Edit the selector if the count looks wrong.';
+    scopePanelEl.appendChild(intro);
+
+    const label = document.createElement('div');
+    styleReset(label);
+    Object.assign(label.style, { fontSize: '12px', fontWeight: '600', marginTop: '14px', marginBottom: '4px' });
+    label.textContent = 'Selector';
+    scopePanelEl.appendChild(label);
+
+    const input = document.createElement('input');
+    styleReset(input);
+    Object.assign(input.style, {
+      display: 'block', width: '100%', padding: '10px', border: `1px solid ${COLORS.border}`, borderRadius: '8px',
+      fontFamily: 'Menlo, Consolas, monospace', fontSize: '12px', color: COLORS.ink, background: '#fff',
+    });
+    input.id = 'pivit-similar-selector';
+    input.setAttribute('spellcheck', 'false');
+    input.value = suggested;
+    scopePanelEl.appendChild(input);
+
+    const count = document.createElement('div');
+    styleReset(count);
+    Object.assign(count.style, { fontSize: '22px', fontWeight: '700', color: COLORS.indigo, marginTop: '12px' });
+    count.id = 'pivit-similar-count';
+    scopePanelEl.appendChild(count);
+
+    const note = document.createElement('div');
+    styleReset(note);
+    Object.assign(note.style, { fontSize: '12px', color: '#6b6f83', marginTop: '4px', lineHeight: '1.4', minHeight: '18px' });
+    note.id = 'pivit-similar-note';
+    scopePanelEl.appendChild(note);
+
+    const hint = document.createElement('div');
+    styleReset(hint);
+    Object.assign(hint.style, { fontSize: '11px', color: '#6b6f83', marginTop: '8px', lineHeight: '1.4' });
+    hint.textContent = 'Generated and state classes are left out when a stable class remains. Classes that only appear on this element are left out when another class matches more than one. The highlight and the count update as you type.';
+    scopePanelEl.appendChild(hint);
+
+    function refresh() {
+      const found = matchesFor(input.value.trim());
+      if (!found.valid) {
+        clearSimilarHits();
+        count.textContent = 'Not a valid selector';
+        count.style.color = COLORS.danger;
+        note.textContent = 'That selector isn\'t valid. Check the brackets and colons, then try again.';
+        applyAllBtn.disabled = true;
+        applyAllBtn.style.opacity = '0.45';
+        return;
+      }
+      paintSimilarHits(found.nodes);
+      count.textContent = matchLabel(found.nodes.length);
+      count.style.color = COLORS.indigo;
+      applyAllBtn.disabled = false;
+      applyAllBtn.style.opacity = '1';
+      if (found.nodes.length === 0) note.textContent = 'Nothing matches yet. You can still use it if those elements load later.';
+      else if (found.nodes.length > 200) note.textContent = 'Highlighting the first 200. Narrow the selector if some of them should stay as they are.';
+      else if (found.nodes.length > 25) note.textContent = 'That\'s a lot of elements. Narrow the selector if some of them should stay as they are.';
+      else note.textContent = 'Highlighted on the page.';
+    }
+
+    const row = document.createElement('div');
+    styleReset(row);
+    Object.assign(row.style, { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px' });
+
+    const applyAllBtn = makeButton('Apply to all similar elements', COLORS.indigo, () => {
+      const selector = input.value.trim();
+      const found = matchesFor(selector);
+      if (!found.valid || !selector) return;
+      closeScopePanel();
+      showActionPopup(el, x, y, selector, 'similar');
+    });
+    applyAllBtn.id = 'pivit-similar-apply';
+    applyAllBtn.style.width = '100%';
+    applyAllBtn.style.whiteSpace = 'normal';
+
+    const justBtn = makeButton('Just this element', '#f0f0f7', () => {
+      closeScopePanel();
+      showActionPopup(el, x, y, unique, 'element');
+    });
+    justBtn.id = 'pivit-similar-one';
+    justBtn.style.width = '100%';
+    justBtn.style.color = COLORS.ink;
+    justBtn.style.whiteSpace = 'normal';
+
+    const cancelBtn = makeButton('Cancel', '#f0f0f7', () => closeScopePanel());
+    cancelBtn.style.width = '100%';
+    cancelBtn.style.color = '#6b6f83';
+
+    row.appendChild(applyAllBtn);
+    row.appendChild(justBtn);
+    row.appendChild(cancelBtn);
+    scopePanelEl.appendChild(row);
+
+    input.addEventListener('input', refresh);
+    refresh();
+    input.focus();
+  }
+
+  // Free-form CSS for this variant only. Stored as a stylesheet change with
+  // an empty selector — the snippet already injects that while the variant
+  // is active, and leaves every other variant alone.
+  function openCustomCssPanel() {
+    const idx = variantStylesheetIndex();
+    const existing = idx === -1 ? '' : (allChanges[idx].value || '');
+    showEditorPanel({
+      title: 'Custom CSS',
+      subtitle: 'This variant only',
+      fields: [{
+        key: 'css',
+        label: 'CSS',
+        value: existing,
+        hint: 'Free-form CSS, injected only while this variant is active. It does not apply to the other variants. Use !important to override the site, including colours set on the element itself. Clear the box and apply to remove it.',
+      }],
+      applyLabel: idx === -1 ? 'Apply' : 'Save change',
+      onApply: (v) => {
+        const css = v.css.trim();
+        if (idx === -1) {
+          if (!css) return { error: 'Add some CSS, or cancel.' };
+          recordAndApply({ type: 'stylesheet', selector: '', value: css });
+          return;
+        }
+        if (!css) {
+          allChanges.splice(idx, 1);
+          reloadAndReplay();
+          return;
+        }
+        if (css === String(allChanges[idx].value || '').trim()) return { error: 'Nothing changed yet.' };
+        allChanges[idx] = { ...allChanges[idx], type: 'stylesheet', selector: '', value: css };
+        reloadAndReplay();
+      },
+    });
+  }
+
+  function showActionPopup(el, x, y, selector, scope) {
+    closeActionPopup();
+    closeScopePanel();
+    selector = selector || getSelector(el);
 
     actionPopup = document.createElement('div');
     styleReset(actionPopup);
     Object.assign(actionPopup.style, {
-      position: 'fixed', left: Math.min(x, window.innerWidth - 200) + 'px', top: Math.min(y, window.innerHeight - 310) + 'px',
+      position: 'fixed', left: Math.min(x, window.innerWidth - 260) + 'px', top: Math.min(y, window.innerHeight - 340) + 'px',
       zIndex: String(Z), background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: '10px',
-      boxShadow: '0 8px 28px rgba(19,23,35,0.2)', padding: '8px', width: '190px', fontSize: '13px',
+      boxShadow: '0 8px 28px rgba(19,23,35,0.2)', padding: '8px', width: '240px', fontSize: '13px',
     });
     document.body.appendChild(actionPopup);
+
+    const cap = document.createElement('div');
+    styleReset(cap);
+    Object.assign(cap.style, {
+      fontFamily: 'Menlo, Consolas, monospace', fontSize: '10px', color: '#6b6f83',
+      wordBreak: 'break-all', padding: '4px 8px 8px', lineHeight: '1.35',
+    });
+    cap.textContent = selector;
+    actionPopup.appendChild(cap);
 
     const actions = [
       ['✎ Edit element', () => openEditElementPanel(el, selector)],
       ['⬆ Add above', () => openInsertPanel(selector, 'insert_before')],
       ['⬇ Add below', () => openInsertPanel(selector, 'insert_after')],
       ['⧉ Duplicate', () => { recordAndApply({ selector, type: 'duplicate' }); closeActionPopup(); }],
-      ['🎯 Set as goal', () => openGoalPanel(el)],
+      ['🎯 Set as goal', () => openGoalPanel(el, selector, scope)],
       ['🗑 Remove', () => { recordAndApply({ selector, type: 'remove' }); closeActionPopup(); }],
     ];
     actions.forEach(([label, handler]) => {
@@ -583,8 +828,19 @@
   // Records a NEW change (from a quick action, not from editing an existing
   // list entry) — applies directly to the live DOM, no reload needed, since
   // adding something new doesn't require reversing anything.
+  function ensureApplier() {
+    if (editorApplier || !window.PivitRuntime) return editorApplier;
+    editorApplier = window.PivitRuntime.createApplier(document, {
+      // Don't let a broad selector rewrite the editor chrome.
+      skip: (el) => !!(root && (el === root || root.contains(el))),
+    });
+    return editorApplier;
+  }
+
   function recordAndApply(change) {
-    applyChange(change);
+    const applier = ensureApplier();
+    if (applier) applier.applyOne(change, 'edit:' + allChanges.length);
+    else applyChange(change);
     allChanges.push(change);
     persistWorkingSet();
     refreshToolbarState();
@@ -836,11 +1092,16 @@
     return label;
   }
 
-  function openGoalPanel(pickedEl) {
+  function openGoalPanel(pickedEl, chosenSelector, scope) {
     // If the pick landed on the text/icon inside a button or link, the goal belongs on the
     // button or link itself — that's what visitors actually click.
     const clickable = pickedEl.closest('a, button, [role="button"], input[type="submit"], input[type="button"]') || pickedEl;
-    const selector = getSelector(clickable);
+    let selector = chosenSelector || getSelector(clickable);
+    if (clickable !== pickedEl) {
+      selector = (scope === 'similar' && window.PivitRuntime)
+        ? window.PivitRuntime.generaliseSelector(clickable, pageQuery)
+        : getSelector(clickable);
+    }
     const existing = allGoals.find((g) => (g.type || 'click') === 'click' && g.selector === selector);
     showEditorPanel({
       title: 'Set as click goal',
@@ -913,7 +1174,9 @@
       allChanges = persisted ? persisted.changes : serverChanges;
       allGoals = persisted && persisted.goals !== null ? persisted.goals : serverGoals;
 
-      allChanges.forEach(applyChange);
+      const applier = ensureApplier();
+      if (applier) applier.applyAll(allChanges, 'edit');
+      else allChanges.forEach(applyChange);
 
       buildToolbar();
       statusEl.textContent = `${experimentName} — ${variantName}`;
