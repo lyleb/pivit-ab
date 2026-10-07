@@ -1,19 +1,12 @@
 const session = require('express-session');
 const pgSession = require('connect-pg-simple')(session);
-const crypto = require('crypto');
 const { pool } = require('./db');
+const { getSessionSecret } = require('./session-secret');
 
-// express-session throws at construction time if secret is missing, which would
-// crash the whole server at boot — the same "fail loudly instead of silently
-// running unprotected" instinct as elsewhere in this app, but here it can't be
-// deferred to per-request time. Falling back to a random secret keeps the server
-// up (consistent with everything else here preferring availability), at the cost
-// of logging everyone out on every restart until SESSION_SECRET is actually set.
-let secret = process.env.SESSION_SECRET;
-if (!secret) {
-  console.error('[session] SESSION_SECRET is not set — using a random one-time secret. Sessions will not survive a server restart until you set SESSION_SECRET.');
-  secret = crypto.randomBytes(32).toString('hex');
-}
+// In production a missing or short SESSION_SECRET refuses to boot (see
+// src/session-secret.js). Outside production a dev-only fallback is used and
+// a warning is logged. The same secret signs edit and preview tokens.
+const secret = getSessionSecret();
 
 // Sessions are stored in Postgres (not memory), so logging in survives a Railway
 // redeploy — a plain in-memory session store would log everyone out on every

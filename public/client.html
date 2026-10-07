@@ -85,6 +85,8 @@
             <tbody id="results-body"></tbody>
           </table>
         </div>
+        <p class="hint">A visitor who converts more than once still counts as one conversion.</p>
+        <div id="goal-breakdown" hidden></div>
         <p class="hint table-scroll-hint">Swipe the table sideways for more columns.</p>
         <div class="chart-wrap rate-wrap" id="rate-chart-wrap"><canvas id="rate-chart"></canvas></div>
         <div class="trend-row" id="trend-toggle">
@@ -143,10 +145,7 @@ async function callApi(path) {
   let data = null;
   try { data = raw ? JSON.parse(raw) : null; } catch (e) {}
   if (!res.ok) {
-    const detail = data && (data.detail || data.error)
-      ? (data.detail ? `${data.error} — ${data.detail}` : data.error)
-      : (raw || `HTTP ${res.status}`);
-    console.error('Client API error', path, detail);
+    console.error('Client API error', path, res.status, data && data.error);
     return { ok: false, message: LOAD_ERROR };
   }
   return { ok: true, data };
@@ -155,6 +154,8 @@ async function callApi(path) {
 function hideLiveResults() {
   document.getElementById('results-live').hidden = true;
   document.getElementById('bayesian-summary').hidden = true;
+  const goals = document.getElementById('goal-breakdown');
+  if (goals) { goals.hidden = true; goals.innerHTML = ''; }
   document.getElementById('results-meta').textContent = '';
   if (rateChart) { rateChart.destroy(); rateChart = null; }
   if (trendChart) { trendChart.destroy(); trendChart = null; }
@@ -206,6 +207,13 @@ async function init() {
   });
 }
 
+function boundedRate(visitors, conversions) {
+  const v = Number(visitors) || 0;
+  const c = Number(conversions) || 0;
+  if (v <= 0 || c <= 0) return 0;
+  return +(Math.min(c, v) / v * 100).toFixed(2);
+}
+
 function computeTrendDatasets(series, mode) {
   const days = [...new Set(series.map((r) => r.day))].sort();
   const variantNames = [...new Set(series.map((r) => r.variant_name))];
@@ -214,14 +222,18 @@ function computeTrendDatasets(series, mode) {
   const datasets = variantNames.map((name, i) => {
     let cumVisitors = 0, cumConversions = 0;
     const dataByDay = days.map((day) => {
-      const row = series.find((r) => r.day === day && r.variant_name === name);
-      const v = row ? row.visitors : 0;
-      const c = row ? row.conversions : 0;
-      if (mode === 'cumulative') {
-        cumVisitors += v; cumConversions += c;
-        return cumVisitors > 0 ? +(cumConversions / cumVisitors * 100).toFixed(2) : 0;
+      const row = series.find((r) => r.day === day && r.variant_name === name) || {};
+      if (mode === 'cumulative' && row.cumulative_visitors != null) {
+        return boundedRate(row.cumulative_visitors, row.cumulative_conversions);
       }
-      return v > 0 ? +(c / v * 100).toFixed(2) : 0;
+      const v = Number(row.visitors) || 0;
+      const c = Number(row.conversions) || 0;
+      if (mode === 'cumulative') {
+        cumVisitors += v;
+        cumConversions += c;
+        return boundedRate(cumVisitors, cumConversions);
+      }
+      return boundedRate(v, c);
     });
     return { label: name, data: dataByDay, borderColor: palette[i % palette.length], backgroundColor: palette[i % palette.length], tension: 0.2, fill: false };
   });
@@ -270,6 +282,20 @@ function renderTrendChart() {
   });
 }
 
+function renderGoalBreakdown(goals, primaryGoal) {
+  const mount = document.getElementById('goal-breakdown');
+  if (!mount) return;
+  if (!goals || goals.length < 2) { mount.hidden = true; mount.innerHTML = ''; return; }
+  const blocks = goals.map((goal) => {
+    const rows = (goal.variants || []).map((item) => `<tr><td>${UI.escapeHtml(item.variant_name)}</td><td class="num">${item.conversions}</td><td class="num">${item.conversion_rate}%</td></tr>`).join('');
+    const primary = goal.primary || goal.key === primaryGoal ? ' · primary' : '';
+    return `<h3 style="margin:16px 0 8px;">${UI.escapeHtml(goal.label || goal.key)}${primary ? `<span class="hint">${UI.escapeHtml(primary)}</span>` : ''}</h3>
+      <div class="table-scroll"><table><thead><tr><th>Variant</th><th class="num">Conversions</th><th class="num">Rate</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }).join('');
+  mount.hidden = false;
+  mount.innerHTML = `<p class="hint">Each goal counts a visitor once.${primaryGoal ? ' The main table uses the primary goal.' : ' The main table counts a visitor once if they hit any goal.'}</p>${blocks}`;
+}
+
 document.getElementById('trend-mode-cumulative').addEventListener('click', () => { trendMode = 'cumulative'; renderTrendChart(); });
 document.getElementById('trend-mode-daily').addEventListener('click', () => { trendMode = 'daily'; renderTrendChart(); });
 
@@ -313,6 +339,7 @@ async function loadResults(exp) {
   else meta.textContent = `${count} visitors`;
 
   document.getElementById('results-live').hidden = false;
+  renderGoalBreakdown(result.data.goals, result.data.primary_goal);
   const tbody = document.getElementById('results-body');
   tbody.innerHTML = results.map((item) => `<tr>
     <td>${UI.escapeHtml(item.variant_name)}</td>

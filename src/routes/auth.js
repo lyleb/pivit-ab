@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const db = require('../db');
+const { publicServerError } = require('../public-error');
 const router = express.Router();
 
 // Basic brute-force throttle: an in-memory counter per (ip + purpose), reset on
@@ -54,7 +55,7 @@ router.post('/login', (req, res) => {
   const expected = process.env.ADMIN_API_KEY;
   if (!expected) {
     console.error('[auth] ADMIN_API_KEY is not set — refusing all logins.');
-    return res.status(500).json({ error: 'server misconfigured: ADMIN_API_KEY not set' });
+    return res.status(500).json({ error: "Sign-in isn't available right now. Please try again later." });
   }
 
   if (!password || !timingSafeStringEqual(password, expected)) {
@@ -65,10 +66,7 @@ router.post('/login', (req, res) => {
   clearThrottle(key);
   req.session.role = 'owner';
   req.session.save((err) => {
-    if (err) {
-      console.error(err);
-      return res.status(500).json({ error: 'internal error', detail: err.message });
-    }
+    if (err) return res.status(500).json(publicServerError(err));
     res.json({ role: 'owner' });
   });
 });
@@ -103,25 +101,18 @@ router.post('/client-login', async (req, res) => {
     req.session.clientId = client.id;
     req.session.clientName = client.name;
     req.session.save((err) => {
-      if (err) {
-        console.error(err);
-        return res.status(500).json({ error: 'internal error', detail: err.message });
-      }
+      if (err) return res.status(500).json(publicServerError(err));
       res.json({ role: 'client', client: { id: client.id, name: client.name } });
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'internal error', detail: err.message });
+    res.status(500).json(publicServerError(err));
   }
 });
 
 // POST /api/auth/logout — works for either role
 router.post('/logout', (req, res) => {
   req.session.destroy((err) => {
-    if (err) {
-      console.error(err);
-      return res.status(500).json({ error: 'internal error', detail: err.message });
-    }
+    if (err) return res.status(500).json(publicServerError(err));
     res.clearCookie('pivit.sid');
     res.status(204).end();
   });

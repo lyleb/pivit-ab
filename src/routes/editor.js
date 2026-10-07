@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { verifyEditToken } = require('../edit-token');
+const { createPreviewToken } = require('../preview-access');
 const { recordGoalUsage } = require('./goals');
 const router = express.Router();
 
@@ -32,6 +33,14 @@ router.get('/variants/:variantId', requireValidEditToken, async (req, res) => {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });
   }
+});
+
+// GET /api/editor/variants/:variantId/preview-token?token=...
+// The editor runs on the customer origin. Exchange the edit token for a
+// preview token so Desktop/Tablet/Mobile can open a preview that does not
+// carry the more powerful edit token in the URL.
+router.get('/variants/:variantId/preview-token', requireValidEditToken, (req, res) => {
+  res.json({ preview_token: createPreviewToken(req.params.variantId) });
 });
 
 // A goal as the snippet understands it: { type: 'click', selector, id } or

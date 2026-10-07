@@ -467,12 +467,23 @@
     renderGoalsList();
   }
 
-  function openPreview(width, height) {
-    const url = new URL(window.location.href);
-    url.searchParams.delete('ab_edit');
-    url.searchParams.delete('token');
-    url.searchParams.set('ab_preview', VARIANT_ID);
-    window.open(url.toString(), '_blank', `width=${width},height=${height}`);
+  async function openPreview(width, height) {
+    try {
+      const res = await fetch(`${API_BASE}/api/editor/variants/${encodeURIComponent(VARIANT_ID)}/preview-token?token=${encodeURIComponent(TOKEN)}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.preview_token) {
+        window.alert('This edit link has expired. Generate a new one from the pivitlab dashboard, then preview again.');
+        return;
+      }
+      const url = new URL(window.location.href);
+      url.searchParams.delete('ab_edit');
+      url.searchParams.delete('token');
+      url.searchParams.set('ab_preview', VARIANT_ID);
+      url.searchParams.set('ab_preview_token', data.preview_token);
+      window.open(url.toString(), '_blank', `width=${width},height=${height}`);
+    } catch (err) {
+      window.alert("Couldn't open the preview. Check your connection and try again.");
+    }
   }
 
   // --- Element picking ---

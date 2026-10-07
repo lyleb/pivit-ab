@@ -9,10 +9,10 @@
  * to a variant per experiment (sticky via localStorage), applies DOM
  * changes, and reports view/click events back to the API.
  *
- * Preview mode: append ?ab_preview=<variant_id> to any URL to force that
- * variant (works even if the experiment is draft/paused or the variant is
- * disabled) without logging any view/conversion events. The admin dashboard
- * generates these links for you.
+ * Preview mode: the dashboard opens ?ab_preview=<variant_id>&ab_preview_token=<token>.
+ * The token is signed and expires. It can show a draft, paused or disabled
+ * variant and never logs a view or conversion. A preview link without a valid
+ * token is ignored, so drafts are not served to anyone who guesses the URL.
  *
  * Anti-flicker: if the anti-flicker snippet (from the dashboard's "Copy
  * Snippet" popover) is also installed in <head>, it hides the page via an
@@ -291,13 +291,14 @@
       return;
     }
 
-    // Preview mode: ?ab_preview=<variant_id> forces that exact variant, works even
-    // for a draft/paused experiment or a paused variant, and never logs events —
-    // so previewing never pollutes your real results. It also bypasses the
-    // consent check below, since no tracking happens during a preview anyway.
-    const previewVariantId = new URLSearchParams(window.location.search).get('ab_preview');
+    // Preview needs both the variant id and a signed token. The token is what
+    // lets a draft or paused experiment through; the id alone does not.
+    const previewParams = new URLSearchParams(window.location.search);
+    const previewVariantId = previewParams.get('ab_preview');
+    const previewToken = previewParams.get('ab_preview_token');
+    const wantsPreview = !!(previewVariantId && previewToken);
 
-    if (!previewVariantId && !hasTrackingConsent()) {
+    if (!wantsPreview && !hasTrackingConsent()) {
       // No consent yet (and this isn't a preview) — don't write to localStorage,
       // don't fetch experiments, don't apply changes, don't send anything. The
       // visitor just sees the page exactly as if this snippet weren't there.
@@ -305,33 +306,41 @@
       return;
     }
 
-    const visitorId = getVisitorId();
     const url = encodeURIComponent(window.location.href);
-    const previewQuery = previewVariantId ? '&preview=1' : '';
+    const previewQuery = wantsPreview
+      ? `&preview=1&preview_variant=${encodeURIComponent(previewVariantId)}&preview_token=${encodeURIComponent(previewToken)}`
+      : '';
 
     try {
       const res = await fetch(`${API_BASE}/api/experiments?url=${url}${previewQuery}`);
       const data = await res.json();
 
+      // Authorised preview: show only the forced variant. Do not assign a
+      // visitor, do not write localStorage, and do not log any event — including
+      // for other experiments on the same page.
+      if (wantsPreview && data.preview && data.preview.variant_id) {
+        (data.experiments || []).forEach((experiment) => {
+          const variant = (experiment.variants || []).find((v) => v.id === data.preview.variant_id);
+          if (!variant) return;
+          (variant.changes || []).forEach(applyChange);
+          console.info(`[ab] preview mode — showing variant "${variant.name}" for experiment "${experiment.name}". No events are being logged.`);
+        });
+        revealPage();
+        return;
+      }
+
+      if (!hasTrackingConsent()) {
+        revealPage();
+        return;
+      }
+
+      const visitorId = getVisitorId();
       (data.experiments || []).forEach((experiment) => {
         if (!experiment.variants || experiment.variants.length === 0) return;
-
-        let variant;
-        let isPreview = false;
-        if (previewVariantId) {
-          const match = experiment.variants.find((v) => v.id === previewVariantId);
-          if (match) { variant = match; isPreview = true; }
-        }
-        if (!variant) variant = pickVariant(experiment, visitorId);
-
+        const variant = pickVariant(experiment, visitorId);
         (variant.changes || []).forEach(applyChange);
-
-        if (isPreview) {
-          console.info(`[ab] preview mode — showing variant "${variant.name}" for experiment "${experiment.name}". No events are being logged.`);
-        } else {
-          sendEvent(experiment.id, variant.id, visitorId, 'view');
-          wireConversionTracking(experiment.id, variant.id, visitorId, variant);
-        }
+        sendEvent(experiment.id, variant.id, visitorId, 'view');
+        wireConversionTracking(experiment.id, variant.id, visitorId, variant);
       });
 
       // Reveal now — DOM changes are applied, so this is the earliest safe moment.
@@ -340,7 +349,7 @@
 
       // Check "visited a URL" goals on every page load — including pages with no
       // on-page experiment at all, e.g. a /thank-you confirmation page.
-      if (!previewVariantId) await checkUrlGoals(visitorId);
+      await checkUrlGoals(visitorId);
     } catch (err) {
       console.warn('[ab] failed to load experiments:', err);
       revealPage(); // never leave the page hidden just because the API call failed

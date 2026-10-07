@@ -11,9 +11,10 @@
 // purpose (session cookies).
 
 const crypto = require('crypto');
+const { getSessionSecret } = require('./session-secret');
 
 function getSecret() {
-  return process.env.SESSION_SECRET || 'dev-fallback-secret-not-for-production';
+  return getSessionSecret();
 }
 
 function sign(payload) {
