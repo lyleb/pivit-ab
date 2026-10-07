@@ -1,5 +1,5 @@
 /**
- * AB Platform snippet — v0.4
+ * AB Platform snippet — v0.5
  *
  * Usage on client site:
  *   <script src="https://your-api.example.com/snippet/ab.js"
@@ -32,8 +32,18 @@
  * it defaults to running as before (unchanged behavior) — there's no CMP to
  * take a signal from, and whether that's fine is a call for whoever runs the
  * site. If a site uses a different CMP, wire up window.pivitConsent manually.
+ *
+ * Selectors and applying changes live on PivitRuntime (also exported for tests).
+ * The visual editor uses the same helpers, so a selector saved from the editor
+ * is what visitors get. Positional selectors (nth-child / nth-of-type and the
+ * other structural pseudos) are applied once, inline, exactly as before.
  */
-(function () {
+(function (root) {
+  const api = buildPivitRuntime();
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  if (!root || !root.document) return;
+  root.PivitRuntime = api;
+
   // document.currentScript can be unreliable when a script is injected
   // dynamically by a tag manager (GTM, etc.) rather than parsed directly from
   // the page's HTML — fall back to finding it by its own src if needed.
@@ -133,77 +143,15 @@
     return chosen;
   }
 
-  function applyChange(change) {
-    // Raw CSS isn't tied to a matched element — it's injected as its own <style>
-    // tag (one per change, so a typo in one block can't break the others) and
-    // handled before any selector lookup. Supports everything a stylesheet does
-    // that inline styles can't: !important, :hover, media queries, etc.
-    if (change.type === 'stylesheet') {
-      const styleEl = document.createElement('style');
-      styleEl.setAttribute('data-pivit-css', '');
-      styleEl.textContent = change.value || '';
-      document.head.appendChild(styleEl);
-      return;
-    }
-
-    const els = document.querySelectorAll(change.selector);
-    els.forEach((el) => {
-      switch (change.type) {
-        case 'text':
-          el.textContent = change.value;
-          break;
-        case 'html':
-          el.innerHTML = change.value;
-          break;
-        case 'hide':
-          el.style.display = 'none';
-          break;
-        case 'show':
-          el.style.display = '';
-          break;
-        case 'style':
-          Object.assign(el.style, change.value || {});
-          break;
-        case 'attr':
-          if (change.attr) el.setAttribute(change.attr, change.value);
-          break;
-        case 'js':
-          // Advanced / power-user option: runs arbitrary JS you configured yourself
-          // against the matched element. Only ever set by you via the admin dashboard —
-          // never accept this from anything outside your own control.
-          try {
-            new Function('el', change.value)(el);
-          } catch (err) {
-            console.warn('[ab] custom JS change failed:', err);
-          }
-          break;
-        case 'remove':
-          // Genuine removal from the DOM — distinct from 'hide', which just sets
-          // display:none and leaves the element (and any layout space it still
-          // claims, depending on CSS) in place.
-          el.remove();
-          break;
-        case 'duplicate': {
-          const clone = el.cloneNode(true);
-          clone.removeAttribute('id'); // avoid a duplicate-id collision with the original
-          el.insertAdjacentElement('afterend', clone);
-          break;
-        }
-        case 'insert_before':
-          el.insertAdjacentHTML('beforebegin', change.value);
-          break;
-        case 'insert_after':
-          el.insertAdjacentHTML('afterend', change.value);
-          break;
-        case 'replace':
-          // Swap the whole element (not just its contents, which is what 'html' does).
-          el.insertAdjacentHTML('afterend', change.value);
-          el.remove();
-          break;
-        default:
-          console.warn('[ab] unknown change type:', change.type);
-      }
-    });
+  // One applier for the page so every variant shares a single observer.
+  // Style and hide on a non-positional selector become a <style> rule (current
+  // and later matches, no per-element write). Text, HTML, attributes and the
+  // structural types are applied to matches now and to elements added later.
+  let pageApplier = null;
+  function applyVariantChanges(variant) {
+    if (!variant) return;
+    if (!pageApplier) pageApplier = api.createApplier(document);
+    pageApplier.applyAll(variant.changes || [], variant.id || 'variant');
   }
 
   function sendEvent(experimentId, variantId, visitorId, eventType, goalId) {
@@ -322,7 +270,7 @@
         (data.experiments || []).forEach((experiment) => {
           const variant = (experiment.variants || []).find((v) => v.id === data.preview.variant_id);
           if (!variant) return;
-          (variant.changes || []).forEach(applyChange);
+          applyVariantChanges(variant);
           console.info(`[ab] preview mode — showing variant "${variant.name}" for experiment "${experiment.name}". No events are being logged.`);
         });
         revealPage();
@@ -338,7 +286,7 @@
       (data.experiments || []).forEach((experiment) => {
         if (!experiment.variants || experiment.variants.length === 0) return;
         const variant = pickVariant(experiment, visitorId);
-        (variant.changes || []).forEach(applyChange);
+        applyVariantChanges(variant);
         sendEvent(experiment.id, variant.id, visitorId, 'view');
         wireConversionTracking(experiment.id, variant.id, visitorId, variant);
       });
@@ -361,4 +309,417 @@
   } else {
     init();
   }
-})();
+
+  // Hoisted. Node can require this file and read the return value; the boot
+  // above returns first when there is no document.
+  function buildPivitRuntime() {
+  const STATE_EXACT = {
+    active: 1, hover: 1, focus: 1, focused: 1, selected: 1, open: 1, opened: 1,
+    closed: 1, disabled: 1, hidden: 1, visible: 1, current: 1, show: 1, shown: 1,
+    hide: 1, loading: 1, loaded: 1, error: 1, success: 1, animating: 1, animated: 1,
+    entering: 1, leaving: 1, entered: 1, exited: 1, collapsed: 1, expanded: 1,
+    checked: 1, pressed: 1,
+  };
+  const WATCH_TYPES = {
+    text: 1, html: 1, show: 1, attr: 1, js: 1, remove: 1, duplicate: 1,
+    insert_before: 1, insert_after: 1, replace: 1,
+  };
+  const MARK = 'data-pivit-applied';
+
+  function cssEscape(str) {
+    const s = String(str);
+    if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(s);
+    return s.replace(/([^a-zA-Z0-9_-])/g, '\\$1');
+  }
+
+  function isStateClass(cls) {
+    const c = String(cls).toLowerCase();
+    if (STATE_EXACT[c]) return true;
+    if (/^(is|has|js|u|state)-/.test(c)) return true;
+    if (/--(?:active|open|opened|selected|hover|focus|focused|disabled|loading|visible|hidden|current|animated|animating|entered|leaving)$/.test(c)) return true;
+    if (/-(?:active|open|opened|selected|hover|focus|focused|disabled|loading|visible|hidden|current|animated|animating)$/.test(c)) return true;
+    return false;
+  }
+
+  // Obviously generated: emotion, styled-components, CSS-module hashes,
+  // long hex, Shopify section ids. A stable class alongside one of these
+  // wins; a hash is only used when the element has nothing more stable.
+  function isGeneratedClass(cls) {
+    const c = String(cls);
+    if (/^css-[A-Za-z0-9_-]+$/.test(c)) return true;
+    if (/^sc-[A-Za-z0-9]+$/.test(c)) return true;
+    if (/shopify-section-|template--\d+/i.test(c)) return true;
+    if (/[a-f0-9]{8,}/i.test(c)) return true;
+    const tail = c.split('__').pop();
+    if (c.indexOf('__') !== -1 && tail !== c && tail.length >= 5 && /[0-9]/.test(tail) && /[A-Za-z]/.test(tail) && /^[A-Za-z0-9]+$/.test(tail)) return true;
+    const under = c.lastIndexOf('_');
+    if (under > 0) {
+      const suf = c.slice(under + 1);
+      if (suf.length >= 6 && /[0-9]/.test(suf) && /[A-Z]/.test(suf) && /[a-z]/.test(suf) && /^[A-Za-z0-9]+$/.test(suf)) return true;
+    }
+    return false;
+  }
+
+  function isUnstableClass(cls) {
+    return isStateClass(cls) || isGeneratedClass(cls);
+  }
+
+  function isPositionalSelector(selector) {
+    return /:(?:nth-child|nth-of-type|nth-last-child|nth-last-of-type|first-child|last-child|first-of-type|last-of-type|only-child|only-of-type)\b/.test(selector || '');
+  }
+
+  function classTokens(el) {
+    if (!el) return [];
+    let raw = '';
+    if (typeof el.className === 'string') raw = el.className;
+    else if (el.className && typeof el.className.baseVal === 'string') raw = el.className.baseVal;
+    else if (el.getAttribute) raw = el.getAttribute('class') || '';
+    return raw.trim().split(/\s+/).filter(Boolean);
+  }
+
+  function uniqueSelector(el, doc) {
+    const body = (doc && doc.body) || (typeof document !== 'undefined' ? document.body : null);
+    if (!el || !el.tagName) return '';
+    if (el.id) return '#' + cssEscape(el.id);
+    const path = [];
+    let node = el;
+    while (node && node.nodeType === 1 && node !== body) {
+      let part = String(node.tagName).toLowerCase();
+      if (typeof node.className === 'string' && node.className.trim()) {
+        const classes = node.className.trim().split(/\s+/).slice(0, 2).map(cssEscape);
+        if (classes.length) part += '.' + classes.join('.');
+      }
+      const parent = node.parentElement;
+      if (parent) {
+        const siblings = Array.prototype.filter.call(parent.children, (c) => c.tagName === node.tagName);
+        if (siblings.length > 1) part += ':nth-of-type(' + (siblings.indexOf(node) + 1) + ')';
+      }
+      path.unshift(part);
+      node = parent;
+    }
+    return path.join(' > ');
+  }
+
+  function poolFor(tokens) {
+    const stable = tokens.filter((c) => !isStateClass(c) && !isGeneratedClass(c));
+    if (stable.length) return stable;
+    return tokens.filter((c) => !isStateClass(c));
+  }
+
+  function sharedClasses(tag, pool, queryAll, descendantTag) {
+    if (!queryAll) return pool.slice();
+    const shared = [];
+    pool.forEach((cls) => {
+      const sel = descendantTag
+        ? tag + '.' + cssEscape(cls) + ' ' + descendantTag
+        : tag + '.' + cssEscape(cls);
+      let n = 0;
+      try { n = queryAll(sel).length; } catch (e) { n = 0; }
+      if (n > 1) shared.push(cls);
+    });
+    return shared.length ? shared : pool.slice();
+  }
+
+  function nearestClassedAncestor(el) {
+    let node = el.parentElement;
+    while (node && node.nodeType === 1) {
+      const tag = String(node.tagName || '').toUpperCase();
+      if (tag === 'BODY' || tag === 'HTML') break;
+      if (poolFor(classTokens(node)).length) return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  // tag + the stable classes this element shares with others. State and
+  // hashed classes are dropped when a real class remains. Classes that
+  // match only this element are dropped when another class matches more
+  // than one, so a unique hash doesn't pin the selector to one badge.
+  function generaliseSelector(el, queryAll) {
+    if (!el || !el.tagName) return '';
+    const tag = String(el.tagName).toLowerCase();
+    const pool = poolFor(classTokens(el));
+    if (pool.length) {
+      const use = sharedClasses(tag, pool, queryAll, null);
+      return tag + '.' + use.map(cssEscape).join('.');
+    }
+    const ancestor = nearestClassedAncestor(el);
+    if (ancestor) {
+      const ptag = String(ancestor.tagName).toLowerCase();
+      const ppool = poolFor(classTokens(ancestor));
+      if (ppool.length) {
+        const use = sharedClasses(ptag, ppool, queryAll, tag);
+        return ptag + '.' + use.map(cssEscape).join('.') + ' ' + tag;
+      }
+    }
+    return tag;
+  }
+
+  function kebab(prop) {
+    return String(prop).replace(/[A-Z]/g, (m) => '-' + m.toLowerCase());
+  }
+
+  function selectorSafeForCss(selector) {
+    return !!selector && !/[{}<>]/.test(selector);
+  }
+
+  function cssForChange(change) {
+    if (!change || !change.selector) return '';
+    if (isPositionalSelector(change.selector)) return '';
+    if (!selectorSafeForCss(change.selector)) return '';
+    if (change.type === 'hide') return change.selector + '{display:none !important}';
+    if (change.type !== 'style' || !change.value || typeof change.value !== 'object') return '';
+    const decls = [];
+    Object.keys(change.value).forEach((key) => {
+      const value = change.value[key];
+      if (value == null || value === '') return;
+      decls.push(kebab(key) + ':' + String(value).replace(/</g, '\\3C ') + ' !important');
+    });
+    if (!decls.length) return '';
+    return change.selector + '{' + decls.join(';') + '}';
+  }
+
+  function shouldWatch(change) {
+    if (!change || !change.selector || !WATCH_TYPES[change.type]) return false;
+    if (isPositionalSelector(change.selector)) return false;
+    return true;
+  }
+
+  function cssDomId(key) {
+    return 'pivit-css-' + String(key).replace(/[^a-zA-Z0-9_-]/g, '-');
+  }
+
+  function createApplier(doc, options) {
+    const schedule = (options && options.schedule) || function (fn) {
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(fn);
+      else setTimeout(fn, 50);
+    };
+    const Observer = (options && options.MutationObserver) || (typeof MutationObserver !== 'undefined' ? MutationObserver : null);
+    const skip = (options && options.skip) || function () { return false; };
+    const seen = new Set();
+    const watched = [];
+    let observer = null;
+    let pending = [];
+    let scheduled = false;
+    let applying = 0;
+    let domApplies = 0;
+
+    function inject(css, key) {
+      if (!css) return;
+      const id = cssDomId(key);
+      if (doc.getElementById && doc.getElementById(id)) return;
+      const styleEl = doc.createElement('style');
+      styleEl.id = id;
+      styleEl.setAttribute('data-pivit-css', '');
+      styleEl.textContent = css;
+      (doc.head || doc.documentElement).appendChild(styleEl);
+    }
+
+    function already(el, key) {
+      const cur = el.getAttribute(MARK) || '';
+      return cur.split(' ').indexOf(key) !== -1;
+    }
+
+    function mark(el, key) {
+      if (!el || !el.setAttribute || already(el, key)) return;
+      const cur = el.getAttribute(MARK) || '';
+      el.setAttribute(MARK, cur ? cur + ' ' + key : key);
+    }
+
+    function markMatching(node, selector, key) {
+      if (!node || node.nodeType !== 1) return;
+      try {
+        if (node.matches && node.matches(selector)) mark(node, key);
+        if (node.querySelectorAll) node.querySelectorAll(selector).forEach((n) => mark(n, key));
+      } catch (e) { /* selector can't be matched against the inserted fragment */ }
+    }
+
+    // `boundary` is the sibling that was next to `el` before the insert, so the
+    // walk covers only the nodes just added and stops before pre-existing ones.
+    function markInserted(el, which, selector, key, boundary) {
+      let n = which === 'before' ? el.previousSibling : el.nextSibling;
+      while (n && n !== boundary) {
+        const step = which === 'before' ? n.previousSibling : n.nextSibling;
+        if (n.nodeType === 1) markMatching(n, selector, key);
+        n = step;
+      }
+    }
+
+    function applyToElement(el, change, key, track) {
+      if (!el || el.nodeType !== 1) return;
+      if (skip(el)) return;
+      if (track && already(el, key)) return;
+      if (domApplies > 500) { disconnect(); return; }
+      domApplies += 1;
+      if (track) mark(el, key);
+      applying += 1;
+      try {
+        switch (change.type) {
+          case 'text':
+            el.textContent = change.value;
+            break;
+          case 'html':
+            el.innerHTML = change.value;
+            break;
+          case 'hide':
+            el.style.display = 'none';
+            break;
+          case 'show':
+            el.style.display = '';
+            break;
+          case 'style':
+            Object.assign(el.style, change.value || {});
+            break;
+          case 'attr':
+            if (change.attr) el.setAttribute(change.attr, change.value);
+            break;
+          case 'js':
+            try { new Function('el', change.value)(el); }
+            catch (err) { console.warn('[ab] custom JS change failed:', err); }
+            break;
+          case 'remove':
+            el.remove();
+            break;
+          case 'duplicate': {
+            const clone = el.cloneNode(true);
+            clone.removeAttribute('id');
+            if (track) mark(clone, key);
+            el.insertAdjacentElement('afterend', clone);
+            break;
+          }
+          case 'insert_before': {
+            const boundary = el.previousSibling;
+            el.insertAdjacentHTML('beforebegin', change.value || '');
+            markInserted(el, 'before', change.selector, key, boundary);
+            break;
+          }
+          case 'insert_after': {
+            const boundary = el.nextSibling;
+            el.insertAdjacentHTML('afterend', change.value || '');
+            markInserted(el, 'after', change.selector, key, boundary);
+            break;
+          }
+          case 'replace': {
+            const boundary = el.nextSibling;
+            el.insertAdjacentHTML('afterend', change.value || '');
+            markInserted(el, 'after', change.selector, key, boundary);
+            el.remove();
+            break;
+          }
+          default:
+            console.warn('[ab] unknown change type:', change.type);
+        }
+      } finally {
+        applying -= 1;
+        if (applying === 0 && pending.length) scheduleFlush();
+      }
+    }
+
+    function applyDomQuery(change, key, track) {
+      let list;
+      try {
+        list = doc.querySelectorAll(change.selector);
+      } catch (err) {
+        if (isPositionalSelector(change.selector)) throw err;
+        console.warn('[ab] selector failed:', change.selector, err);
+        return;
+      }
+      list.forEach((el) => applyToElement(el, change, key, track));
+    }
+
+    function processNode(node) {
+      if (!node || node.nodeType !== 1 || node.isConnected === false) return;
+      watched.forEach((w) => {
+        try {
+          if (node.matches && node.matches(w.change.selector)) applyToElement(node, w.change, w.key, true);
+          if (node.querySelectorAll) node.querySelectorAll(w.change.selector).forEach((el) => applyToElement(el, w.change, w.key, true));
+        } catch (err) {
+          console.warn('[ab] selector failed:', w.change.selector, err);
+        }
+      });
+    }
+
+    function flush() {
+      const batch = pending.splice(0, 40);
+      batch.forEach(processNode);
+      if (pending.length) scheduleFlush();
+    }
+
+    function scheduleFlush() {
+      if (scheduled) return;
+      scheduled = true;
+      schedule(() => {
+        scheduled = false;
+        flush();
+      });
+    }
+
+    function ensureObserver() {
+      if (observer || !Observer) return;
+      const target = doc.documentElement || doc;
+      if (!target || !target.nodeType) return;
+      observer = new Observer((records) => {
+        records.forEach((record) => {
+          const nodes = record.addedNodes || [];
+          for (let i = 0; i < nodes.length; i++) {
+            if (nodes[i] && nodes[i].nodeType === 1) pending.push(nodes[i]);
+          }
+        });
+        if (applying) return;
+        if (pending.length) scheduleFlush();
+      });
+      observer.observe(target, { childList: true, subtree: true });
+    }
+
+    function applyOne(change, key) {
+      if (!change || seen.has(key)) return;
+      seen.add(key);
+      if (change.type === 'stylesheet') {
+        // Free-form CSS, including the variant's custom CSS block. Injected
+        // only because this variant is active — other variants never reach here.
+        inject(change.value || '', key);
+        return;
+      }
+      const css = cssForChange(change);
+      if (css) {
+        inject(css, key);
+        return;
+      }
+      if (!change.selector) {
+        if (change.type && change.type !== 'stylesheet') console.warn('[ab] unknown change type:', change.type);
+        return;
+      }
+      const track = shouldWatch(change);
+      applyDomQuery(change, key, track);
+      if (track) {
+        watched.push({ change, key });
+        ensureObserver();
+      }
+    }
+
+    function applyAll(changes, prefix) {
+      const p = prefix || 'c';
+      (changes || []).forEach((change, i) => applyOne(change, p + ':' + i));
+    }
+
+    function disconnect() {
+      if (observer) observer.disconnect();
+      observer = null;
+    }
+
+    return { applyAll, applyOne, flush, disconnect };
+  }
+
+  return {
+    cssEscape,
+    isUnstableClass,
+    isStateClass,
+    isGeneratedClass,
+    isPositionalSelector,
+    uniqueSelector,
+    generaliseSelector,
+    cssForChange,
+    createApplier,
+  };
+  }
+})(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this));
