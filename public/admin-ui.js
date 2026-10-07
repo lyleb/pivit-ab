@@ -115,6 +115,12 @@
     return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   }
 
+  // Whether the Make edits desktop note should appear. `matches` is the
+  // narrow-or-touch media query; `stored` is the dismissal flag ('1' hides it).
+  function shouldShowSignpost(matches, stored) {
+    return !!matches && stored !== '1';
+  }
+
   return {
     escapeHtml,
     shortUrl,
@@ -126,5 +132,6 @@
     statusAction,
     describeGoal,
     formatCreated,
+    shouldShowSignpost,
   };
 });
