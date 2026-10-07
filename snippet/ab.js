@@ -13,6 +13,8 @@
  * The token is signed and expires. It can show a draft, paused or disabled
  * variant and never logs a view or conversion. A preview link without a valid
  * token is ignored, so drafts are not served to anyone who guesses the URL.
+ * If the URL still has an older ab_edit or ab_preview (a leftover from the
+ * previous test), the last one wins, and preview applies only that experiment.
  *
  * Anti-flicker: if the anti-flicker snippet (from the dashboard's "Copy
  * Snippet" popover) is also installed in <head>, it hides the page via an
@@ -69,6 +71,28 @@
   }
   const VISITOR_KEY = '_ab_visitor_id';
   const ASSIGNMENT_PREFIX = '_ab_assign_';
+  // Bump when editor.js changes so a cached copy cannot keep the old variant.
+  const EDITOR_VERSION = '20261007';
+
+  // The first query value is the leftover. The last ab_edit or ab_preview is
+  // the link the owner just opened.
+  function lastQuery(params, name) {
+    const values = params.getAll(name).filter((value) => value);
+    return values.length ? values[values.length - 1] : null;
+  }
+
+  function pageMode() {
+    const params = new URLSearchParams(window.location.search);
+    let mode = null;
+    for (const [key, value] of params) {
+      if (!value) continue;
+      if (key === 'ab_edit') mode = { type: 'edit', variantId: value };
+      else if (key === 'ab_preview') mode = { type: 'preview', variantId: value };
+    }
+    if (!mode) return { type: null, variantId: null, token: null };
+    mode.token = mode.type === 'edit' ? lastQuery(params, 'token') : lastQuery(params, 'ab_preview_token');
+    return mode;
+  }
 
   function revealPage() {
     document.documentElement.classList.remove('ab-hide');
@@ -222,18 +246,39 @@
     }
   }
 
+  function previewVariant(experiments, preview) {
+    if (!preview || !preview.variant_id) return null;
+    const list = experiments || [];
+    let experiment = preview.experiment_id
+      ? list.find((item) => item.id === preview.experiment_id)
+      : null;
+    if (!experiment) {
+      const owners = list.filter((item) => (item.variants || []).some((variant) => variant.id === preview.variant_id));
+      experiment = owners.length === 1 ? owners[0] : null;
+    }
+    if (!experiment) return null;
+    const variant = (experiment.variants || []).find((item) => item.id === preview.variant_id);
+    return variant ? { experiment, variant } : null;
+  }
+
   async function init() {
+    const mode = pageMode();
+
     // Edit mode: ?ab_edit=<variant_id>&token=<token> hands off entirely to a
     // separate editor script, loaded only now (not for every real visitor) —
     // keeps this production snippet lean. No tracking/preview logic runs below
     // this point for an edit-mode page load, so an editing session never sends
-    // a stray view event into real results.
-    const editVariantId = new URLSearchParams(window.location.search).get('ab_edit');
-    if (editVariantId) {
+    // a stray view event into real results. A later ab_preview in the same URL
+    // is preview mode instead — the newest link wins.
+    if (mode.type === 'edit' && mode.variantId) {
+      const previous = document.querySelectorAll('script[data-pivit-editor]');
+      for (let i = 0; i < previous.length; i++) previous[i].remove();
       const editorScript = document.createElement('script');
-      editorScript.src = `${API_BASE}/snippet/editor.js`;
+      editorScript.src = `${API_BASE}/snippet/editor.js?v=${EDITOR_VERSION}`;
+      editorScript.async = false;
+      editorScript.setAttribute('data-pivit-editor', '1');
       editorScript.setAttribute('data-api', API_BASE);
-      editorScript.setAttribute('data-variant-id', editVariantId);
+      editorScript.setAttribute('data-variant-id', mode.variantId);
       document.head.appendChild(editorScript);
       revealPage();
       return;
@@ -241,10 +286,7 @@
 
     // Preview needs both the variant id and a signed token. The token is what
     // lets a draft or paused experiment through; the id alone does not.
-    const previewParams = new URLSearchParams(window.location.search);
-    const previewVariantId = previewParams.get('ab_preview');
-    const previewToken = previewParams.get('ab_preview_token');
-    const wantsPreview = !!(previewVariantId && previewToken);
+    const wantsPreview = mode.type === 'preview' && !!(mode.variantId && mode.token);
 
     if (!wantsPreview && !hasTrackingConsent()) {
       // No consent yet (and this isn't a preview) — don't write to localStorage,
@@ -256,23 +298,28 @@
 
     const url = encodeURIComponent(window.location.href);
     const previewQuery = wantsPreview
-      ? `&preview=1&preview_variant=${encodeURIComponent(previewVariantId)}&preview_token=${encodeURIComponent(previewToken)}`
+      ? `&preview=1&preview_variant=${encodeURIComponent(mode.variantId)}&preview_token=${encodeURIComponent(mode.token)}`
       : '';
 
     try {
-      const res = await fetch(`${API_BASE}/api/experiments?url=${url}${previewQuery}`);
+      const res = await fetch(
+        `${API_BASE}/api/experiments?url=${url}${previewQuery}`,
+        wantsPreview ? { cache: 'no-store' } : undefined
+      );
       const data = await res.json();
 
-      // Authorised preview: show only the forced variant. Do not assign a
-      // visitor, do not write localStorage, and do not log any event — including
-      // for other experiments on the same page.
-      if (wantsPreview && data.preview && data.preview.variant_id) {
-        (data.experiments || []).forEach((experiment) => {
-          const variant = (experiment.variants || []).find((v) => v.id === data.preview.variant_id);
-          if (!variant) return;
-          applyVariantChanges(variant);
-          console.info(`[ab] preview mode — showing variant "${variant.name}" for experiment "${experiment.name}". No events are being logged.`);
-        });
+      // Authorised preview: show only that experiment's variant. Do not assign
+      // a visitor, do not write localStorage, and do not log any event. A
+      // preview URL whose token was rejected shows the page unchanged — never
+      // another experiment that happens to match the same host.
+      if (wantsPreview) {
+        const match = data.preview && data.preview.variant_id === mode.variantId
+          ? previewVariant(data.experiments, data.preview)
+          : null;
+        if (match) {
+          applyVariantChanges(match.variant);
+          console.info(`[ab] preview mode — showing variant "${match.variant.name}" for experiment "${match.experiment.name}". No events are being logged.`);
+        }
         revealPage();
         return;
       }

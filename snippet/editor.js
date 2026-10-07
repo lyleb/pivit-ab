@@ -16,18 +16,26 @@
  * updated change list from a clean DOM, rather than trying to reverse an
  * arbitrary DOM mutation in place (which isn't reliably possible — there's no
  * generic "undo" for an innerHTML overwrite or a node removal). The working
- * change list survives the reload via sessionStorage, keyed per variant, so
- * unsaved edits aren't lost either.
+ * change list survives the reload via sessionStorage, keyed by experiment id
+ * and variant id, so unsaved edits aren't lost and aren't reused for a
+ * different test.
  */
 (function () {
   const scriptTag = document.currentScript || document.querySelector('script[src*="/snippet/editor.js"]');
   const API_BASE = (scriptTag && scriptTag.getAttribute('data-api')) || '';
-  const VARIANT_ID = scriptTag && scriptTag.getAttribute('data-variant-id');
-  const TOKEN = new URLSearchParams(window.location.search).get('token');
+
+  // The last ab_edit / token wins. A leftover pair earlier in the URL belongs
+  // to the previous test. The script tag is only a fallback.
+  function lastQuery(name) {
+    const values = new URLSearchParams(window.location.search).getAll(name).filter((value) => value);
+    return values.length ? values[values.length - 1] : null;
+  }
+  const VARIANT_ID = lastQuery('ab_edit') || (scriptTag && scriptTag.getAttribute('data-variant-id'));
+  const TOKEN = lastQuery('token');
 
   const Z = 2147483647; // max safe z-index — stays above whatever the host page uses
   const COLORS = { indigo: '#5635FB', indigoDark: '#4527d6', mint: '#02DEB5', ink: '#131723', danger: '#d64545', border: '#e6e7f0' };
-  const STORAGE_KEY = `pivit_editor_changes_${VARIANT_ID}`;
+  let experimentId = '';
 
   let allChanges = [];       // the full working set — both already-saved and new-this-session
   let allGoals = [];         // this variant's click/url goals, same idea
@@ -142,13 +150,16 @@
   }
 
   // --- API calls (token in the query string — no cookies involved at all) ---
+  function editorFetch(url, options) {
+    return fetch(url, Object.assign({ cache: 'no-store' }, options || {}));
+  }
   async function fetchVariant() {
-    const res = await fetch(`${API_BASE}/api/editor/variants/${VARIANT_ID}?token=${encodeURIComponent(TOKEN)}`);
+    const res = await editorFetch(`${API_BASE}/api/editor/variants/${VARIANT_ID}?token=${encodeURIComponent(TOKEN)}`);
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
     return res.json();
   }
   async function saveWorkingSet(changes, goals) {
-    const res = await fetch(`${API_BASE}/api/editor/variants/${VARIANT_ID}?token=${encodeURIComponent(TOKEN)}`, {
+    const res = await editorFetch(`${API_BASE}/api/editor/variants/${VARIANT_ID}?token=${encodeURIComponent(TOKEN)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ changes, goals }),
@@ -158,21 +169,72 @@
   }
 
   // --- Working-set persistence across a reload ---
+  // Keyed by experiment and variant. A buffer for another test is ignored and
+  // removed, so switching experiments cannot replay the previous changes.
+  function storageKey() {
+    return `pivit_editor_changes_${experimentId}_${VARIANT_ID}`;
+  }
+  function legacyStorageKey() {
+    return `pivit_editor_changes_${VARIANT_ID}`;
+  }
+  function parseStored(raw) {
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return { changes: parsed, goals: null, experimentId: '', variantId: '' };
+      if (parsed && Array.isArray(parsed.changes)) {
+        return {
+          changes: parsed.changes,
+          goals: Array.isArray(parsed.goals) ? parsed.goals : null,
+          experimentId: parsed.experimentId || '',
+          variantId: parsed.variantId || '',
+        };
+      }
+    } catch (e) { /* ignore malformed buffers */ }
+    return null;
+  }
+  function storedIsForThisVariant(parsed) {
+    if (!parsed) return false;
+    if (parsed.experimentId && parsed.experimentId !== experimentId) return false;
+    if (parsed.variantId && parsed.variantId !== VARIANT_ID) return false;
+    return true;
+  }
   function persistWorkingSet() {
-    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ changes: allChanges, goals: allGoals })); } catch (e) { /* ignore quota/privacy-mode errors */ }
+    try {
+      sessionStorage.setItem(storageKey(), JSON.stringify({
+        experimentId,
+        variantId: VARIANT_ID,
+        changes: allChanges,
+        goals: allGoals,
+      }));
+    } catch (e) { /* ignore quota/privacy-mode errors */ }
   }
   function readPersistedWorkingSet() {
     try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return { changes: parsed, goals: null }; // written before goals existed here
-      if (parsed && Array.isArray(parsed.changes)) return { changes: parsed.changes, goals: Array.isArray(parsed.goals) ? parsed.goals : null };
+      const current = parseStored(sessionStorage.getItem(storageKey()));
+      if (storedIsForThisVariant(current)) return current;
+      const legacy = parseStored(sessionStorage.getItem(legacyStorageKey()));
+      if (storedIsForThisVariant(legacy)) return legacy;
       return null;
     } catch (e) { return null; }
   }
   function clearPersistedWorkingSet() {
-    try { sessionStorage.removeItem(STORAGE_KEY); } catch (e) { /* ignore */ }
+    try {
+      sessionStorage.removeItem(storageKey());
+      sessionStorage.removeItem(legacyStorageKey());
+    } catch (e) { /* ignore */ }
+  }
+  function clearStaleEditorState() {
+    const keep = storageKey();
+    try {
+      const current = parseStored(sessionStorage.getItem(keep));
+      if (sessionStorage.getItem(keep) && !storedIsForThisVariant(current)) sessionStorage.removeItem(keep);
+      const keys = [];
+      for (let i = 0; i < sessionStorage.length; i++) keys.push(sessionStorage.key(i));
+      keys.forEach((key) => {
+        if (key && key.indexOf('pivit_editor_changes_') === 0 && key !== keep) sessionStorage.removeItem(key);
+      });
+    } catch (e) { /* ignore */ }
   }
 
   // Edit or remove on an EXISTING change can't reliably be undone in place —
@@ -491,7 +553,7 @@
 
   async function openPreview(width, height) {
     try {
-      const res = await fetch(`${API_BASE}/api/editor/variants/${encodeURIComponent(VARIANT_ID)}/preview-token?token=${encodeURIComponent(TOKEN)}`);
+      const res = await editorFetch(`${API_BASE}/api/editor/variants/${encodeURIComponent(VARIANT_ID)}/preview-token?token=${encodeURIComponent(TOKEN)}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.preview_token) {
         window.alert('This edit link has expired. Generate a new one from the pivitlab dashboard, then preview again.');
@@ -1162,6 +1224,7 @@
     }
     try {
       const variant = await fetchVariant();
+      experimentId = String(variant.experiment_id || '');
       experimentName = variant.experiment_name || '';
       variantName = variant.name || '';
       const serverChanges = Array.isArray(variant.changes) ? variant.changes : [];
@@ -1169,10 +1232,13 @@
       savedSnapshot = canon({ changes: serverChanges, goals: serverGoals });
 
       // A working set left over from a reload-and-replay (an in-progress,
-      // not-yet-saved edit) takes precedence over what's on the server.
+      // not-yet-saved edit) takes precedence over what's on the server, but
+      // only when it was stored for this experiment and this variant.
       const persisted = readPersistedWorkingSet();
       allChanges = persisted ? persisted.changes : serverChanges;
       allGoals = persisted && persisted.goals !== null ? persisted.goals : serverGoals;
+      clearStaleEditorState();
+      if (persisted) persistWorkingSet();
 
       const applier = ensureApplier();
       if (applier) applier.applyAll(allChanges, 'edit');
