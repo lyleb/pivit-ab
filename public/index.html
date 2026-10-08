@@ -8,7 +8,7 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>pivitlab</title>
-<link rel="stylesheet" href="/assets/pivit.css?v=3">
+<link rel="stylesheet" href="/assets/pivit.css?v=4">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="/url-match.js"></script>
 <script src="/admin-ui.js"></script>
@@ -1440,6 +1440,10 @@ document.getElementById('page-detail').addEventListener('click', async (e) => {
     return;
   }
   if (action === 'add-variant') {
+    if (!UI.canAddVariant((currentDetail.variants || []).length)) {
+      detailError(UI.variantCapMessage((currentDetail.variants || []).length));
+      return;
+    }
     const name = document.getElementById('new-var-name').value.trim();
     const traffic_split = parseInt(document.getElementById('new-var-split').value, 10);
     if (!name) { detailError('Give the new variant a name.'); return; }
