@@ -197,6 +197,22 @@ CREATE TABLE IF NOT EXISTS test_traffic_audit (
 CREATE INDEX IF NOT EXISTS idx_test_traffic_audit_experiment
   ON test_traffic_audit (experiment_id, created_at DESC);
 
+-- Fixed-horizon plan. Null means the owner has not adopted one. Existing
+-- running tests stay without a plan until someone saves one. started_at is
+-- the first time the test was set to running (backfilled from the earliest
+-- view, which does not change the events). peeked_at is set by Reveal early.
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS plan JSONB;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS peeked_at TIMESTAMPTZ;
+
+UPDATE experiments AS e
+SET started_at = COALESCE(
+  (SELECT MIN(ev.created_at) FROM events ev WHERE ev.experiment_id = e.id AND ev.event_type = 'view'),
+  e.created_at
+)
+WHERE e.started_at IS NULL
+  AND e.status IN ('running', 'paused', 'archived');
+
 -- Events the public endpoint dropped, per experiment per UTC day.
 -- reason is rate_limited, bot, or host. Cheap upsert, same idea as host_hits.
 -- A counter failure must not fail the request (see src/event-drops.js).

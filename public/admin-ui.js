@@ -33,14 +33,6 @@
     return text;
   }
 
-  function leadingStat(bayes) {
-    const stats = (bayes && Array.isArray(bayes.stats)) ? bayes.stats : [];
-    return stats.reduce((best, row) => {
-      if (!best || Number(row.probability_best) > Number(best.probability_best)) return row;
-      return best;
-    }, null);
-  }
-
   function visitorTotal(bayes) {
     if (!bayes) return 0;
     const total = Number(bayes.total_visitors);
@@ -48,25 +40,57 @@
   }
 
   // Signal column on the experiments list.
-  // Draft or nothing recorded yet → "No data yet".
-  // Running, once each variant has a usable sample → "B leading · 68% prob. best".
-  // Paused → "Paused · last: <leader or Control>".
-  function signalText(status, bayes) {
-    const visitors = visitorTotal(bayes);
-    const leader = leadingStat(bayes);
-    const leaderName = leader && leader.variant_name ? leader.variant_name : 'Control';
-
+  // A running test does not announce a winner from a live probability.
+  // The server sends mode; without one, the column stays a health check.
+  function signalText(status, reading) {
     if (status === 'draft') return 'No data yet';
-    if (status === 'paused') {
-      return visitors === 0 ? 'Paused · last: Control' : `Paused · last: ${leaderName}`;
+    const mode = reading && reading.mode;
+    const days = reading ? Number(reading.days_elapsed) || 0 : 0;
+    const min = reading ? Number(reading.min_runtime_days) || 0 : 0;
+    if (mode === 'unplanned') return status === 'paused' ? 'Paused · set a plan' : 'Set a plan';
+    if (mode === 'data_problem') return status === 'paused' ? 'Paused · data problem' : 'Data problem';
+    if (mode === 'verdict') return status === 'paused' ? 'Paused · verdict ready' : 'Verdict ready';
+    if (mode === 'peeked') return 'Peeked · not a verdict';
+    if (mode === 'blind') {
+      const head = status === 'paused' ? 'Paused · health check' : 'Health check';
+      return min ? `${head} · ${days} of ${min} days` : head;
     }
-    if (visitors === 0) return 'No data yet';
-    if (status === 'archived') return `Archived · last: ${leaderName}`;
-    if (status === 'running') {
-      if (!leader || bayes.low_sample_warning) return 'Collecting data';
-      return `${shortVariantLabel(leader.variant_name)} leading · ${leader.probability_best}% prob. best`;
-    }
+    const visitors = visitorTotal(reading);
+    if (status === 'paused') return visitors === 0 ? 'Paused · last: Control' : 'Paused';
+    if (status === 'archived') return visitors === 0 ? 'No data yet' : 'Archived';
+    if (status === 'running') return visitors === 0 ? 'No data yet' : 'Health check';
     return 'No data yet';
+  }
+
+  function plannerShell(prefix) {
+    const id = escapeHtml(prefix);
+    return `<div class="planner" data-planner="${id}">
+      <h2>How big a change are you looking for?</h2>
+      <p class="hint">You can leave the suggestion. pivitlab turns it into the visitors you need, and saves a plan either way.</p>
+      <div class="choice-row" role="radiogroup" aria-label="Size of change">
+        <button type="button" class="choice" data-plan-choice="small" aria-pressed="false">Small change<span>about 5% relative</span></button>
+        <button type="button" class="choice" data-plan-choice="medium" aria-pressed="true">Medium<span>about 10% relative</span></button>
+        <button type="button" class="choice" data-plan-choice="big" aria-pressed="false">Big<span>about 20% relative</span></button>
+      </div>
+      <p class="plan-sentence" id="${id}-plan-sentence"></p>
+      <p class="hint" id="${id}-plan-meta"></p>
+      <p class="hint" id="${id}-baseline-note"></p>
+      <details>
+        <summary>Advanced</summary>
+        <div class="accordion-body">
+          <label for="${id}-baseline">Baseline conversion rate (%)</label>
+          <input id="${id}-baseline" type="number" min="0.1" max="99" step="0.1" value="3">
+          <label for="${id}-relative">Relative change to detect (%)</label>
+          <input id="${id}-relative" type="number" min="1" max="200" step="0.5" value="10">
+          <label for="${id}-weekly">Visitors you expect in a week</label>
+          <input id="${id}-weekly" type="number" min="0" step="1">
+          <label for="${id}-weeks">Minimum runtime (weeks)</label>
+          <input id="${id}-weeks" type="number" min="1" max="26" step="1" value="2">
+          <p class="hint" id="${id}-week-warn"></p>
+          <p class="hint" id="${id}-maths"></p>
+        </div>
+      </details>
+    </div>`;
   }
 
   // Draft, or a test that has not recorded a visitor, must not show rates or
@@ -197,6 +221,7 @@
     shortUrl,
     shortVariantLabel,
     signalText,
+    plannerShell,
     resultsGated,
     overviewBanner,
     showNextSteps,

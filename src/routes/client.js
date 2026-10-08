@@ -4,6 +4,9 @@ const { requireAuth } = require('../middleware/auth');
 const { computeBayesianStats } = require('../bayesian');
 const { publicServerError } = require('../public-error');
 const { getVariantResults, getGoalBreakdown, getTimeseries, getPrimaryVariantData } = require('../metrics');
+const { outcomeGate } = require('../experiment-plan');
+const { hideOutcomeRow } = require('../reading');
+const { buildVerdict } = require('../verdict');
 const router = express.Router();
 
 router.use(requireAuth(['client']));
@@ -41,16 +44,31 @@ router.get('/results/:experimentId', async (req, res) => {
     const experiment = await assertOwnsExperiment(req.session.clientId, req.params.experimentId);
     if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
 
-    const [{ results, primaryKey }, breakdown] = await Promise.all([
+    const [{ results, primaryKey }, breakdown, gate] = await Promise.all([
       getVariantResults(req.params.experimentId),
       getGoalBreakdown(req.params.experimentId),
+      outcomeGate(req.params.experimentId, false),
     ]);
+    const visible = gate.visible;
+    let verdict = null;
+    if (visible && gate.reading && gate.reading.plan_met) {
+      const { variantData } = await getPrimaryVariantData(req.params.experimentId);
+      verdict = buildVerdict({
+        variants: variantData,
+        plan: gate.loaded.experiment.plan,
+        srmDetected: !!(gate.loaded.srm && gate.loaded.srm.srm_detected),
+      });
+      verdict.peeked = gate.reading.peeked;
+    }
 
     res.json({
       experiment: { id: experiment.id, name: experiment.name, status: experiment.status },
-      primary_goal: primaryKey,
-      results,
-      goals: breakdown.goals,
+      primary_goal: visible ? primaryKey : null,
+      results: visible ? results : results.map(hideOutcomeRow),
+      goals: visible ? breakdown.goals : [],
+      reading: gate.reading,
+      blinded: !visible,
+      verdict,
     });
   } catch (err) {
     res.status(500).json(publicServerError(err));
@@ -63,8 +81,10 @@ router.get('/results/:experimentId/timeseries', async (req, res) => {
     const experiment = await assertOwnsExperiment(req.session.clientId, req.params.experimentId);
     if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
 
+    const gate = await outcomeGate(req.params.experimentId, false);
+    if (!gate.visible) return res.json({ series: [], blinded: true, reading: gate.reading });
     const series = await getTimeseries(req.params.experimentId);
-    res.json({ series });
+    res.json({ series, blinded: false, reading: gate.reading });
   } catch (err) {
     res.status(500).json(publicServerError(err));
   }
@@ -78,10 +98,15 @@ router.get('/results/:experimentId/bayesian', async (req, res) => {
     const experiment = await assertOwnsExperiment(req.session.clientId, req.params.experimentId);
     if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
 
+    const gate = await outcomeGate(req.params.experimentId, false);
     const { variantData } = await getPrimaryVariantData(req.params.experimentId);
+    if (!gate.visible) {
+      return res.json({ low_sample_warning: false, stats: [], blinded: true, reading: gate.reading });
+    }
     const stats = computeBayesianStats(variantData);
     const lowSample = variantData.some((v) => v.visitors < 30);
-    res.json({ low_sample_warning: lowSample, stats });
+    const secondary = !!(gate.reading && gate.reading.plan_met && gate.reading.mode !== 'data_problem');
+    res.json({ low_sample_warning: lowSample, stats, blinded: false, reading: gate.reading, secondary });
   } catch (err) {
     res.status(500).json(publicServerError(err));
   }

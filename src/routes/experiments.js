@@ -11,6 +11,8 @@ const {
 const { detectSRM } = require('../srm');
 const { buildHealth } = require('../health');
 const { flagIsOn, summariseTestTraffic } = require('../test-traffic');
+const { ensurePlanOnStart, recordReveal, loadReading, readingPayload, srmFor } = require('../experiment-plan');
+const { planProgress, describeReading, listSignal } = require('../reading');
 const { visibleEventSql } = require('../metrics');
 const { utcDay, windowStartDay } = require('../host-hits');
 const { createEditToken } = require('../edit-token');
@@ -166,6 +168,38 @@ router.use(requireAuth(['owner']));
 
 // Owner-only. Not mounted on the client portal.
 router.use('/:id/test-traffic', require('./test-traffic'));
+router.use('/:id/plan', require('./plan'));
+
+function actorIp(req) {
+  const ip = req && req.ip ? String(req.ip) : '';
+  return ip ? ip.slice(0, 64) : null;
+}
+
+// POST /api/experiments/:id/reveal
+// Owner only. Logs the look and marks the result as peeked. Does not change events.
+router.post('/:id/reveal', async (req, res) => {
+  if (!req.body || req.body.confirm !== true) {
+    return res.status(400).json({ error: 'Confirm the early look before it is shown.' });
+  }
+  try {
+    const result = await recordReveal({
+      experimentId: req.params.id,
+      actor: 'owner',
+      actorIp: actorIp(req),
+    });
+    if (!result.ok) return res.status(result.status || 400).json({ error: result.error });
+    const loaded = await loadReading(req.params.id, { includeTest: false });
+    res.json({
+      peeked_at: result.peeked_at,
+      audit_id: result.audit_id,
+      created_at: result.created_at,
+      reading: readingPayload(loaded),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
 
 // Hosts the snippet has asked about since this process started. In-memory, so
 // it resets on deploy — that is what Settings calls "since last deploy".
@@ -187,7 +221,66 @@ router.get('/all', async (req, res) => {
        GROUP BY e.id, c.name
        ORDER BY e.created_at DESC`
     );
-    res.json({ experiments: rows });
+    const ids = rows.map((row) => row.id);
+    let variantRows = [];
+    if (ids.length) {
+      const counted = await db.query(
+        `SELECT v.experiment_id, v.id, v.name, v.traffic_split, v.enabled,
+           COUNT(DISTINCT e.visitor_id) FILTER (
+             WHERE e.event_type = 'view' AND e.excluded_at IS NULL AND e.is_test = false
+           )::int AS visitors
+         FROM variants v
+         LEFT JOIN events e ON e.variant_id = v.id
+         WHERE v.experiment_id = ANY($1::uuid[])
+         GROUP BY v.experiment_id, v.id`,
+        [ids]
+      );
+      variantRows = counted.rows;
+    }
+    const byExperiment = new Map();
+    variantRows.forEach((row) => {
+      if (!byExperiment.has(row.experiment_id)) byExperiment.set(row.experiment_id, []);
+      byExperiment.get(row.experiment_id).push({
+        id: row.id,
+        variant_id: row.id,
+        name: row.name,
+        variant_name: row.name,
+        traffic_split: row.traffic_split,
+        enabled: row.enabled !== false,
+        visitors: Number(row.visitors) || 0,
+      });
+    });
+    const experiments = rows.map((row) => {
+      const variants = byExperiment.get(row.id) || [];
+      const progress = planProgress({
+        plan: row.plan,
+        startedAt: row.started_at,
+        variants,
+      });
+      const srm = srmFor(variants);
+      const described = describeReading({
+        status: row.status,
+        plan: row.plan,
+        peekedAt: row.peeked_at,
+        progress,
+        srmDetected: !!(srm && srm.srm_detected),
+      });
+      const reading = {
+        mode: described.mode,
+        outcome_visible: described.outcome_visible,
+        peeked: described.peeked,
+        has_plan: described.has_plan,
+        plan_met: described.plan_met,
+        days_elapsed: progress.days_elapsed,
+        min_runtime_days: progress.min_runtime_days,
+        total_visitors: progress.variants.reduce((sum, item) => sum + item.visitors, 0),
+      };
+      return Object.assign({}, row, {
+        reading,
+        signal: listSignal(row.status, reading),
+      });
+    });
+    res.json({ experiments });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });
@@ -634,20 +727,21 @@ router.patch('/:id/status', async (req, res) => {
     const allowed = ['draft', 'running', 'paused', 'archived'];
     if (!allowed.includes(status)) return res.status(400).json({ error: `status must be one of ${allowed.join(', ')}` });
 
+    const { rows: existingRows } = await db.query(`SELECT * FROM experiments WHERE id = $1`, [id]);
+    if (existingRows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
+    const existing = existingRows[0];
     if (status === 'running') {
-      const { rows: existing } = await db.query(
-        `SELECT allowed_hosts FROM experiments WHERE id = $1`,
-        [id]
-      );
-      if (existing.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
-      const hosts = existing[0].allowed_hosts || [];
+      const hosts = existing.allowed_hosts || [];
       if (hosts.length === 0) {
         return res.status(400).json({ error: 'Add at least one site domain in Settings before starting this experiment.' });
       }
+      if (existing.status === 'draft') await ensurePlanOnStart(existing);
     }
 
     const { rows } = await db.query(
-      `UPDATE experiments SET status = $1 WHERE id = $2 RETURNING *`,
+      status === 'running'
+        ? `UPDATE experiments SET status = $1, started_at = COALESCE(started_at, now()) WHERE id = $2 RETURNING *`
+        : `UPDATE experiments SET status = $1 WHERE id = $2 RETURNING *`,
       [status, id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });

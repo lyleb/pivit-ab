@@ -16,30 +16,33 @@
 // answer as the sample count grows, and 20,000 draws is already stable to
 // within about +/-1 percentage point.
 
-function gaussianRandom() {
-  // Box-Muller transform
+function gaussianRandom(random) {
+  // Box-Muller transform. random defaults to Math.random so existing callers
+  // keep the same unseeded behaviour.
+  const rng = random || Math.random;
   let u = 0, v = 0;
-  while (u === 0) u = Math.random();
-  while (v === 0) v = Math.random();
+  while (u === 0) u = rng();
+  while (v === 0) v = rng();
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
 // Marsaglia & Tsang (2000) method for sampling Gamma(shape, 1).
-function sampleGamma(shape) {
+function sampleGamma(shape, random) {
+  const rng = random || Math.random;
   if (shape < 1) {
-    const u = Math.random();
-    return sampleGamma(1 + shape) * Math.pow(u, 1 / shape);
+    const u = rng();
+    return sampleGamma(1 + shape, rng) * Math.pow(u, 1 / shape);
   }
   const d = shape - 1 / 3;
   const c = 1 / Math.sqrt(9 * d);
   while (true) {
     let x, v;
     do {
-      x = gaussianRandom();
+      x = gaussianRandom(rng);
       v = 1 + c * x;
     } while (v <= 0);
     v = v * v * v;
-    const u = Math.random();
+    const u = rng();
     if (u < 1 - 0.0331 * x * x * x * x) return d * v;
     if (Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) return d * v;
   }
@@ -47,19 +50,22 @@ function sampleGamma(shape) {
 
 // Beta(alpha, beta) via the standard Gamma-ratio construction: if X ~ Gamma(a)
 // and Y ~ Gamma(b), then X/(X+Y) ~ Beta(a, b).
-function sampleBeta(alpha, beta) {
-  const x = sampleGamma(alpha);
-  const y = sampleGamma(beta);
+function sampleBeta(alpha, beta, random) {
+  const rng = random || Math.random;
+  const x = sampleGamma(alpha, rng);
+  const y = sampleGamma(beta, rng);
   return x / (x + y);
 }
 
 /**
  * @param {Array<{variant_id, variant_name, visitors, conversions}>} variantData
  * @param {number} numSamples - Monte Carlo draws per variant (default 20,000)
+ * @param {{random?: function}} [options] - optional RNG in [0, 1). Omit it to keep Math.random.
  * @returns {Array<{variant_id, variant_name, visitors, conversions, posterior_mean, ci_low, ci_high, probability_best}>}
  */
-function computeBayesianStats(variantData, numSamples = 20000) {
+function computeBayesianStats(variantData, numSamples = 20000, options) {
   if (variantData.length === 0) return [];
+  const random = options && typeof options.random === 'function' ? options.random : Math.random;
 
   // One full posterior sample set per variant, drawn together so the
   // "probability of being best" comparison below is apples-to-apples per draw.
@@ -67,7 +73,7 @@ function computeBayesianStats(variantData, numSamples = 20000) {
     const alpha = 1 + v.conversions;
     const beta = 1 + Math.max(v.visitors - v.conversions, 0);
     const draws = new Array(numSamples);
-    for (let i = 0; i < numSamples; i++) draws[i] = sampleBeta(alpha, beta);
+    for (let i = 0; i < numSamples; i++) draws[i] = sampleBeta(alpha, beta, random);
     return draws;
   });
 
