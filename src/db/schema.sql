@@ -105,3 +105,25 @@ CREATE TABLE IF NOT EXISTS host_hits (
   PRIMARY KEY (day, host, referrer_origin)
 );
 
+-- Goals live on the experiment and apply to every variant. id is stable and
+-- is what events.goal_id stores; name is the label and can be renamed.
+-- goals_scope = divergent means the variants were saved with different goals
+-- and those per-variant lists are still the ones that run.
+-- goals_migrated is set by the startup backfill (src/goals.js). New rows are
+-- inserted with it already true. Existing rows start false and are migrated
+-- once; identical goals are merged and keep the ids events already use.
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS goals JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS goals_scope TEXT NOT NULL DEFAULT 'shared';
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS goals_migrated BOOLEAN NOT NULL DEFAULT false;
+
+-- Events the public endpoint dropped, per experiment per UTC day.
+-- reason is rate_limited, bot, or host. Cheap upsert, same idea as host_hits.
+-- A counter failure must not fail the request (see src/event-drops.js).
+CREATE TABLE IF NOT EXISTS event_drops (
+  day DATE NOT NULL,
+  experiment_id UUID NOT NULL REFERENCES experiments(id) ON DELETE CASCADE,
+  reason TEXT NOT NULL,
+  drop_count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, experiment_id, reason)
+);
+

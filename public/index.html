@@ -8,8 +8,9 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>pivitlab</title>
-<link rel="stylesheet" href="/assets/pivit.css?v=2">
+<link rel="stylesheet" href="/assets/pivit.css?v=3">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="/url-match.js"></script>
 <script src="/admin-ui.js"></script>
 <style>
   .app-shell { display: flex; min-height: 100vh; align-items: stretch; }
@@ -283,10 +284,11 @@
           <div id="wizard-variants"></div>
           <p id="wizard-split-note" class="hint"></p>
           <button type="button" class="btn-ghost" id="wizard-add-variant" style="margin-top:10px;">+ Add variant</button>
+          <p id="wizard-cap-note" class="hint"></p>
         </div>
 
         <div id="wizard-step-3" class="wizard-step" hidden>
-          <p class="hint" style="margin-top:0;">Optional. The same goals are saved on every variant so the comparison stays fair. Skip if you will add them in the editor.</p>
+          <p class="hint" style="margin-top:0;">Optional. Goals are saved once for the experiment and apply to every variant, including Control. Skip if you will add them in the editor.</p>
           <p style="margin-top:10px;"><a class="picker-link picker-bookmarklet" href="#">Selector Picker</a> <span class="hint">Drag to your bookmarks bar, then click it on the live page.</span></p>
           <div id="wizard-popular-goals"></div>
           <div id="wizard-goals-list"></div>
@@ -932,6 +934,7 @@ function renderDetail() {
         ${action ? `<button type="button" data-action="set-status" data-status="${action.next}">${action.label}</button>` : ''}
       </div>
     </div>
+    <div id="health-panel" hidden></div>
     <p id="detail-error" class="error-msg" hidden></p>
     <div class="tabs" role="tablist">
       ${['overview', 'variants', 'goals', 'results', 'settings'].map((tab) =>
@@ -970,8 +973,9 @@ function renderDetail() {
         <label for="detail-page-url">Page URL for preview and edits</label>
         <input id="detail-page-url" value="${UI.escapeHtml(pageUrl)}" placeholder="https://example.com/about" spellcheck="false">
         <p id="variant-warnings" class="hint"></p>
+        <p id="variant-cap-note" class="hint"></p>
         <div id="detail-variants"></div>
-        <div class="add-row">
+        <div class="add-row" id="add-variant-row">
           <input id="new-var-name" type="text" placeholder="variant name">
           <input id="new-var-split" type="number" value="50" aria-label="Traffic split">
           <button type="button" data-action="add-variant">Add variant</button>
@@ -981,7 +985,7 @@ function renderDetail() {
 
     <div data-tab-panel="goals" hidden>
       <div class="card">
-        <p class="hint" style="margin-top:0;">Goals belong to each variant. Use the same label on every variant, or the comparison will not line up.</p>
+        <p id="goals-intro" class="hint" style="margin-top:0;">Goals are set once for this experiment and apply to every variant, including Control. Renaming a goal does not split its history.</p>
         <p><a class="picker-link picker-bookmarklet" href="${pickerHref}">Selector Picker</a> <span class="hint">Drag to your bookmarks bar once, then use it on the live page.</span></p>
         <div id="detail-popular-goals"></div>
         <div id="detail-goals"></div>
@@ -1074,6 +1078,7 @@ function renderDetail() {
   loadSeenHosts(exp.id);
   renderVariantRows();
   renderGoalBlocks();
+  loadHealth();
   document.querySelectorAll('.picker-bookmarklet').forEach((a) => { a.href = pickerHref; });
   const pageInput = document.getElementById('detail-page-url');
   if (pageInput) {
@@ -1241,25 +1246,72 @@ function renderVariantWarnings() {
     if (splitSum !== 100) {
       warnings.push(`Active splits add up to ${splitSum}%, not 100%. Visitors are still assigned using the numbers as weights.`);
     }
-    const labels = (v) => (v.goals || []).map((g) => g.id || g.selector || g.url_match).sort();
-    if (new Set(enabled.map((v) => JSON.stringify(labels(v)))).size > 1) {
-      const summary = enabled.map((v) => `${v.name}: ${labels(v).join(', ') || 'none'}`).join(' · ');
-      warnings.push(`These variants don’t share the same goals (${summary}). A variant with no goal always shows 0%.`);
-    }
   }
   msgEl.className = warnings.length ? 'warn-text' : 'hint';
   msgEl.textContent = warnings.join('\n\n');
+  const cap = document.getElementById('variant-cap-note');
+  const addRow = document.getElementById('add-variant-row');
+  const message = UI.variantCapMessage(variants.length);
+  if (cap) cap.textContent = message;
+  if (addRow) addRow.hidden = !UI.canAddVariant(variants.length);
+}
+
+async function loadHealth() {
+  const panel = document.getElementById('health-panel');
+  if (!panel || !currentDetail) return;
+  if (currentDetail.status !== 'running') {
+    panel.hidden = true;
+    panel.innerHTML = '';
+    return;
+  }
+  const expId = currentDetail.id;
+  const result = await callApi(`/api/experiments/${expId}/health`, { headers: authHeaders() });
+  if (!currentDetail || currentDetail.id !== expId || !document.getElementById('health-panel')) return;
+  if (!result.ok || !result.data.show) {
+    panel.hidden = true;
+    panel.innerHTML = '';
+    return;
+  }
+  panel.hidden = false;
+  panel.innerHTML = UI.renderHealth(result.data);
 }
 
 function renderGoalBlocks() {
   const mount = document.getElementById('detail-goals');
+  const intro = document.getElementById('goals-intro');
   if (!mount || !currentDetail) return;
-  const variants = currentDetail.variants || [];
-  mount.innerHTML = variants.map((v) => {
+  const divergent = currentDetail.goals_scope === 'divergent';
+  if (intro) {
+    intro.textContent = divergent
+      ? 'These variants do not measure the same goals, so each list is still saved on its own variant. Past results stay as they are.'
+      : 'Goals are set once for this experiment and apply to every variant, including Control. Renaming a goal does not split its history.';
+  }
+  if (divergent) {
+    mount.innerHTML = renderDivergentGoals() + `
+      <details>
+        <summary>Use one goal list for every variant</summary>
+        <div class="accordion-body">
+          <p class="hint" style="margin-top:0;">Saving replaces the per-variant goals. Past results stay as they are. From then on, every variant is measured the same way.</p>
+          <div id="detail-goals-list"></div>
+          <button type="button" class="btn-ghost" style="margin-top:10px;" data-action="add-goal-row">+ Add goal</button>
+          <div style="margin-top:12px;"><button type="button" data-action="save-goals" data-unify="1">Replace with this list</button></div>
+        </div>
+      </details>`;
+    return;
+  }
+  mount.innerHTML = `
+    <div id="detail-goals-list"></div>
+    <button type="button" class="btn-ghost" style="margin-top:10px;" data-action="add-goal-row">+ Add goal</button>
+    <div style="margin-top:12px;"><button type="button" data-action="save-goals">Save goals</button></div>`;
+  (currentDetail.goals || []).forEach((goal) => addGoalRow(goal, 'detail-goals-list'));
+}
+
+function renderDivergentGoals() {
+  return (currentDetail.variants || []).map((v) => {
     const goals = v.goals || [];
     const items = goals.length
       ? goals.map((g, i) => `<div class="goal-saved"><span>${UI.escapeHtml(UI.describeGoal(g))}</span><button type="button" class="btn-ghost" data-action="remove-goal" data-id="${v.id}" data-index="${i}">Remove</button></div>`).join('')
-      : '<p class="hint">No goals on this variant yet.</p>';
+      : '<p class="hint">No goals on this variant.</p>';
     return `<div style="margin-top:16px;">
       <h3>${UI.escapeHtml(v.name)}</h3>
       ${items}
@@ -1269,22 +1321,35 @@ function renderGoalBlocks() {
           <option value="url">Visited URL</option>
         </select>
         <input class="g-value" type="text" placeholder="#cta-button" style="margin:0; flex:1;">
-        <input class="g-id" type="text" placeholder="label" style="margin:0; width:140px;">
+        <input class="g-id" type="text" placeholder="name" style="margin:0; width:140px;">
         <button type="button" data-action="add-goal" data-id="${v.id}">Add goal</button>
       </div>
     </div>`;
   }).join('');
 }
 
+async function saveExperimentGoals(goals, unify) {
+  const result = await callApi(`/api/experiments/${currentDetail.id}/goals`, {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify({ goals, unify: !!unify }),
+  });
+  if (!result.ok) { detailError(result.message); return false; }
+  detailError('');
+  await reloadDetail();
+  return true;
+}
+
 async function patchVariant(variant, fields) {
+  const body = {
+    name: fields.name != null ? fields.name : variant.name,
+    traffic_split: fields.traffic_split != null ? fields.traffic_split : variant.traffic_split,
+  };
+  if (fields.goals != null) body.goals = fields.goals;
   const result = await callApi(`/api/experiments/${currentDetail.id}/variants/${variant.id}`, {
     method: 'PATCH',
     headers: authHeaders(),
-    body: JSON.stringify({
-      name: fields.name != null ? fields.name : variant.name,
-      traffic_split: fields.traffic_split != null ? fields.traffic_split : variant.traffic_split,
-      goals: fields.goals != null ? fields.goals : (variant.goals || []),
-    }),
+    body: JSON.stringify(body),
   });
   if (!result.ok) { detailError(result.message); return false; }
   detailError('');
@@ -1403,8 +1468,20 @@ document.getElementById('page-detail').addEventListener('click', async (e) => {
     const value = draft.querySelector('.g-value').value.trim();
     const label = draft.querySelector('.g-id').value.trim();
     if (!value) { detailError(type === 'url' ? 'Add the URL text to match.' : 'Add a selector.'); return; }
-    const goal = type === 'url' ? { type: 'url', url_match: value, id: label } : { type: 'click', selector: value, id: label };
+    const goal = type === 'url'
+      ? { type: 'url', url_match: value, name: label, match: 'contains' }
+      : { type: 'click', selector: value, name: label };
     await patchVariant(variant, { goals: [...(variant.goals || []), goal] });
+    return;
+  }
+  if (action === 'add-goal-row') {
+    addGoalRow(null, 'detail-goals-list');
+    return;
+  }
+  if (action === 'save-goals') {
+    const goals = collectGoals('detail-goals-list');
+    if (btn.dataset.unify === '1' && !confirm('Replace the per-variant goals with this one list? Past results stay as they are.')) return;
+    await saveExperimentGoals(goals, btn.dataset.unify === '1');
     return;
   }
   if (action === 'save-settings') {
@@ -1880,9 +1957,14 @@ function renderWizardVariants() {
 
 function updateSplitNote() {
   const note = document.getElementById('wizard-split-note');
-  if (!note) return;
-  const sum = wizard.variants.reduce((total, row) => total + (parseInt(row.split, 10) || 0), 0);
-  note.textContent = wizard.variants.length ? `Splits currently add up to ${sum}%.` : '';
+  if (note) {
+    const sum = wizard.variants.reduce((total, row) => total + (parseInt(row.split, 10) || 0), 0);
+    note.textContent = wizard.variants.length ? `Splits currently add up to ${sum}%.` : '';
+  }
+  const cap = document.getElementById('wizard-cap-note');
+  const addBtn = document.getElementById('wizard-add-variant');
+  if (cap) cap.textContent = UI.variantCapMessage(wizard.variants.length);
+  if (addBtn) addBtn.hidden = !UI.canAddVariant(wizard.variants.length);
 }
 
 function syncWizardVariantFromDom(index) {
@@ -1898,8 +1980,13 @@ async function ensureWizardVariants() {
   const result = await callApi(`/api/experiments/${wizard.expId}`, { headers: authHeaders() });
   if (!result.ok) return;
   wizard.variants = (result.data.variants || []).map((v) => ({ id: v.id, name: v.name, split: v.traffic_split }));
-  const withGoals = (result.data.variants || []).find((v) => v.goals && v.goals.length);
-  if (withGoals && !wizard.goalRows.length) wizard.goalRows = withGoals.goals;
+  if (!wizard.goalRows.length) {
+    if (result.data.goals && result.data.goals.length) wizard.goalRows = result.data.goals;
+    else {
+      const withGoals = (result.data.variants || []).find((v) => v.goals && v.goals.length);
+      if (withGoals) wizard.goalRows = withGoals.goals;
+    }
+  }
   saveWizard();
 }
 
@@ -1962,12 +2049,10 @@ async function persistVariantRow(index) {
   }
   const exp = await callApi(`/api/experiments/${wizard.expId}`, { headers: authHeaders() });
   if (!exp.ok) { wizardMsg(exp.message); return false; }
-  const existing = (exp.data.variants || []).find((v) => v.id === row.id);
-  const goals = existing ? (existing.goals || []) : [];
   if (row.id) {
     const result = await callApi(`/api/experiments/${wizard.expId}/variants/${row.id}`, {
       method: 'PATCH', headers: authHeaders(),
-      body: JSON.stringify({ name, traffic_split, goals }),
+      body: JSON.stringify({ name, traffic_split }),
     });
     if (!result.ok) { wizardMsg(result.message); return false; }
   } else {
@@ -2005,15 +2090,16 @@ function rememberWizardGoals() {
 
 async function persistWizardGoals() {
   rememberWizardGoals();
-  const goals = wizard.goalRows;
-  const exp = await callApi(`/api/experiments/${wizard.expId}`, { headers: authHeaders() });
-  if (!exp.ok) { wizardMsg(exp.message); return false; }
-  for (const variant of exp.data.variants || []) {
-    const result = await callApi(`/api/experiments/${wizard.expId}/variants/${variant.id}`, {
-      method: 'PATCH', headers: authHeaders(),
-      body: JSON.stringify({ name: variant.name, traffic_split: variant.traffic_split, goals }),
-    });
-    if (!result.ok) { wizardMsg(result.message); return false; }
+  const result = await callApi(`/api/experiments/${wizard.expId}/goals`, {
+    method: 'PUT', headers: authHeaders(),
+    body: JSON.stringify({ goals: wizard.goalRows }),
+  });
+  if (!result.ok) { wizardMsg(result.message); return false; }
+  wizard.goalRows = result.data.goals || wizard.goalRows;
+  const list = document.getElementById('wizard-goals-list');
+  if (list) {
+    list.innerHTML = '';
+    wizard.goalRows.forEach((goal) => addGoalRow(goal, 'wizard-goals-list'));
   }
   saveWizard();
   return true;
@@ -2145,6 +2231,10 @@ document.getElementById('wizard-steps').addEventListener('click', async (e) => {
 });
 document.getElementById('wizard-add-variant').addEventListener('click', () => {
   wizard.variants.forEach((_, i) => syncWizardVariantFromDom(i));
+  if (!UI.canAddVariant(wizard.variants.length)) {
+    wizardMsg(UI.variantCapMessage(wizard.variants.length));
+    return;
+  }
   const n = wizard.variants.length;
   const letter = String.fromCharCode(97 + Math.min(25, n));
   wizard.variants.push({ id: null, name: `variant-${letter}`, split: 0 });
@@ -2215,6 +2305,7 @@ function addGoalRow(prefill, listId) {
   if (!list) return;
   const row = document.createElement('div');
   row.className = 'goal-row';
+  row.dataset.goalId = (prefill && prefill.id) || '';
   row.innerHTML = `
     <div class="full-width">
       <label>Goal type</label>
@@ -2223,13 +2314,30 @@ function addGoalRow(prefill, listId) {
         <option value="url">Visited a URL</option>
       </select>
     </div>
+    <div class="g-match-wrap full-width" hidden>
+      <label>Match</label>
+      <select class="g-match">
+        <option value="contains">Contains</option>
+        <option value="exact">Exact</option>
+        <option value="starts_with">Starts with</option>
+        <option value="regex">Regular expression</option>
+      </select>
+    </div>
     <div>
       <label class="g-value-label">Selector</label>
       <input class="g-value" placeholder="#cta-button">
     </div>
     <div>
-      <label>Label</label>
-      <input class="g-id" placeholder="cta_click">
+      <label>Name</label>
+      <input class="g-name" placeholder="Thank-you page">
+    </div>
+    <div class="g-test full-width" hidden>
+      <label>Test this URL</label>
+      <div class="goal-test">
+        <input class="g-sample" type="text" placeholder="https://example.com/thank-you" spellcheck="false">
+        <button type="button" class="btn-ghost g-test-btn">Test this URL</button>
+        <span class="g-test-result hint"></span>
+      </div>
     </div>
     <div style="align-self:end;">
       <button type="button" class="remove-row" onclick="this.closest('.goal-row').remove()">Remove</button>
@@ -2237,21 +2345,35 @@ function addGoalRow(prefill, listId) {
   `;
   list.appendChild(row);
   const typeEl = row.querySelector('.g-type');
+  const matchWrap = row.querySelector('.g-match-wrap');
+  const matchEl = row.querySelector('.g-match');
   const valueLabelEl = row.querySelector('.g-value-label');
   const valueEl = row.querySelector('.g-value');
+  const testWrap = row.querySelector('.g-test');
   function renderValueField() {
-    if (typeEl.value === 'url') {
-      valueLabelEl.textContent = 'URL contains';
-      valueEl.placeholder = '/thank-you';
-    } else {
+    const url = typeEl.value === 'url';
+    matchWrap.hidden = !url;
+    testWrap.hidden = !url;
+    if (!url) {
       valueLabelEl.textContent = 'Selector';
       valueEl.placeholder = '#cta-button';
+      return;
     }
+    const how = {
+      contains: 'URL contains',
+      exact: 'URL is exactly',
+      starts_with: 'URL starts with',
+      regex: 'Regular expression',
+    }[matchEl.value] || 'URL contains';
+    valueLabelEl.textContent = how;
+    valueEl.placeholder = matchEl.value === 'regex' ? '/thank-you/?$' : '/thank-you';
   }
   typeEl.addEventListener('change', renderValueField);
+  matchEl.addEventListener('change', renderValueField);
   if (prefill) {
     typeEl.value = prefill.type || 'click';
-    row.querySelector('.g-id').value = prefill.id || '';
+    row.querySelector('.g-name').value = prefill.name || prefill.id || '';
+    if (prefill.match) matchEl.value = prefill.match;
     valueEl.value = prefill.type === 'url' ? (prefill.url_match || '') : (prefill.selector || '');
   }
   renderValueField();
@@ -2261,8 +2383,15 @@ function collectGoals(listId) {
   return Array.from(document.querySelectorAll(`#${listId} .goal-row`)).map((row) => {
     const type = row.querySelector('.g-type').value;
     const value = row.querySelector('.g-value').value.trim();
-    const id = row.querySelector('.g-id').value.trim();
-    return type === 'url' ? { type: 'url', url_match: value, id } : { type: 'click', selector: value, id };
+    const name = row.querySelector('.g-name').value.trim();
+    const goal = { id: row.dataset.goalId || '', name, type };
+    if (type === 'url') {
+      goal.url_match = value;
+      goal.match = row.querySelector('.g-match').value || 'contains';
+    } else {
+      goal.selector = value;
+    }
+    return goal;
   }).filter((g) => (g.type === 'url' ? g.url_match : g.selector));
 }
 
@@ -2294,7 +2423,8 @@ document.body.addEventListener('click', async (e) => {
     type: g.type,
     selector: g.type === 'click' ? g.value : undefined,
     url_match: g.type === 'url' ? g.value : undefined,
-    id: g.label,
+    name: g.label || '',
+    match: 'contains',
   };
   if (chip.dataset.popularMode === 'wizard') {
     addGoalRow(prefill, 'wizard-goals-list');
@@ -2302,19 +2432,34 @@ document.body.addEventListener('click', async (e) => {
     return;
   }
   if (!currentDetail) return;
-  const goal = g.type === 'url'
-    ? { type: 'url', url_match: g.value, id: g.label || '' }
-    : { type: 'click', selector: g.value, id: g.label || '' };
-  for (const variant of currentDetail.variants || []) {
-    const already = (variant.goals || []).some((existing) => existing.id === goal.id && (existing.selector === goal.selector || existing.url_match === goal.url_match));
-    if (already) continue;
-    const result = await callApi(`/api/experiments/${currentDetail.id}/variants/${variant.id}`, {
-      method: 'PATCH', headers: authHeaders(),
-      body: JSON.stringify({ name: variant.name, traffic_split: variant.traffic_split, goals: [...(variant.goals || []), goal] }),
-    });
-    if (!result.ok) { detailError(result.message); return; }
+  if (currentDetail.goals_scope === 'divergent') {
+    detailError('This test’s goals differ between variants, so a quick-add would not apply to every variant.');
+    return;
   }
-  await reloadDetail();
+  const goal = g.type === 'url'
+    ? { type: 'url', url_match: g.value, name: g.label || '', match: 'contains' }
+    : { type: 'click', selector: g.value, name: g.label || '' };
+  const already = (currentDetail.goals || []).some((existing) =>
+    (existing.name || existing.id) === (goal.name || '') &&
+    (existing.selector === goal.selector || existing.url_match === goal.url_match)
+  );
+  if (already) return;
+  await saveExperimentGoals([...(currentDetail.goals || []), goal], false);
+});
+
+document.body.addEventListener('click', (e) => {
+  const btn = e.target.closest('.g-test-btn');
+  if (!btn || !window.PivitUrl) return;
+  const row = btn.closest('.goal-row');
+  if (!row) return;
+  const result = window.PivitUrl.testUrlGoal(
+    row.querySelector('.g-match').value,
+    row.querySelector('.g-value').value.trim(),
+    row.querySelector('.g-sample').value.trim()
+  );
+  const out = row.querySelector('.g-test-result');
+  out.textContent = result.message;
+  out.className = 'g-test-result ' + (result.ok ? (result.matches ? 'ok-msg' : 'warn-text') : 'error-msg');
 });
 
 // --- Preview page ---

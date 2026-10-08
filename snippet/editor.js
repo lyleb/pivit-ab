@@ -42,6 +42,7 @@
   let savedSnapshot = '';    // canonical form of what's actually saved on the server, for the dirty check
   let experimentName = '';
   let variantName = '';
+  let goalsScope = 'shared';
   let pickingActive = false;
   let hoveredEl = null;
   let changesListOpen = false;
@@ -472,8 +473,8 @@
 
   function describeGoal(g) {
     return (g.type || 'click') === 'url'
-      ? `Visit goal "${g.id || g.url_match}" — URL contains ${g.url_match}`
-      : `Click goal "${g.id || g.selector}" on ${g.selector}`;
+      ? `Visit goal "${g.name || g.id || g.url_match}" — URL ${g.match && g.match !== 'contains' ? g.match : 'contains'} ${g.url_match}`
+      : `Click goal "${g.name || g.id || g.selector}" on ${g.selector}`;
   }
 
   function renderGoalsList() {
@@ -1139,10 +1140,9 @@
 
   function openEditElementPanel(el, selector) { openEditSetPanel(el, selector, null); }
 
-  // --- Goals: "Set as goal" marks a click on this element as a conversion for
-  // THIS variant. Goals are per variant (each visitor's snippet only wires the
-  // goals of the variant they were assigned), so the hint says to repeat it on
-  // the others — otherwise those variants are never measured. ---
+  // Goals are stored once for the experiment and apply to every variant.
+  // The id is generated and stays put if the name is renamed. A test whose
+  // variants were saved with different goals still writes this variant only.
   function suggestGoalLabel(el) {
     const slug = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30);
     let base = el.id ? slug(el.id) : '';
@@ -1150,8 +1150,14 @@
     if (!base) base = el.tagName.toLowerCase();
     let label = `${base}_click`;
     let n = 2;
-    while (allGoals.some((g) => g.id === label)) label = `${base}_click_${n++}`;
+    while (allGoals.some((g) => (g.name || g.id) === label)) label = `${base}_click_${n++}`;
     return label;
+  }
+  function newGoalId() {
+    return 'g_' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
+  }
+  function variantGoalsDiffer() {
+    return goalsScope === 'divergent';
   }
 
   function openGoalPanel(pickedEl, chosenSelector, scope) {
@@ -1169,18 +1175,18 @@
       title: 'Set as click goal',
       subtitle: selector,
       fields: [{
-        key: 'label', label: 'Goal label', line: true, value: suggestGoalLabel(clickable),
-        hint: 'A click on this element counts as a conversion for this variant, and the label names it in your results. ' +
-          (clickable !== pickedEl ? 'Using the button/link around what you clicked. ' : '') +
-          'Goals belong to each variant separately — set the same goal (same label) on your other variants too, otherwise they are not measured.',
+        key: 'label', label: 'Goal name', line: true, value: suggestGoalLabel(clickable),
+        hint: 'A click on this element counts as a conversion for every variant, including Control. The name is what you see in results. Repeat clicks from the same visitor are counted once. ' +
+          (clickable !== pickedEl ? 'Using the button or link around what you clicked. ' : '') +
+          (variantGoalsDiffer() ? 'This test’s variants do not share the same goals, so this one is saved on this variant only.' : ''),
       }],
       applyLabel: 'Set goal',
       onApply: (v) => {
         const label = v.label.trim();
-        if (existing) return { error: `This element is already a goal ("${existing.id || existing.selector}") on this variant. Remove it from the Goals list first to change its label.` };
-        if (!/^[A-Za-z0-9_-]{1,100}$/.test(label)) return { error: 'Use letters, numbers, underscores or hyphens only — no spaces.' };
-        if (allGoals.some((g) => g.id === label)) return { error: `A goal called "${label}" already exists on this variant — choose a different label.` };
-        allGoals.push({ type: 'click', selector, id: label });
+        if (existing) return { error: `This element is already a goal ("${existing.name || existing.id || existing.selector}"). Remove it from the Goals list first to change its name.` };
+        if (!label || label.length > 100) return { error: 'Give the goal a name of 100 characters or fewer.' };
+        if (allGoals.some((g) => (g.name || g.id) === label)) return { error: `A goal called "${label}" already exists — choose a different name.` };
+        allGoals.push({ type: 'click', selector, id: newGoalId(), name: label });
         persistWorkingSet();
         refreshToolbarState();
       },
@@ -1227,6 +1233,7 @@
       experimentId = String(variant.experiment_id || '');
       experimentName = variant.experiment_name || '';
       variantName = variant.name || '';
+      goalsScope = variant.goals_scope || 'shared';
       const serverChanges = Array.isArray(variant.changes) ? variant.changes : [];
       const serverGoals = Array.isArray(variant.goals) ? variant.goals : [];
       savedSnapshot = canon({ changes: serverChanges, goals: serverGoals });

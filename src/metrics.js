@@ -21,11 +21,36 @@ const db = require('./db');
 const GOAL_TYPES = ['click', 'url', 'form', 'custom', 'revenue'];
 
 function goalKey(goal) {
+  if (!goal) return '';
   if (goal.id) return goal.id;
   const type = goal.type || 'click';
   if (type === 'url') return goal.url_match || '';
   if (type === 'custom' || type === 'revenue') return goal.event || '';
   return goal.selector || '';
+}
+
+function goalLabel(goal, key) {
+  if (goal && goal.name) return goal.name;
+  if (goal && goal.id) return goal.id;
+  return key;
+}
+
+// One definition per event id. Experiment-level goals win when the test is
+// shared. Divergent tests, and anything not migrated yet, still read the
+// per-variant lists so historical breakdowns stay on the same keys.
+function defsFromGoalList(goals) {
+  const byKey = new Map();
+  (goals || []).forEach((g) => {
+    const key = goalKey(g);
+    if (!key) return;
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.primary = existing.primary || !!g.primary;
+    } else {
+      byKey.set(key, { key, type: g.type || 'click', label: goalLabel(g, key), primary: !!g.primary });
+    }
+  });
+  return Array.from(byKey.values());
 }
 
 function conversionRate(visitors, conversions) {
@@ -208,21 +233,18 @@ function annotateUniqueConversions(rows) {
 }
 
 async function getGoalDefs(experimentId) {
+  const { rows: expRows } = await db.query(
+    `SELECT goals, goals_scope FROM experiments WHERE id = $1`,
+    [experimentId]
+  );
+  const exp = expRows[0];
+  if (exp && exp.goals_scope !== 'divergent' && Array.isArray(exp.goals) && exp.goals.length > 0) {
+    return defsFromGoalList(exp.goals);
+  }
   const { rows } = await db.query(`SELECT goals FROM variants WHERE experiment_id = $1 ORDER BY created_at`, [experimentId]);
-  const byKey = new Map();
-  rows.forEach((r) => {
-    (r.goals || []).forEach((g) => {
-      const key = goalKey(g);
-      if (!key) return;
-      const existing = byKey.get(key);
-      if (existing) {
-        existing.primary = existing.primary || !!g.primary;
-      } else {
-        byKey.set(key, { key, type: g.type || 'click', label: g.id || key, primary: !!g.primary });
-      }
-    });
-  });
-  return Array.from(byKey.values());
+  const lists = [];
+  rows.forEach((r) => { (r.goals || []).forEach((g) => lists.push(g)); });
+  return defsFromGoalList(lists);
 }
 
 async function getPrimaryGoalKey(experimentId) {
@@ -438,6 +460,8 @@ async function getTimeseries(experimentId) {
 module.exports = {
   GOAL_TYPES,
   goalKey,
+  goalLabel,
+  defsFromGoalList,
   conversionRate,
   summariseConversions,
   summariseByGoal,

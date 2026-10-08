@@ -45,6 +45,28 @@ assert.strictEqual(ui.shortVariantLabel('Control'), 'Control');
 assert.strictEqual(ui.shortVariantLabel('Homepage hero'), 'Homepage hero');
 assert.strictEqual(ui.shortUrl('https://cantsaythat.co.uk/about'), 'cantsaythat.co.uk/about');
 assert.strictEqual(ui.describeGoal({ type: 'click', selector: '.hero-cta', id: 'CTA click' }), 'CTA click → .hero-cta');
+assert.strictEqual(ui.describeGoal({ type: 'click', selector: '.hero-cta', id: 'g_abc', name: 'Buy button' }), 'Buy button → .hero-cta');
+assert.strictEqual(ui.describeGoal({ type: 'url', url_match: '/checkout', id: 'g_1', name: 'Checkout', match: 'exact' }), 'Checkout → URL is exactly /checkout');
+assert.strictEqual(ui.describeGoal({ type: 'url', url_match: '/thanks', id: 'thanks' }), 'thanks → URL contains /thanks');
+
+assert.strictEqual(ui.canAddVariant(2), true);
+assert.strictEqual(ui.canAddVariant(3), false);
+assert.strictEqual(ui.canAddVariant(4), false);
+assert.strictEqual(ui.variantCapMessage(2), '');
+assert.strictEqual(ui.variantCapMessage(3), 'A test can have at most 3 variants, including Control.');
+assert.ok(ui.variantCapMessage(5).includes('still run'));
+
+const healthHtml = ui.renderHealth({
+  show: true,
+  checks: [
+    { state: 'green', title: 'Traffic split', detail: 'The traffic split matches the weights you set.' },
+    { state: 'red', title: 'Goals', detail: 'These variants do not measure the same goals.' },
+  ],
+});
+assert.ok(healthHtml.includes('health-card green'));
+assert.ok(healthHtml.includes('health-card red'));
+assert.ok(healthHtml.includes('The traffic split matches the weights you set.'));
+assert.strictEqual(ui.renderHealth({ show: false, checks: [] }), '');
 assert.strictEqual(ui.escapeHtml(`<b class="x">'`), '&lt;b class=&quot;x&quot;&gt;&#39;');
 
 const here = 'https://pivit.click';

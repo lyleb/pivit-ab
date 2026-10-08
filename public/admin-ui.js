@@ -102,11 +102,48 @@
     return null;
   }
 
+  const MAX_VARIANTS = 3;
+
+  function canAddVariant(count) {
+    return Number(count) < MAX_VARIANTS;
+  }
+
+  // Shown when a test is already at the limit, and a gentler line when an
+  // older test has more than three and must keep running.
+  function variantCapMessage(count) {
+    const n = Number(count) || 0;
+    if (n > MAX_VARIANTS) {
+      return `This test has ${n} variants. New tests are limited to 3, including Control. These extra variants still run.`;
+    }
+    if (n >= MAX_VARIANTS) return 'A test can have at most 3 variants, including Control.';
+    return '';
+  }
+
   function describeGoal(goal) {
     if (!goal) return '';
-    const label = goal.id ? goal.id : (goal.type === 'url' ? 'Visited URL' : 'Click');
-    const target = goal.type === 'url' ? (goal.url_match || '') : (goal.selector || '');
+    const label = goal.name || goal.id || (goal.type === 'url' ? 'Visited URL' : 'Click');
+    if (goal.type === 'url') {
+      const target = goal.url_match || '';
+      const how = {
+        contains: 'contains',
+        exact: 'is exactly',
+        starts_with: 'starts with',
+        regex: 'matches',
+      }[goal.match || 'contains'] || 'contains';
+      return target ? `${label} → URL ${how} ${target}` : label;
+    }
+    const target = goal.selector || '';
     return target ? `${label} → ${target}` : label;
+  }
+
+  function renderHealth(report) {
+    if (!report || !report.show || !Array.isArray(report.checks)) return '';
+    const cards = report.checks.map((check) => {
+      const state = check.state === 'red' || check.state === 'amber' || check.state === 'green' ? check.state : 'amber';
+      const label = state === 'green' ? 'OK' : (state === 'red' ? 'Problem' : 'Check');
+      return `<section class="health-card ${state}"><div class="state">${escapeHtml(label)}</div><h3>${escapeHtml(check.title || '')}</h3><p>${escapeHtml(check.detail || '')}</p></section>`;
+    }).join('');
+    return `<h2>Health</h2><div class="health-grid">${cards}</div>`;
   }
 
   function formatCreated(iso) {
@@ -165,6 +202,10 @@
     showNextSteps,
     statusAction,
     describeGoal,
+    MAX_VARIANTS,
+    canAddVariant,
+    variantCapMessage,
+    renderHealth,
     formatCreated,
     displayOrigin,
     snippetTag,

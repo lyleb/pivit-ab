@@ -371,3 +371,20 @@ body.modal-open { overflow: hidden; }
   .modal-body { flex: 1; }
   .modal-foot button, .modal-foot .btn { flex: 1; min-height: var(--tap); }
 }
+
+#health-panel { margin: 16px 0 6px; }
+.health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.health-card {
+  border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--card-2);
+}
+.health-card h3 { margin: 4px 0 6px; }
+.health-card p { margin: 0; color: var(--text-muted); font-size: 0.88em; }
+.health-card .state { font-size: 0.72em; font-weight: 750; letter-spacing: 0.04em; text-transform: uppercase; }
+.health-card.green { border-color: #1d6b52; }
+.health-card.green .state { color: var(--ok); }
+.health-card.amber { border-color: #8a6a2f; }
+.health-card.amber .state { color: var(--warn); }
+.health-card.red { border-color: #8a3a3a; }
+.health-card.red .state { color: var(--danger); }
+.goal-test { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.goal-test input { flex: 1; min-width: 160px; margin: 0; }

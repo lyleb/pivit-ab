@@ -2,6 +2,15 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { recordGoalUsage } = require('./goals');
+const {
+  variantAdditionAllowed,
+  variantCapError,
+  validateGoals,
+  persistGoals,
+} = require('../goals');
+const { detectSRM } = require('../srm');
+const { buildHealth } = require('../health');
+const { utcDay, windowStartDay } = require('../host-hits');
 const { createEditToken } = require('../edit-token');
 const { authorisePreview, buildPublicExperimentList, createPreviewToken, previewUrl, editUrl, cacheControlForExperimentsQuery } = require('../preview-access');
 const {
@@ -60,7 +69,7 @@ router.get('/', async (req, res) => {
 
   try {
     const { rows: experiments } = await db.query(
-      `SELECT id, name, url_match, allowed_hosts FROM experiments
+      `SELECT id, name, url_match, allowed_hosts, goals FROM experiments
        WHERE $1 ILIKE '%' || url_match || '%' AND status = 'running'`,
       [url]
     );
@@ -70,7 +79,7 @@ router.get('/', async (req, res) => {
     let previewExperiment = null;
     if (previewAuth.ok) {
       const { rows: previewRows } = await db.query(
-        `SELECT e.id, e.name, e.url_match, e.allowed_hosts, e.status
+        `SELECT e.id, e.name, e.url_match, e.allowed_hosts, e.status, e.goals
          FROM variants v
          JOIN experiments e ON e.id = v.experiment_id
          WHERE v.id = $1
@@ -124,7 +133,7 @@ router.get('/by-ids', async (req, res) => {
 
   try {
     const { rows: experiments } = await db.query(
-      `SELECT id, name, allowed_hosts FROM experiments WHERE id = ANY($1::uuid[])`,
+      `SELECT id, name, allowed_hosts, goals FROM experiments WHERE id = ANY($1::uuid[])`,
       [idList]
     );
     const visible = applyHostScope(experiments, req);
@@ -139,6 +148,7 @@ router.get('/by-ids', async (req, res) => {
     const result = visible.map((exp) => ({
       id: exp.id,
       name: exp.name,
+      goals: Array.isArray(exp.goals) ? exp.goals : [],
       variants: variants.filter((v) => v.experiment_id === exp.id),
     }));
 
@@ -198,6 +208,76 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// GET /api/experiments/:id/health
+// Owner-only. Shown on the experiment page while the test is running.
+// Counts only — nothing here excludes or deletes visitors.
+router.get('/:id/health', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rows: expRows } = await db.query(
+      `SELECT status, goals, goals_scope FROM experiments WHERE id = $1`,
+      [id]
+    );
+    if (expRows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
+    const exp = expRows[0];
+
+    const { rows: splitRows } = await db.query(
+      `SELECT v.name AS variant_name, v.traffic_split,
+         COUNT(DISTINCT e.visitor_id) FILTER (WHERE e.event_type = 'view') AS visitors
+       FROM variants v
+       LEFT JOIN events e ON e.variant_id = v.id
+       WHERE v.experiment_id = $1 AND v.enabled = true
+       GROUP BY v.id, v.name, v.traffic_split
+       ORDER BY v.name`,
+      [id]
+    );
+    const split = splitRows.map((row) => ({
+      name: row.variant_name,
+      visitors: Number(row.visitors) || 0,
+      traffic_split: row.traffic_split,
+    }));
+    const srm = detectSRM(split);
+    const totalVisitors = split.reduce((sum, row) => sum + row.visitors, 0);
+
+    const { start } = windowStartDay(7);
+    const { rows: dropRows } = await db.query(
+      `SELECT day::text AS day, reason, drop_count
+       FROM event_drops
+       WHERE experiment_id = $1 AND day >= $2::date`,
+      [id, start]
+    );
+    const { rows: syntheticRows } = await db.query(
+      `SELECT COUNT(DISTINCT visitor_id)::int AS n
+       FROM events
+       WHERE experiment_id = $1 AND left(visitor_id, 4) = 'v_pt'`,
+      [id]
+    );
+
+    const goalCount = exp.goals_scope === 'divergent'
+      ? null
+      : (Array.isArray(exp.goals) ? exp.goals.length : 0);
+    let scope = exp.goals_scope || 'shared';
+    let count = goalCount;
+    if (scope === 'divergent') {
+      count = 0;
+    }
+
+    res.json(buildHealth({
+      status: exp.status,
+      srm,
+      totalVisitors,
+      scope,
+      goalCount: count,
+      drops: dropRows,
+      today: utcDay(),
+      syntheticVisitors: syntheticRows[0] ? syntheticRows[0].n : 0,
+    }));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
 // Creating an experiment also creates a "Control" variant automatically — no
 // changes, 50% traffic — so every new experiment starts with an unmodified
 // baseline to compare against. You only ever need to add the variant(s) you're
@@ -222,7 +302,8 @@ router.post('/', async (req, res) => {
     await client.query('BEGIN');
 
     const { rows: expRows } = await client.query(
-      `INSERT INTO experiments (name, url_match, client_id, allowed_hosts) VALUES ($1, $2, $3, $4::text[]) RETURNING *`,
+      `INSERT INTO experiments (name, url_match, client_id, allowed_hosts, goals, goals_scope, goals_migrated)
+       VALUES ($1, $2, $3, $4::text[], '[]'::jsonb, 'shared', true) RETURNING *`,
       [name, url_match, client_id || null, hosts]
     );
     const experiment = expRows[0];
@@ -265,23 +346,58 @@ router.patch('/:id/client', async (req, res) => {
 });
 
 router.post('/:id/variants', async (req, res) => {
+  const client = await db.pool.connect();
   try {
     const { id } = req.params;
     const { name, traffic_split, changes, goals } = req.body;
     if (!name) return res.status(400).json({ error: 'name is required' });
     if (!id) return res.status(400).json({ error: 'experiment id is required in the URL' });
 
-    const { rows } = await db.query(
+    await client.query('BEGIN');
+    const locked = await client.query(
+      `SELECT goals, goals_scope FROM experiments WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
+    if (locked.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'no experiment found with that id' });
+    }
+    const { rows: countRows } = await client.query(
+      `SELECT COUNT(*)::int AS n FROM variants WHERE experiment_id = $1`,
+      [id]
+    );
+    if (!variantAdditionAllowed(countRows[0].n)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: variantCapError() });
+    }
+
+    // A shared test copies the experiment goals onto the new variant. A
+    // divergent test keeps whatever list was sent (the editor still works).
+    const scope = locked.rows[0].goals_scope || 'shared';
+    let goalList = scope === 'divergent' ? (goals ?? []) : (locked.rows[0].goals || []);
+    if (scope === 'divergent' && goalList.length) {
+      const problem = validateGoals(goalList);
+      if (problem) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: problem });
+      }
+    }
+
+    const { rows } = await client.query(
       `INSERT INTO variants (experiment_id, name, traffic_split, changes, goals)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [id, name, traffic_split ?? 50, JSON.stringify(changes ?? []), JSON.stringify(goals ?? [])]
+      [id, name, traffic_split ?? 50, JSON.stringify(changes ?? []), JSON.stringify(goalList)]
     );
-    await recordGoalUsage(goals);
+    await client.query('COMMIT');
+    if (scope === 'divergent') await recordGoalUsage(goalList);
     res.status(201).json(rows[0]);
   } catch (err) {
+    await client.query('ROLLBACK').catch((rollbackErr) => console.error('Rollback failed:', rollbackErr));
     console.error(err);
     if (err.code === '23503') return res.status(400).json({ error: 'no experiment found with that id' });
     res.status(500).json({ error: 'internal error', detail: err.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -290,28 +406,90 @@ router.post('/:id/variants', async (req, res) => {
 // Editing a variant that's currently live changes what visitors see immediately —
 // there's no staging/draft step, so treat this like editing the client's page directly.
 router.patch('/:id/variants/:variantId', async (req, res) => {
+  const client = await db.pool.connect();
   try {
     const { id, variantId } = req.params;
     const { name, traffic_split, changes, goals } = req.body;
     if (!name) return res.status(400).json({ error: 'name is required' });
 
     // `changes` is only written when the request actually includes it. The
-    // dashboard form edits name/split/goals only — what a variant *does* is
-    // authored in the visual editor — so a save from the form must leave the
-    // variant's changes untouched rather than resetting them to [].
+    // dashboard form edits name/split — what a variant *does* is authored in
+    // the visual editor — so a save from the form must leave changes untouched.
+    // Goals are the same: omitted means "leave them", so a rename cannot wipe
+    // the list. An empty list is also ignored when the experiment already has
+    // shared goals, so a stale tab cannot clear them by accident.
     const changesParam = changes === undefined ? null : JSON.stringify(Array.isArray(changes) ? changes : []);
 
-    const { rows } = await db.query(
-      `UPDATE variants SET name = $1, traffic_split = $2, changes = COALESCE($3::jsonb, changes), goals = $4
-       WHERE id = $5 AND experiment_id = $6 RETURNING *`,
-      [name, traffic_split ?? 50, changesParam, JSON.stringify(goals ?? []), variantId, id]
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `UPDATE variants SET name = $1, traffic_split = $2, changes = COALESCE($3::jsonb, changes)
+       WHERE id = $4 AND experiment_id = $5 RETURNING *`,
+      [name, traffic_split ?? 50, changesParam, variantId, id]
     );
-    if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id on that experiment' });
-    await recordGoalUsage(goals);
+    if (rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'no variant found with that id on that experiment' });
+    }
+
+    if (goals !== undefined) {
+      const problem = validateGoals(goals);
+      if (problem) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: problem });
+      }
+      const { rows: expRows } = await client.query(`SELECT goals, goals_scope FROM experiments WHERE id = $1`, [id]);
+      const shared = expRows[0] && expRows[0].goals_scope !== 'divergent';
+      const wipingShared = shared && goals.length === 0 && (expRows[0].goals || []).length > 0;
+      if (!wipingShared) {
+        const saved = await persistGoals(client.query.bind(client), {
+          experimentId: id,
+          variantId,
+          goals,
+          unify: false,
+        });
+        rows[0].goals = saved.goals;
+        await recordGoalUsage(saved.goals);
+      }
+    }
+
+    await client.query('COMMIT');
     res.json(rows[0]);
   } catch (err) {
+    await client.query('ROLLBACK').catch((rollbackErr) => console.error('Rollback failed:', rollbackErr));
     console.error(err);
+    if (err.status) return res.status(err.status).json({ error: err.message });
     res.status(500).json({ error: 'internal error', detail: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/experiments/:id/goals  { goals: [...], unify?: true }
+// One list for every variant. unify is required when the variants were saved
+// with different goals, so a normal save cannot flatten that history.
+router.put('/:id/goals', async (req, res) => {
+  const client = await db.pool.connect();
+  try {
+    const goals = req.body && req.body.goals;
+    const problem = validateGoals(goals);
+    if (problem) return res.status(400).json({ error: problem });
+
+    await client.query('BEGIN');
+    const saved = await persistGoals(client.query.bind(client), {
+      experimentId: req.params.id,
+      goals,
+      unify: !!(req.body && req.body.unify),
+    });
+    await client.query('COMMIT');
+    await recordGoalUsage(saved.goals);
+    res.json(saved);
+  } catch (err) {
+    await client.query('ROLLBACK').catch((rollbackErr) => console.error('Rollback failed:', rollbackErr));
+    console.error(err);
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  } finally {
+    client.release();
   }
 });
 
