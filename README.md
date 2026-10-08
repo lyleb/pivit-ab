@@ -287,6 +287,10 @@ Test traffic is excluded from the owner results table, the Bayesian inputs (the 
 
 Snippet and public API hits from test traffic are not added to `host_hits` from now on. The script-tag request that loads `ab.js` can still be counted, because that request has already happened before the snippet can add `pivit_qa=1`. Two tester windows on 7 Oct 2026 are recorded in `host_hit_exclusions` and are not deleted: 12:22–12:24 UTC and 18:01–18:27 UTC, from `54.201.40.3`, origin `https://cantsaythat.co.uk`, host `pivitlab.com`. The daily totals already stored for that day are kept. The home page lists the windows.
 
+## How a test is decided
+
+A running test that has a plan shows health, progress and the traffic split until each variant has the planned visitors and the minimum runtime has passed. The verdict is then Win, Loss or Inconclusive, read once. Probability best stays a secondary detail after that, not a live call. The sum, the automatic plan, Reveal early, and the simulation results are in [docs/how-pivitlab-decides.md](docs/how-pivitlab-decides.md).
+
 ## What's NOT in v1 (by design)
 
 - Single owner account, not per-teammate logins — client accounts exist, but if you ever bring on a co-worker, they'd share the one owner password

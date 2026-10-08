@@ -5,6 +5,9 @@ const { computeBayesianStats } = require('../bayesian');
 const { detectSRM } = require('../srm');
 const { getVariantResults, getGoalBreakdown, getTimeseries, getPrimaryVariantData, annotateUniqueConversions, visibleEventSql } = require('../metrics');
 const { flagIsOn, summariseTestTraffic } = require('../test-traffic');
+const { outcomeGate } = require('../experiment-plan');
+const { hideOutcomeRow } = require('../reading');
+const { buildVerdict } = require('../verdict');
 const router = express.Router();
 
 router.use(requireAuth(['owner'])); // results are for your eyes only, not the public snippet
@@ -45,14 +48,18 @@ router.get('/:experimentId', async (req, res) => {
       summariseTestTraffic(experimentId),
     ]);
 
+    const gate = await outcomeGate(experimentId, includeTest);
+    const visible = gate.visible;
     res.json({
       experiment_id: experimentId,
       visitor_type: req.query.visitor_type || 'all',
       include_test: includeTest,
       test_traffic: { ...testTraffic, excluded: !includeTest },
-      primary_goal: primaryKey,
-      results,
-      goals: breakdown.goals,
+      primary_goal: visible ? primaryKey : null,
+      results: visible ? results : results.map(hideOutcomeRow),
+      goals: visible ? breakdown.goals : [],
+      reading: gate.reading,
+      blinded: !visible,
     });
   } catch (err) {
     console.error(err);
@@ -69,8 +76,13 @@ router.get('/:experimentId/timeseries', async (req, res) => {
 
   try {
     const includeTest = wantsTestTraffic(req);
+    const gate = await outcomeGate(experimentId, includeTest);
+    if (!gate.visible) {
+      res.json({ experiment_id: experimentId, include_test: includeTest, series: [], blinded: true, reading: gate.reading });
+      return;
+    }
     const series = await getTimeseries(experimentId, { includeTest });
-    res.json({ experiment_id: experimentId, include_test: includeTest, series });
+    res.json({ experiment_id: experimentId, include_test: includeTest, series, blinded: false, reading: gate.reading });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });
@@ -84,15 +96,17 @@ router.get('/:experimentId/recent', async (req, res) => {
   const { experimentId } = req.params;
   try {
     const includeTest = wantsTestTraffic(req);
+    const gate = await outcomeGate(experimentId, includeTest);
+    const outcomeSql = gate.visible ? '' : ` AND e.event_type = 'view'`;
     const { rows } = await db.query(
       `SELECT e.event_type, e.goal_id, e.created_at, v.name AS variant_name
        FROM events e JOIN variants v ON v.id = e.variant_id
-       WHERE e.experiment_id = $1 AND ${visibleEventSql('e', 2)}
+       WHERE e.experiment_id = $1 AND ${visibleEventSql('e', 2)}${outcomeSql}
        ORDER BY e.created_at DESC
        LIMIT 20`,
       [experimentId, includeTest]
     );
-    res.json({ events: rows });
+    res.json({ events: rows, blinded: !gate.visible, reading: gate.reading });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });
@@ -114,6 +128,26 @@ router.get('/:experimentId/export', async (req, res) => {
   const { experimentId } = req.params;
   try {
     const includeTest = wantsTestTraffic(req);
+    const gate = await outcomeGate(experimentId, includeTest);
+    if (!gate.visible) {
+      const header = ['variant_name', 'visitors', 'target_visitors', 'traffic_split_percent', 'days_elapsed', 'minimum_days'];
+      const lines = [header.join(',')];
+      const progress = (gate.reading && gate.reading.variants) || [];
+      progress.forEach((row) => {
+        lines.push([
+          csvField(row.variant_name),
+          row.visitors,
+          row.target == null ? '' : row.target,
+          row.traffic_split == null ? '' : row.traffic_split,
+          gate.reading.days_elapsed,
+          gate.reading.min_runtime_days == null ? '' : gate.reading.min_runtime_days,
+        ].join(','));
+      });
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="experiment-${experimentId}-progress.csv"`);
+      res.send(lines.join('\n'));
+      return;
+    }
     const { rows } = await db.query(
       `${firstSeenCte()}
        SELECT e.created_at, e.event_type, v.name AS variant_name, e.goal_id, e.visitor_id,
@@ -151,12 +185,31 @@ router.get('/:experimentId/bayesian', async (req, res) => {
   const { experimentId } = req.params;
   try {
     const includeTest = wantsTestTraffic(req);
+    const gate = await outcomeGate(experimentId, includeTest);
     const { variantData } = await getPrimaryVariantData(experimentId, { includeTest });
-    const stats = computeBayesianStats(variantData);
     const totalVisitors = variantData.reduce((sum, v) => sum + v.visitors, 0);
+    if (!gate.visible) {
+      res.json({
+        experiment_id: experimentId,
+        total_visitors: totalVisitors,
+        low_sample_warning: false,
+        stats: [],
+        blinded: true,
+        reading: gate.reading,
+      });
+      return;
+    }
+    const stats = computeBayesianStats(variantData);
     const lowSample = variantData.some((v) => v.visitors < 30);
 
-    res.json({ experiment_id: experimentId, total_visitors: totalVisitors, low_sample_warning: lowSample, stats });
+    res.json({
+      experiment_id: experimentId,
+      total_visitors: totalVisitors,
+      low_sample_warning: lowSample,
+      stats,
+      blinded: false,
+      reading: gate.reading,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });
@@ -193,6 +246,30 @@ router.get('/:experimentId/srm', async (req, res) => {
 
     const srm = detectSRM(variantData);
     res.json({ experiment_id: experimentId, variants: variantData, ...srm });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
+// GET /api/results/:experimentId/verdict
+// Win, loss or inconclusive once the plan is met. Empty until then.
+router.get('/:experimentId/verdict', async (req, res) => {
+  const { experimentId } = req.params;
+  try {
+    const includeTest = wantsTestTraffic(req);
+    const gate = await outcomeGate(experimentId, includeTest);
+    if (!gate.loaded) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (!gate.reading.plan_met) {
+      return res.json({ ready: false, reading: gate.reading, peeked: gate.reading.peeked });
+    }
+    const { variantData } = await getPrimaryVariantData(experimentId, { includeTest });
+    const verdict = buildVerdict({
+      variants: variantData,
+      plan: gate.loaded.experiment.plan,
+      srmDetected: !!(gate.loaded.srm && gate.loaded.srm.srm_detected),
+    });
+    res.json({ ...verdict, peeked: gate.reading.peeked, reading: gate.reading });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });
