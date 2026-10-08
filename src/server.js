@@ -7,7 +7,8 @@ const db = require('./db');
 const sessionMiddleware = require('./session');
 
 const { hostScopingMode } = require('./host-scope');
-const { configuredAppOrigin, sendPublicConfig } = require('./app-origin');
+const { configuredAppOrigin, sendPublicConfig, canonicalHtmlMiddleware } = require('./app-origin');
+const { robotsTagMiddleware, sendRobotsTxt } = require('./robots');
 const { hostHitMiddleware } = require('./host-hits');
 const { backfillExperimentGoals } = require('./goals');
 const { hstsMiddleware } = require('./hsts');
@@ -29,6 +30,10 @@ const app = express();
 // req.ip (used for the login throttle) would show the proxy's IP for everyone.
 app.set('trust proxy', 1);
 
+// noindex on every response (HTML, static files, /snippet, /api, /health).
+// See src/robots.js. Does not change caching or CORS.
+app.use(robotsTagMiddleware);
+
 // HSTS on every HTTPS response (pages, /snippet, /api, /health). See src/hsts.js.
 app.use(hstsMiddleware());
 
@@ -42,7 +47,8 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(sessionMiddleware);
 // Count snippet and public API hits without delaying the response. /health
-// is excluded inside the middleware. A counter failure is logged and ignored.
+// and /robots.txt are excluded inside the middleware. A counter failure is
+// logged and ignored.
 app.use(hostHitMiddleware);
 
 // editor.js is only loaded for an editing session. no-store stops a cached
@@ -52,6 +58,16 @@ app.use('/snippet/editor.js', (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   next();
 });
+
+// Leave the HTML crawlable so Google can read the noindex. Disallow: /
+// would stop that. /api and /snippet are not pages, so those stay disallowed.
+// See src/robots.js. There is no sitemap.xml — a sitemap belongs on the
+// future marketing site, not on this app.
+app.get('/robots.txt', sendRobotsTxt);
+
+// Fills in <link rel="canonical"> from APP_ORIGIN (else https://pivitlab.com)
+// before the static handler can send the file unchanged.
+app.use(canonicalHtmlMiddleware);
 
 // Serve the built snippet + the admin dashboard as static files
 app.use('/snippet', express.static(path.join(__dirname, '../snippet')));

@@ -67,11 +67,12 @@ function requestPath(req) {
 }
 
 // Snippet assets and the public endpoints the snippet calls. Not /health,
-// not the admin UI, not owner or client dashboard APIs.
+// not /robots.txt, not the admin UI, not owner or client dashboard APIs.
 function shouldCountRequest(req) {
   const path = requestPath(req);
   const method = String((req && req.method) || 'GET').toUpperCase();
   if (path === '/health' || path === '/health/') return false;
+  if (path === '/robots.txt' || path === '/robots.txt/') return false;
   // The admin page fetches this for the bookmarklet. It is not the installed snippet.
   if (path === '/snippet/picker-bookmarklet.js') return false;
   if (path === '/snippet' || path.startsWith('/snippet/')) return true;
