@@ -64,6 +64,8 @@ async function main() {
         visitor_id TEXT NOT NULL,
         event_type TEXT NOT NULL,
         goal_id TEXT,
+        is_test BOOLEAN NOT NULL DEFAULT false,
+        excluded_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
       CREATE TABLE host_hits (

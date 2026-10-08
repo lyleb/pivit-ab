@@ -260,6 +260,33 @@ The public snippet endpoints (`GET /api/experiments`, `POST /api/event`, `GET /a
 
 A conversion in results, the Bayesian panel, the client portal, the trend chart and the CSV `unique_conversion` column is a unique visitor per variant (and per goal, when goals are listed separately). Repeat clicks stay visible on the owner results table as **Conversion events**. The rate uses the unique count, so it cannot exceed 100%. The Bayesian calculation itself is unchanged; it is only fed that unique count.
 
+## Test traffic
+
+QA and synthetic visitors can be flagged, left out of the numbers, and hidden without deleting them. Two live tests keep working: an event body without `is_test` is still a normal visitor, and `GET /health` is still `{ ok: true }`.
+
+An event is test traffic when any of these is true:
+
+- the visitor id starts with `v_pt` (the existing fake-traffic prefix, including `v_ptmuyez2tm_`)
+- the JSON body has `"is_test": true` (also `1` or `"1"`)
+- the request has `?pivit_qa=1`, or a `Referer` whose query has `pivit_qa=1`
+- the request header `X-Pivit-Test` is `1`, `true`, or `yes`
+
+**What the box tester should send.** On the customer site, open the page with `?pivit_qa=1` (for example `https://cantsaythat.co.uk/?pivit_qa=1`). The snippet stores that in `localStorage` under `pivit_qa` and in a first-party cookie `pivit_qa=1`. Later visits from that browser stay marked until the page is opened with `?pivit_qa=0`, which clears both. While the flag is on, each beacon is the usual JSON body plus `"is_test": true`, and the snippet’s own calls to `/api/experiments` add `pivit_qa=1`. The snippet does not send `X-Pivit-Test`. `navigator.sendBeacon` cannot set a request header, and today’s beacons must stay sendBeacon calls. A direct client that can set headers (curl, or the tester posting to `/api/event` itself) may send `X-Pivit-Test: 1` instead of the field. A visitor id starting with `v_pt` is enough on its own. A normal beacon omits `is_test`.
+
+Example for a direct post:
+
+```json
+{ "experiment_id": "…", "variant_id": "…", "visitor_id": "v_pt…", "event_type": "view", "is_test": true }
+```
+
+Test traffic is excluded from the owner results table, the Bayesian inputs (the maths in `src/bayesian.js` are unchanged), the trend, the sample-ratio check, the client portal, the CSV, and recent activity. The results tab has an owner-only **Include test traffic** control that puts it back. The client portal ignores that flag. The Health panel shows how many test visitors there are and whether they are excluded.
+
+**Remove test traffic** (owner only) previews the visitor and event counts per variant, then hides the matching rows by setting `excluded_at`. **Restore** clears it. Nothing is deleted. The same actions accept a visitor-id prefix, matched literally, so `v_ptmuyez2tm_` does not treat `_` as a wildcard. Every remove and restore is written to `test_traffic_audit` (who, when, experiment, criteria, counts), shown on the results tab. These routes are not on the client portal. This change does not itself remove the synthetic `v_ptmuyez2tm_` visitors; the owner does that from the new control after deploy.
+
+`is_test` is added on startup if the column is missing. Existing rows whose visitor id starts with `v_pt` are flagged in the same startup pass. That update does not set `excluded_at`, and it is safe to run on every boot.
+
+Snippet and public API hits from test traffic are not added to `host_hits` from now on. The script-tag request that loads `ab.js` can still be counted, because that request has already happened before the snippet can add `pivit_qa=1`. Two tester windows on 7 Oct 2026 are recorded in `host_hit_exclusions` and are not deleted: 12:22–12:24 UTC and 18:01–18:27 UTC, from `54.201.40.3`, origin `https://cantsaythat.co.uk`, host `pivitlab.com`. The daily totals already stored for that day are kept. The home page lists the windows.
+
 ## What's NOT in v1 (by design)
 
 - Single owner account, not per-teammate logins — client accounts exist, but if you ever bring on a co-worker, they'd share the one owner password

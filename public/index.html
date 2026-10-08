@@ -36,6 +36,10 @@
   .page-actions, .header-actions, .wizard-actions .right, .inline-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
   label { margin-top: 14px; }
+  label.test-toggle {
+    display: flex; align-items: center; gap: 10px; margin-top: 0; font-size: 0.95em;
+  }
+  label.test-toggle input { width: 18px; height: 18px; margin: 0; flex: 0 0 auto; }
   .card label:first-child, .stack label:first-child { margin-top: 0; }
   textarea { height: 90px; font-family: "SF Mono", Menlo, monospace; font-size: 0.85em; }
   textarea.hosts { height: 68px; }
@@ -238,7 +242,8 @@
       </div>
       <div class="card" id="host-hits-card">
         <h2>Snippet traffic</h2>
-        <p class="hint" style="margin-top:0;">Hits to the snippet and the public API over the last 30 days, by the host that was called and the customer site that sent them. Health checks are not counted.</p>
+        <p class="hint" style="margin-top:0;">Hits to the snippet and the public API over the last 30 days, by the host that was called and the customer site that sent them. Health checks are not counted. Test traffic is not counted from now on.</p>
+        <p id="host-hits-exclusions" class="hint"></p>
         <p id="host-hits-summary" class="hint"></p>
         <p id="host-hits-msg" class="hint">Loading…</p>
         <div class="table-scroll" tabindex="0" role="region" aria-label="Snippet traffic by host (scrolls sideways)">
@@ -388,6 +393,19 @@
   </div>
 </div>
 
+<div id="test-traffic-modal" class="modal-backdrop">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="test-traffic-title">
+    <div class="modal-head">
+      <h2 id="test-traffic-title">Remove test traffic</h2>
+      <button type="button" class="modal-close" id="test-traffic-close" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" id="test-traffic-body"></div>
+    <div class="modal-foot">
+      <button type="button" class="btn-ghost" id="test-traffic-cancel">Cancel</button>
+      <button type="button" id="test-traffic-confirm">Remove</button>
+    </div>
+  </div>
+</div>
 <div id="clients-modal" class="modal-backdrop">
   <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="clients-title">
     <div class="modal-head">
@@ -429,6 +447,9 @@ let clientsCache = [];
 let experimentsCache = [];
 let experimentsLoaded = false;
 let currentDetail = null;
+let includeTestTraffic = false;
+let includeTestExperimentId = null;
+let testTrafficPending = null;
 let currentTab = 'overview';
 let routeToken = 0;
 let pickerHref = '#';
@@ -571,9 +592,10 @@ let clientsReturnFocus = null;
 
 function syncModalScrollLock() {
   const clientsOpen = document.getElementById('clients-modal').classList.contains('active');
+  const testOpen = document.getElementById('test-traffic-modal').classList.contains('active');
   const pop = document.getElementById('snippet-popover');
   const snippetSheet = pop.classList.contains('open') && pop.classList.contains('is-sheet');
-  document.body.classList.toggle('modal-open', clientsOpen || snippetSheet);
+  document.body.classList.toggle('modal-open', clientsOpen || testOpen || snippetSheet);
 }
 
 function openClientsModal() {
@@ -602,6 +624,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   const pop = document.getElementById('snippet-popover');
   if (pop.classList.contains('open')) { closeSnippetPopover(); return; }
+  if (document.getElementById('test-traffic-modal').classList.contains('active')) { closeTestTrafficModal(); return; }
   if (document.getElementById('clients-modal').classList.contains('active')) closeClientsModal();
 });
 
@@ -826,7 +849,7 @@ document.getElementById('exp-list-body').addEventListener('click', (e) => {
 });
 
 async function exportResultsCsv(expId) {
-  const res = await fetch(`/api/results/${expId}/export`, { headers: authHeaders() });
+  const res = await fetch(withTestQuery(`/api/results/${expId}/export`), { headers: authHeaders() });
   if (res.status === 401) { window.location.href = '/login.html'; return; }
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
@@ -873,6 +896,10 @@ function rememberPageUrl(id, value) {
 }
 
 async function openExperiment(id, tab, { token, force } = {}) {
+  if (includeTestExperimentId !== id) {
+    includeTestExperimentId = id;
+    includeTestTraffic = false;
+  }
   const requestToken = token || routeToken;
   if (!force && currentDetail && currentDetail.id === id && document.getElementById('detail-header')) {
     if (requestToken !== routeToken) return;
@@ -993,6 +1020,33 @@ function renderDetail() {
     </div>
 
     <div data-tab-panel="results" hidden>
+      <div class="card" id="test-traffic-card">
+        <h2>Test traffic</h2>
+        <p class="hint" style="margin-top:0;">Test traffic is left out of the table, the chart, the trend and the CSV. Include test traffic puts it back. Remove hides it until you restore it. Nothing here is deleted.</p>
+        <label class="test-toggle" for="include-test-traffic">
+          <input type="checkbox" id="include-test-traffic"${includeTestTraffic ? ' checked' : ''}>
+          Include test traffic
+        </label>
+        <div class="inline-actions" style="margin-top:12px;">
+          <button type="button" class="btn-ghost" data-action="test-traffic" data-mode="test" data-direction="remove">Remove test traffic</button>
+          <button type="button" class="btn-ghost" data-action="test-traffic" data-mode="test" data-direction="restore">Restore test traffic</button>
+        </div>
+        <label for="test-visitor-prefix">Visitor ID prefix</label>
+        <input id="test-visitor-prefix" placeholder="v_ptmuyez2tm_" spellcheck="false" autocomplete="off">
+        <p class="hint">The count is shown before anything is hidden. Underscores are matched exactly.</p>
+        <div class="inline-actions">
+          <button type="button" class="btn-ghost" data-action="test-traffic" data-mode="prefix" data-direction="remove">Remove this prefix</button>
+          <button type="button" class="btn-ghost" data-action="test-traffic" data-mode="prefix" data-direction="restore">Restore this prefix</button>
+        </div>
+        <h3 style="margin-top:18px;">Log</h3>
+        <p id="test-audit-msg" class="hint">Loading…</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Test traffic log (scrolls sideways)">
+          <table id="test-audit-table" style="display:none">
+            <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Criteria</th><th class="num">Visitors</th><th class="num">Events</th></tr></thead>
+            <tbody id="test-audit-body"></tbody>
+          </table>
+        </div>
+      </div>
       <div id="results-gate" class="card">
         <div class="banner" id="results-gate-banner"><span id="results-gate-text">Loading results…</span></div>
         <div class="placeholder"><strong>Conversion chart</strong>Shown once this experiment is running and has visitors.</div>
@@ -1265,7 +1319,7 @@ async function loadHealth() {
     return;
   }
   const expId = currentDetail.id;
-  const result = await callApi(`/api/experiments/${expId}/health`, { headers: authHeaders() });
+  const result = await callApi(withTestQuery(`/api/experiments/${expId}/health`), { headers: authHeaders() });
   if (!currentDetail || currentDetail.id !== expId || !document.getElementById('health-panel')) return;
   if (!result.ok || !result.data.show) {
     panel.hidden = true;
@@ -1500,6 +1554,10 @@ document.getElementById('page-detail').addEventListener('click', async (e) => {
     await deleteExperiment(currentDetail.id, btn);
     return;
   }
+  if (action === 'test-traffic') {
+    openTestTrafficDialog(btn.dataset.direction, btn.dataset.mode);
+    return;
+  }
   if (action === 'refresh-results') loadResults();
   if (action === 'trend') setTrendMode(btn.dataset.mode);
 });
@@ -1658,14 +1716,14 @@ async function loadResults() {
   if (!currentDetail) return;
   const expId = currentDetail.id;
   const status = currentDetail.status;
+  loadTestAudit(expId);
   if (status === 'draft') {
     showResultsGate('Not running — Bayesian and conversion rates stay hidden until you collect traffic. Install the snippet, then start.');
     return;
   }
   const filterEl = document.getElementById('visitor-type-filter');
   const visitorType = filterEl ? filterEl.value : '';
-  const qs = visitorType ? `?visitor_type=${encodeURIComponent(visitorType)}` : '';
-  const result = await callApi(`/api/results/${expId}${qs}`, { headers: authHeaders() });
+  const result = await callApi(withTestQuery(`/api/results/${expId}`, visitorType ? { visitor_type: visitorType } : null), { headers: authHeaders() });
   if (!currentDetail || currentDetail.id !== expId) return;
   if (!result.ok) {
     showResultsGate(`Could not load results: ${result.message}`);
@@ -1674,9 +1732,13 @@ async function loadResults() {
   const results = result.data.results || [];
   const visitors = results.reduce((sum, row) => sum + Number(row.visitors || 0), 0);
   if (UI.resultsGated(status, visitors)) {
-    showResultsGate(status === 'draft'
+    const testVisitors = result.data.test_traffic ? Number(result.data.test_traffic.visitors) || 0 : 0;
+    const testNote = status !== 'draft' && !includeTestTraffic && testVisitors > 0
+      ? ' Test traffic is excluded. Tick Include test traffic to see it.'
+      : '';
+    showResultsGate((status === 'draft'
       ? 'Not running — Bayesian and conversion rates stay hidden until you collect traffic. Install the snippet, then start.'
-      : 'No traffic yet — rates and probability best stay hidden until visitors arrive.');
+      : 'No traffic yet — rates and probability best stay hidden until visitors arrive.') + testNote);
     return;
   }
   document.getElementById('results-gate').hidden = true;
@@ -1711,12 +1773,12 @@ async function loadResults() {
     });
   }
 
-  const trendResult = await callApi(`/api/results/${expId}/timeseries`, { headers: authHeaders() });
+  const trendResult = await callApi(withTestQuery(`/api/results/${expId}/timeseries`), { headers: authHeaders() });
   currentTrendSeries = (trendResult.ok && trendResult.data.series) ? trendResult.data.series : [];
   renderTrendChart();
 
   const srmPanel = document.getElementById('srm-panel');
-  const srmResult = await callApi(`/api/results/${expId}/srm`, { headers: authHeaders() });
+  const srmResult = await callApi(withTestQuery(`/api/results/${expId}/srm`), { headers: authHeaders() });
   if (!srmResult.ok || !srmResult.data.applicable) {
     srmPanel.style.display = 'none';
   } else {
@@ -1734,7 +1796,7 @@ async function loadResults() {
 
   const bayesianTable = document.getElementById('bayesian-table');
   const bayesianWarning = document.getElementById('bayesian-warning');
-  const bayesianResult = await callApi(`/api/results/${expId}/bayesian`, { headers: authHeaders() });
+  const bayesianResult = await callApi(withTestQuery(`/api/results/${expId}/bayesian`), { headers: authHeaders() });
   if (!bayesianResult.ok || !bayesianResult.data.stats || bayesianResult.data.stats.length === 0) {
     bayesianTable.style.display = 'none';
     bayesianWarning.style.display = 'none';
@@ -1786,6 +1848,17 @@ async function loadHostHits() {
   }
   const rows = result.data.rows || [];
   const byHost = result.data.by_host || [];
+  const windows = result.data.excluded_windows || [];
+  const exclusions = document.getElementById('host-hits-exclusions');
+  if (exclusions) {
+    exclusions.textContent = windows.length
+      ? 'Recorded tester windows (daily totals kept, not deleted): ' + windows.map((window) => {
+          const start = formatAuditWhen(window.started_at);
+          const end = formatAuditWhen(window.ended_at);
+          return `${start} – ${end} from ${window.source_ip || 'unknown IP'}, ${window.referrer_origin || 'unknown site'} to ${window.host}`;
+        }).join('; ') + '.'
+      : '';
+  }
   if (summary) {
     summary.textContent = byHost.length
       ? byHost.map((item) => `${item.host}: ${item.hit_count.toLocaleString('en-GB')}`).join(' · ')
@@ -1802,13 +1875,171 @@ async function loadHostHits() {
   body.innerHTML = rows.map((row) => {
     const day = row.day ? new Date(row.day + 'T00:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '';
     const site = row.referrer_origin || 'Unknown';
-    return `<tr><td>${UI.escapeHtml(day)}</td><td class="mono">${UI.escapeHtml(row.host)}</td><td class="mono">${UI.escapeHtml(site)}</td><td class="num">${row.hit_count}</td></tr>`;
+    const note = row.overlaps_excluded_window ? ' <span class="hint">includes a tester window</span>' : '';
+    return `<tr><td>${UI.escapeHtml(day)}</td><td class="mono">${UI.escapeHtml(row.host)}</td><td class="mono">${UI.escapeHtml(site)}</td><td class="num">${row.hit_count}${note}</td></tr>`;
   }).join('');
   if (table) table.style.display = 'table';
 }
 
 document.addEventListener('change', (e) => {
-  if (e.target && e.target.id === 'visitor-type-filter' && currentDetail) loadResults();
+  if (!e.target || !currentDetail) return;
+  if (e.target.id === 'visitor-type-filter') loadResults();
+  if (e.target.id === 'include-test-traffic') {
+    includeTestTraffic = e.target.checked;
+    loadResults();
+    loadHealth();
+  }
+});
+
+function withTestQuery(path, extra) {
+  const params = new URLSearchParams();
+  if (extra) {
+    Object.keys(extra).forEach((key) => {
+      if (extra[key] != null && extra[key] !== '') params.set(key, extra[key]);
+    });
+  }
+  if (includeTestTraffic) params.set('include_test', '1');
+  const qs = params.toString();
+  return qs ? `${path}?${qs}` : path;
+}
+
+function formatAuditWhen(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC';
+}
+
+function auditCriteriaLabel(criteria) {
+  if (!criteria) return '';
+  if (criteria.mode === 'prefix') return `Prefix ${criteria.prefix || ''}`;
+  return 'Test traffic';
+}
+
+function auditActionLabel(action) {
+  if (action === 'restore') return 'Restore';
+  if (action === 'remove') return 'Remove';
+  return action || '';
+}
+
+async function loadTestAudit(expId) {
+  const msg = document.getElementById('test-audit-msg');
+  const table = document.getElementById('test-audit-table');
+  const body = document.getElementById('test-audit-body');
+  if (!msg || !body) return;
+  const result = await callApi(`/api/experiments/${expId}/test-traffic/audit`, { headers: authHeaders() });
+  if (!currentDetail || currentDetail.id !== expId || !document.getElementById('test-audit-body')) return;
+  if (!result.ok) {
+    msg.className = 'error-msg';
+    msg.textContent = 'Could not load the test traffic log.';
+    if (table) table.style.display = 'none';
+    return;
+  }
+  const entries = result.data.entries || [];
+  if (entries.length === 0) {
+    msg.className = 'hint';
+    msg.textContent = 'Nothing has been removed or restored.';
+    if (table) table.style.display = 'none';
+    body.innerHTML = '';
+    return;
+  }
+  msg.textContent = '';
+  body.innerHTML = entries.map((entry) => `<tr>
+    <td>${UI.escapeHtml(formatAuditWhen(entry.created_at))}</td>
+    <td>${UI.escapeHtml(entry.actor || 'owner')}</td>
+    <td>${UI.escapeHtml(auditActionLabel(entry.action))}</td>
+    <td>${UI.escapeHtml(auditCriteriaLabel(entry.criteria))}</td>
+    <td class="num">${entry.visitor_count}</td>
+    <td class="num">${entry.event_count}</td>
+  </tr>`).join('');
+  if (table) table.style.display = 'table';
+}
+
+function closeTestTrafficModal() {
+  const modal = document.getElementById('test-traffic-modal');
+  if (modal) modal.classList.remove('active');
+  testTrafficPending = null;
+  syncModalScrollLock();
+}
+
+function renderTestTrafficDialog() {
+  const pending = testTrafficPending;
+  if (!pending) return;
+  const preview = pending.preview || {};
+  const restoring = pending.direction === 'restore';
+  const title = document.getElementById('test-traffic-title');
+  const confirmBtn = document.getElementById('test-traffic-confirm');
+  const prefixBit = pending.mode === 'prefix' ? ` starting with ${pending.prefix}` : '';
+  if (title) title.textContent = restoring ? `Restore visitors${prefixBit}` : `Remove visitors${prefixBit}`;
+  if (confirmBtn) {
+    confirmBtn.textContent = restoring ? 'Restore' : 'Remove';
+    confirmBtn.classList.toggle('btn-danger', !restoring);
+    confirmBtn.disabled = !(Number(preview.events) > 0);
+  }
+  const rows = (preview.variants || []).map((row) => `<tr>
+    <td>${UI.escapeHtml(row.variant_name)}</td>
+    <td class="num">${row.visitors}</td>
+    <td class="num">${row.events}</td>
+  </tr>`).join('');
+  const intro = restoring
+    ? 'These visitors will count again. Test traffic stays out of the results unless Include test traffic is ticked. Nothing was deleted.'
+    : 'These visitors will be hidden from results, including when Include test traffic is ticked. Nothing is deleted. You can restore them.';
+  const empty = Number(preview.events) > 0 ? '' : `<p class="hint">${restoring ? 'Nothing to restore.' : 'Nothing to remove.'}</p>`;
+  document.getElementById('test-traffic-body').innerHTML = `
+    <p style="margin-top:0;">${UI.escapeHtml(intro)}</p>
+    <p><strong>${preview.visitors || 0}</strong> visitors, <strong>${preview.events || 0}</strong> events.</p>
+    ${empty}
+    <div class="table-scroll"><table>
+      <thead><tr><th>Variant</th><th class="num">Visitors</th><th class="num">Events</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+
+async function openTestTrafficDialog(direction, mode) {
+  if (!currentDetail) return;
+  const prefixInput = document.getElementById('test-visitor-prefix');
+  const prefix = prefixInput ? prefixInput.value.trim() : '';
+  const payload = { mode, direction: direction === 'restore' ? 'restore' : 'remove' };
+  if (mode === 'prefix') payload.prefix = prefix;
+  const result = await callApi(`/api/experiments/${currentDetail.id}/test-traffic/preview`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!result.ok) { detailError(result.message); return; }
+  detailError('');
+  testTrafficPending = { direction: payload.direction, mode, prefix, preview: result.data };
+  renderTestTrafficDialog();
+  document.getElementById('test-traffic-modal').classList.add('active');
+  syncModalScrollLock();
+  const confirmBtn = document.getElementById('test-traffic-confirm');
+  if (confirmBtn && !confirmBtn.disabled) confirmBtn.focus();
+}
+
+async function confirmTestTraffic() {
+  if (!testTrafficPending || !currentDetail) return;
+  const pending = testTrafficPending;
+  const confirmBtn = document.getElementById('test-traffic-confirm');
+  if (confirmBtn) confirmBtn.disabled = true;
+  const path = pending.direction === 'restore' ? 'restore' : 'remove';
+  const payload = { mode: pending.mode, confirm: true };
+  if (pending.mode === 'prefix') payload.prefix = pending.prefix;
+  const result = await callApi(`/api/experiments/${currentDetail.id}/test-traffic/${path}`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (confirmBtn) confirmBtn.disabled = false;
+  if (!result.ok) { detailError(result.message); return; }
+  closeTestTrafficModal();
+  await loadResults();
+  await loadHealth();
+}
+
+document.getElementById('test-traffic-close').addEventListener('click', closeTestTrafficModal);
+document.getElementById('test-traffic-cancel').addEventListener('click', closeTestTrafficModal);
+document.getElementById('test-traffic-confirm').addEventListener('click', confirmTestTraffic);
+document.getElementById('test-traffic-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'test-traffic-modal') closeTestTrafficModal();
 });
 
 // --- Wizard ---
