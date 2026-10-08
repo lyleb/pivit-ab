@@ -1,5 +1,5 @@
 /**
- * AB Platform snippet — v0.6
+ * pivitlab snippet — v0.7
  *
  * Usage on client site:
  *   <script src="https://your-api.example.com/snippet/ab.js"
@@ -8,6 +8,12 @@
  * Fetches active experiments for the current page, assigns the visitor
  * to a variant per experiment (sticky via localStorage), applies DOM
  * changes, and reports view/click events back to the API.
+ *
+ * Test traffic: ?pivit_qa=1 on the customer page is stored in localStorage and a
+ * first-party cookie (pivit_qa). ?pivit_qa=0 clears both. While that flag is
+ * set, event beacons include "is_test": true and API calls add pivit_qa=1.
+ * No custom header is sent — sendBeacon cannot set one. Visitor ids starting
+ * with v_pt are test traffic even without the flag.
  *
  * Preview mode: the dashboard opens ?ab_preview=<variant_id>&ab_preview_token=<token>.
  * The token is signed and expires. It can show a draft, paused or disabled
@@ -47,6 +53,13 @@
   api.isSafeRegex = isSafeRegex;
   api.claimClick = claimClick;
   api.clickStorageKey = clickStorageKey;
+  api.qaFlagFromSearch = qaFlagFromSearch;
+  api.applyQaFlag = applyQaFlag;
+  api.readQaFlag = readQaFlag;
+  api.eventBody = eventBody;
+  api.withQaQuery = withQaQuery;
+  api.TEST_VISITOR_PREFIX = 'v_pt';
+  api.QA_STORAGE_KEY = 'pivit_qa';
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (!root || !root.document) return;
   root.PivitRuntime = api;
@@ -75,6 +88,7 @@
     }
   }
   const VISITOR_KEY = '_ab_visitor_id';
+  let qaOn = false;
   const ASSIGNMENT_PREFIX = '_ab_assign_';
   // Bump when editor.js changes so a cached copy cannot keep the old variant.
   const EDITOR_VERSION = '20261007';
@@ -184,13 +198,15 @@
   }
 
   function sendEvent(experimentId, variantId, visitorId, eventType, goalId) {
-    const body = JSON.stringify({
+    // is_test is a JSON field. sendBeacon cannot set X-Pivit-Test, and the
+    // field is omitted for real visitors so their body stays the same.
+    const body = JSON.stringify(api.eventBody({
       experiment_id: experimentId,
       variant_id: variantId,
       visitor_id: visitorId,
       event_type: eventType,
       goal_id: goalId || null,
-    });
+    }, qaOn));
     // sendBeacon is fire-and-forget and survives page navigation, ideal for tracking calls.
     if (navigator.sendBeacon) {
       navigator.sendBeacon(API_BASE + '/api/event', new Blob([body], { type: 'application/json' }));
@@ -242,7 +258,7 @@
     if (experimentIds.length === 0) return;
 
     try {
-      const res = await fetch(`${API_BASE}/api/experiments/by-ids?ids=${experimentIds.join(',')}`);
+      const res = await fetch(api.withQaQuery(`${API_BASE}/api/experiments/by-ids?ids=${experimentIds.join(',')}`, qaOn));
       const data = await res.json();
 
       (data.experiments || []).forEach((experiment) => {
@@ -315,6 +331,12 @@
       return;
     }
 
+    if (!wantsPreview) {
+      qaOn = api.applyQaFlag(localStorage, document.cookie, window.location.search, function (value) {
+        document.cookie = value;
+      });
+    }
+
     const url = encodeURIComponent(window.location.href);
     const previewQuery = wantsPreview
       ? `&preview=1&preview_variant=${encodeURIComponent(mode.variantId)}&preview_token=${encodeURIComponent(mode.token)}`
@@ -322,7 +344,7 @@
 
     try {
       const res = await fetch(
-        `${API_BASE}/api/experiments?url=${url}${previewQuery}`,
+        api.withQaQuery(`${API_BASE}/api/experiments?url=${url}${previewQuery}`, qaOn),
         wantsPreview ? { cache: 'no-store' } : undefined
       );
       const data = await res.json();
@@ -541,6 +563,65 @@
     const height = starHeight(pattern);
     return height >= 0 && height <= 1;
   }
+  function qaFlagFromSearch(search) {
+    const query = String(search || '').replace(/^\?/, '');
+    if (!query) return null;
+    const values = new URLSearchParams(query).getAll('pivit_qa');
+    if (!values.length) return null;
+    const last = values[values.length - 1];
+    if (last === '1') return '1';
+    if (last === '0') return '0';
+    return null;
+  }
+
+  function cookieHasQa(cookie) {
+    const parts = String(cookie || '').split(';');
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i].trim() === 'pivit_qa=1') return true;
+    }
+    return false;
+  }
+
+  function readQaFlag(storage, cookie) {
+    try {
+      if (storage && storage.getItem('pivit_qa') === '1') return true;
+    } catch (e) { /* storage blocked */ }
+    return cookieHasQa(cookie);
+  }
+
+  function applyQaFlag(storage, cookie, search, writeCookie) {
+    const flag = qaFlagFromSearch(search);
+    if (flag === '1') {
+      try { if (storage) storage.setItem('pivit_qa', '1'); } catch (e) { /* storage blocked */ }
+      if (typeof writeCookie === 'function') writeCookie('pivit_qa=1; Path=/; Max-Age=31536000; SameSite=Lax');
+      return true;
+    }
+    if (flag === '0') {
+      try { if (storage) storage.removeItem('pivit_qa'); } catch (e) { /* storage blocked */ }
+      if (typeof writeCookie === 'function') writeCookie('pivit_qa=; Path=/; Max-Age=0; SameSite=Lax');
+      return false;
+    }
+    return readQaFlag(storage, cookie);
+  }
+
+  function eventBody(fields, flagged) {
+    const body = {
+      experiment_id: fields.experiment_id,
+      variant_id: fields.variant_id,
+      visitor_id: fields.visitor_id,
+      event_type: fields.event_type,
+      goal_id: fields.goal_id || null,
+    };
+    const id = fields.visitor_id;
+    if (flagged || (typeof id === 'string' && id.indexOf('v_pt') === 0)) body.is_test = true;
+    return body;
+  }
+
+  function withQaQuery(url, flagged) {
+    if (!flagged) return url;
+    return url + (String(url).indexOf('?') === -1 ? '?' : '&') + 'pivit_qa=1';
+  }
+
   function matchUrlGoal(pattern, href, matchType) {
     const type = matchType || 'contains';
     const pat = String(pattern || '');

@@ -3,6 +3,7 @@ const db = require('../db');
 const { isLikelyBot, isRateLimited } = require('../bot-filter');
 const { checkHost, originHostFromRequest, hostScopingMode } = require('../host-scope');
 const { scheduleEventDrop } = require('../event-drops');
+const { requestIsTestTraffic } = require('../test-traffic');
 const router = express.Router();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -17,7 +18,12 @@ function warnDrop(experimentId, host, reason) {
 }
 
 // POST /api/event
-// body: { experiment_id, variant_id, visitor_id, event_type, goal_id? }
+// body: { experiment_id, variant_id, visitor_id, event_type, goal_id?, is_test? }
+//
+// is_test is optional. Omit it for a real visitor (the same body as before).
+// Send is_test: true, header X-Pivit-Test: 1, or ?pivit_qa=1 to mark the row.
+// A visitor id starting with v_pt is always test traffic. The snippet sends
+// the JSON field, not the header: sendBeacon cannot set headers.
 router.post('/', async (req, res) => {
   const { experiment_id, variant_id, visitor_id, event_type, goal_id } = req.body;
 
@@ -68,10 +74,11 @@ router.post('/', async (req, res) => {
       return res.status(204).end();
     }
 
+    const isTest = requestIsTestTraffic(req);
     await db.query(
-      `INSERT INTO events (experiment_id, variant_id, visitor_id, event_type, goal_id)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [experiment_id, variant_id, visitor_id, event_type, goal_id ?? null]
+      `INSERT INTO events (experiment_id, variant_id, visitor_id, event_type, goal_id, is_test)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [experiment_id, variant_id, visitor_id, event_type, goal_id ?? null, isTest]
     );
     // 204 keeps the beacon call cheap — no body needed on the client.
     res.status(204).end();

@@ -13,12 +13,27 @@ const bayesLead = {
 assert.strictEqual(ui.signalText('draft', null), 'No data yet');
 assert.strictEqual(ui.signalText('draft', bayesLead), 'No data yet');
 assert.strictEqual(ui.signalText('running', { total_visitors: 0, stats: [] }), 'No data yet');
-assert.strictEqual(ui.signalText('running', { total_visitors: 10, low_sample_warning: true, stats: bayesLead.stats }), 'Collecting data');
-assert.strictEqual(ui.signalText('running', bayesLead), 'B leading · 68% prob. best');
+assert.strictEqual(ui.signalText('running', { total_visitors: 10, low_sample_warning: true, stats: bayesLead.stats }), 'Health check');
+assert.strictEqual(ui.signalText('running', bayesLead), 'Health check');
+assert.strictEqual(ui.signalText('running', { mode: 'blind', days_elapsed: 3, min_runtime_days: 14 }), 'Health check · 3 of 14 days');
+assert.strictEqual(ui.signalText('running', { mode: 'unplanned' }), 'Set a plan');
+assert.strictEqual(ui.signalText('running', { mode: 'verdict' }), 'Verdict ready');
+assert.strictEqual(ui.signalText('running', { mode: 'peeked' }), 'Peeked · not a verdict');
+assert.strictEqual(ui.signalText('running', { mode: 'data_problem' }), 'Data problem');
+assert.ok(!ui.signalText('running', bayesLead).includes('prob'));
 assert.strictEqual(ui.signalText('paused', { total_visitors: 0, stats: [] }), 'Paused · last: Control');
-assert.strictEqual(ui.signalText('paused', bayesLead), 'Paused · last: variant-b');
+assert.strictEqual(ui.signalText('paused', bayesLead), 'Paused');
 assert.strictEqual(ui.signalText('archived', { total_visitors: 0, stats: [] }), 'No data yet');
-assert.strictEqual(ui.signalText('archived', bayesLead), 'Archived · last: variant-b');
+assert.strictEqual(ui.signalText('archived', bayesLead), 'Archived');
+
+const planner = ui.plannerShell('wizard');
+assert.ok(planner.includes('Small change'));
+assert.ok(planner.includes('Medium'));
+assert.ok(planner.includes('Big'));
+assert.ok(planner.includes('about 5% relative'));
+assert.ok(planner.includes('Advanced'));
+assert.ok(!planner.includes('MDE'));
+assert.ok(planner.includes('id="wizard-plan-sentence"'));
 
 assert.strictEqual(ui.resultsGated('draft', 0), true);
 assert.strictEqual(ui.resultsGated('draft', 12), true);

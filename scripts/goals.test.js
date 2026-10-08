@@ -254,7 +254,12 @@ assert.strictEqual(early.checks[1].state, 'amber');
 assert.strictEqual(early.checks[2].state, 'amber');
 assert.ok(early.checks[2].detail.includes('3 filtered as bots'));
 assert.strictEqual(early.checks[3].state, 'amber');
-assert.ok(early.checks[3].detail.includes('still included'));
+assert.ok(early.checks[3].detail.includes('excluded'));
+assert.strictEqual(early.checks[3].excluded, true);
+assert.strictEqual(early.checks[3].visitors, 12);
+const included = health.syntheticCheck(3, false);
+assert.ok(included.detail.includes('included'));
+assert.strictEqual(included.excluded, false);
 
 const broken = health.buildHealth({
   status: 'running',

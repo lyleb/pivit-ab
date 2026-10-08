@@ -33,6 +33,24 @@ CREATE INDEX IF NOT EXISTS idx_events_experiment ON events(experiment_id);
 CREATE INDEX IF NOT EXISTS idx_events_variant ON events(variant_id);
 CREATE INDEX IF NOT EXISTS idx_variants_experiment ON variants(experiment_id);
 
+-- is_test: this event is QA / synthetic traffic. excluded_at: an owner hid it
+-- (soft delete). Both are reversible. Never DELETE these rows from a migration.
+ALTER TABLE events ADD COLUMN IF NOT EXISTS is_test BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS excluded_at TIMESTAMPTZ;
+
+-- Startup backfill. Existing v_pt rows (the fake-traffic tester prefix) become
+-- is_test. Rows already flagged are left alone. excluded_at is not set, so
+-- nothing is removed until an owner does it. Safe to re-run: the WHERE clause
+-- matches zero rows once the backfill has caught up.
+UPDATE events
+SET is_test = true
+WHERE is_test = false
+  AND left(visitor_id, 4) = 'v_pt';
+
+CREATE INDEX IF NOT EXISTS idx_events_experiment_test
+  ON events (experiment_id)
+  WHERE is_test OR excluded_at IS NOT NULL;
+
 -- Additive migrations for columns added after the table already existed in production —
 -- safe to re-run every startup, matching the CREATE TABLE IF NOT EXISTS pattern above.
 ALTER TABLE variants ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT true;
@@ -115,6 +133,85 @@ CREATE TABLE IF NOT EXISTS host_hits (
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS goals JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS goals_scope TEXT NOT NULL DEFAULT 'shared';
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS goals_migrated BOOLEAN NOT NULL DEFAULT false;
+
+-- Windows of known tester traffic that were already rolled into host_hits.
+-- The daily totals are kept (never deleted). New test hits are not counted.
+-- These two rows are the 7 Oct 2026 box-tester runs against pivitlab.com.
+CREATE TABLE IF NOT EXISTS host_hit_exclusions (
+  id BIGSERIAL PRIMARY KEY,
+  host TEXT NOT NULL,
+  referrer_origin TEXT NOT NULL DEFAULT '',
+  source_ip TEXT,
+  started_at TIMESTAMPTZ NOT NULL,
+  ended_at TIMESTAMPTZ NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS host_hit_exclusions_window
+  ON host_hit_exclusions (host, referrer_origin, started_at, ended_at);
+
+INSERT INTO host_hit_exclusions (host, referrer_origin, source_ip, started_at, ended_at, note)
+SELECT seed.host, seed.referrer_origin, seed.source_ip, seed.started_at, seed.ended_at, seed.note
+FROM (VALUES
+  (
+    'pivitlab.com'::text,
+    'https://cantsaythat.co.uk'::text,
+    '54.201.40.3'::text,
+    '2026-10-07T12:22:00Z'::timestamptz,
+    '2026-10-07T12:24:00Z'::timestamptz,
+    'Box tester run. The daily host_hits total for this day is kept and was not deleted. This window is excluded from the reading.'::text
+  ),
+  (
+    'pivitlab.com',
+    'https://cantsaythat.co.uk',
+    '54.201.40.3',
+    '2026-10-07T18:01:00Z'::timestamptz,
+    '2026-10-07T18:27:00Z'::timestamptz,
+    'Box tester run. The daily host_hits total for this day is kept and was not deleted. This window is excluded from the reading.'
+  )
+) AS seed(host, referrer_origin, source_ip, started_at, ended_at, note)
+WHERE NOT EXISTS (
+  SELECT 1 FROM host_hit_exclusions existing
+  WHERE existing.host = seed.host
+    AND existing.referrer_origin = seed.referrer_origin
+    AND existing.started_at = seed.started_at
+    AND existing.ended_at = seed.ended_at
+);
+
+-- Owner remove / restore of test traffic. One row per action. Counts are what
+-- that action changed. The events themselves stay in the events table.
+CREATE TABLE IF NOT EXISTS test_traffic_audit (
+  id BIGSERIAL PRIMARY KEY,
+  experiment_id UUID NOT NULL REFERENCES experiments(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  actor_ip TEXT,
+  criteria JSONB NOT NULL,
+  visitor_count INTEGER NOT NULL,
+  event_count INTEGER NOT NULL,
+  variant_counts JSONB NOT NULL DEFAULT '[]',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_test_traffic_audit_experiment
+  ON test_traffic_audit (experiment_id, created_at DESC);
+
+-- Fixed-horizon plan. Null means the owner has not adopted one. Existing
+-- running tests stay without a plan until someone saves one. started_at is
+-- the first time the test was set to running (backfilled from the earliest
+-- view, which does not change the events). peeked_at is set by Reveal early.
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS plan JSONB;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS peeked_at TIMESTAMPTZ;
+
+UPDATE experiments AS e
+SET started_at = COALESCE(
+  (SELECT MIN(ev.created_at) FROM events ev WHERE ev.experiment_id = e.id AND ev.event_type = 'view'),
+  e.created_at
+)
+WHERE e.started_at IS NULL
+  AND e.status IN ('running', 'paused', 'archived');
 
 -- Events the public endpoint dropped, per experiment per UTC day.
 -- reason is rate_limited, bot, or host. Cheap upsert, same idea as host_hits.

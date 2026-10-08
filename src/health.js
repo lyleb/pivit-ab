@@ -96,36 +96,61 @@ function dropsCheck(rows, today) {
   };
 }
 
-function syntheticCheck(count) {
+function exclusionSentence(heldOut, removed) {
+  const gone = Number(removed) || 0;
+  if (gone > 0 && heldOut) {
+    const verb = gone === 1 ? 'has' : 'have';
+    return `They are excluded from the results. ${gone} of them ${verb} been removed and stay out until you restore them.`;
+  }
+  if (gone > 0) {
+    const noun = gone === 1 ? 'visitor' : 'visitors';
+    return `Included in the results, except ${gone} removed ${noun}, which stay out until you restore them.`;
+  }
+  return heldOut ? 'They are excluded from the results.' : 'They are included in the results.';
+}
+
+function syntheticCheck(count, excluded, removed) {
   const n = Number(count) || 0;
-  if (n <= 0) {
+  const heldOut = excluded !== false;
+  const gone = Number(removed) || 0;
+  if (n <= 0 && gone <= 0) {
     return {
       state: 'green',
       title: 'Test traffic',
       detail: 'No test traffic in these results.',
       visitors: 0,
+      excluded: heldOut,
+      removed: 0,
     };
   }
-  const noun = n === 1 ? 'visitor looks' : 'visitors look';
+  const noun = n === 1 ? 'visitor is' : 'visitors are';
   return {
     state: 'amber',
     title: 'Test traffic',
-    detail: `${n} ${noun} like test traffic (visitor ids starting with v_pt). They are still included in the results.`,
+    detail: `${n} ${noun} test traffic. ${exclusionSentence(heldOut, gone)}`,
     visitors: n,
+    excluded: heldOut,
+    removed: gone,
   };
 }
 
-function buildHealth({ status, srm, totalVisitors, scope, goalCount, drops, today, syntheticVisitors } = {}) {
+function buildHealth({ status, srm, totalVisitors, scope, goalCount, drops, today, syntheticVisitors, testExcluded, removedVisitors } = {}) {
+  const heldOut = testExcluded !== false;
   const checks = [
     sampleRatioCheck(srm, totalVisitors),
     goalsCheck({ scope, goalCount }),
     dropsCheck(drops, today),
-    syntheticCheck(syntheticVisitors),
+    syntheticCheck(syntheticVisitors, heldOut, removedVisitors),
   ];
   return {
     show: status === 'running',
     status: status || '',
     checks,
+    test_traffic: {
+      visitors: Number(syntheticVisitors) || 0,
+      excluded: heldOut,
+      removed: Number(removedVisitors) || 0,
+    },
   };
 }
 

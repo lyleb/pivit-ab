@@ -38,6 +38,10 @@
   .page-actions, .header-actions, .wizard-actions .right, .inline-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
   label { margin-top: 14px; }
+  label.test-toggle {
+    display: flex; align-items: center; gap: 10px; margin-top: 0; font-size: 0.95em;
+  }
+  label.test-toggle input { width: 18px; height: 18px; margin: 0; flex: 0 0 auto; }
   .card label:first-child, .stack label:first-child { margin-top: 0; }
   textarea { height: 90px; font-family: "SF Mono", Menlo, monospace; font-size: 0.85em; }
   textarea.hosts { height: 68px; }
@@ -71,6 +75,22 @@
     border: 1px dashed #3a4054; border-radius: 10px; padding: 22px; color: var(--text-muted); margin-top: 12px;
   }
   .placeholder strong { display: block; color: var(--ink); margin-bottom: 4px; }
+  .choice-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+  .choice {
+    flex: 1 1 140px; background: var(--card-2); color: var(--ink); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px; text-align: left; font-weight: 700; margin: 0;
+  }
+  .choice span { display: block; font-weight: 550; color: var(--text-muted); font-size: 0.82em; margin-top: 4px; }
+  .choice[aria-pressed="true"] { border-color: var(--indigo); background: rgba(86,53,251,0.18); }
+  .plan-sentence { font-size: 1.08em; font-weight: 750; margin: 8px 0 6px; letter-spacing: -0.01em; }
+  .progress-track { height: 8px; background: #262a38; border-radius: 99px; overflow: hidden; margin: 6px 0 14px; }
+  .progress-bar { height: 100%; background: #5635FB; width: 0; }
+  .verdict-card { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin: 12px 0; background: var(--card-2); }
+  .verdict-card.win { border-color: #1d6b52; }
+  .verdict-card.loss { border-color: #8a3a3a; }
+  .verdict-card.inconclusive, .verdict-card.data_problem { border-color: #8a6a2f; }
+  .verdict-card h3 { margin: 4px 0 8px; font-size: 1.45em; }
+  .peek-banner { border: 1px solid #8a6a2f; background: var(--warn-bg); color: var(--warn); border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; }
   .steps { display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 8px 0 16px; }
   .step-pill {
     display: flex; align-items: center; gap: 8px; background: transparent; border: none;
@@ -240,7 +260,8 @@
       </div>
       <div class="card" id="host-hits-card">
         <h2>Snippet traffic</h2>
-        <p class="hint" style="margin-top:0;">Hits to the snippet and the public API over the last 30 days, by the host that was called and the customer site that sent them. Health checks are not counted.</p>
+        <p class="hint" style="margin-top:0;">Hits to the snippet and the public API over the last 30 days, by the host that was called and the customer site that sent them. Health checks are not counted. Test traffic is not counted from now on.</p>
+        <p id="host-hits-exclusions" class="hint"></p>
         <p id="host-hits-summary" class="hint"></p>
         <p id="host-hits-msg" class="hint">Loading…</p>
         <div class="table-scroll" tabindex="0" role="region" aria-label="Snippet traffic by host (scrolls sideways)">
@@ -313,6 +334,7 @@
         </div>
 
         <div id="wizard-step-5" class="wizard-step" hidden>
+          <div id="wizard-planner"></div>
           <dl class="summary" id="wizard-summary"></dl>
         </div>
 
@@ -390,6 +412,36 @@
   </div>
 </div>
 
+<div id="test-traffic-modal" class="modal-backdrop">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="test-traffic-title">
+    <div class="modal-head">
+      <h2 id="test-traffic-title">Remove test traffic</h2>
+      <button type="button" class="modal-close" id="test-traffic-close" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" id="test-traffic-body"></div>
+    <div class="modal-foot">
+      <button type="button" class="btn-ghost" id="test-traffic-cancel">Cancel</button>
+      <button type="button" id="test-traffic-confirm">Remove</button>
+    </div>
+  </div>
+</div>
+<div id="reveal-modal" class="modal-backdrop">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="reveal-title">
+    <div class="modal-head">
+      <h2 id="reveal-title">Reveal the numbers early?</h2>
+      <button type="button" class="modal-close" id="reveal-close" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="margin-top:0;">Looking before the planned sample raises the chance of a false win. A live probability can look decisive after a handful of conversions and still be noise.</p>
+      <p>This look will be marked as peeked, and that mark stays on the result. The planned verdict, when it arrives, will say the test was peeked.</p>
+      <p>This is your decision as the owner.</p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn-ghost" id="reveal-cancel">Keep hidden</button>
+      <button type="button" class="btn-danger" id="reveal-confirm">Reveal early</button>
+    </div>
+  </div>
+</div>
 <div id="clients-modal" class="modal-backdrop">
   <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="clients-title">
     <div class="modal-head">
@@ -431,6 +483,9 @@ let clientsCache = [];
 let experimentsCache = [];
 let experimentsLoaded = false;
 let currentDetail = null;
+let includeTestTraffic = false;
+let includeTestExperimentId = null;
+let testTrafficPending = null;
 let currentTab = 'overview';
 let routeToken = 0;
 let pickerHref = '#';
@@ -455,6 +510,7 @@ const wizard = {
   variants: [],
   goalRows: [],
   checks: { snippet: false, preview: false, event: false },
+  planSuggestion: null,
   busy: false,
 };
 
@@ -573,9 +629,11 @@ let clientsReturnFocus = null;
 
 function syncModalScrollLock() {
   const clientsOpen = document.getElementById('clients-modal').classList.contains('active');
+  const testOpen = document.getElementById('test-traffic-modal').classList.contains('active');
+  const revealOpen = document.getElementById('reveal-modal').classList.contains('active');
   const pop = document.getElementById('snippet-popover');
   const snippetSheet = pop.classList.contains('open') && pop.classList.contains('is-sheet');
-  document.body.classList.toggle('modal-open', clientsOpen || snippetSheet);
+  document.body.classList.toggle('modal-open', clientsOpen || testOpen || revealOpen || snippetSheet);
 }
 
 function openClientsModal() {
@@ -600,10 +658,49 @@ document.getElementById('clients-modal').addEventListener('click', (e) => {
 });
 document.getElementById('clients-close').addEventListener('click', closeClientsModal);
 document.getElementById('clients-done').addEventListener('click', closeClientsModal);
+function closeRevealModal() {
+  document.getElementById('reveal-modal').classList.remove('active');
+  syncModalScrollLock();
+}
+
+function openRevealModal() {
+  document.getElementById('reveal-modal').classList.add('active');
+  syncModalScrollLock();
+  const closeBtn = document.getElementById('reveal-close');
+  if (closeBtn) closeBtn.focus();
+}
+
+document.getElementById('reveal-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'reveal-modal') closeRevealModal();
+});
+document.getElementById('reveal-close').addEventListener('click', closeRevealModal);
+document.getElementById('reveal-cancel').addEventListener('click', closeRevealModal);
+document.getElementById('reveal-confirm').addEventListener('click', async () => {
+  if (!currentDetail) return;
+  const btn = document.getElementById('reveal-confirm');
+  btn.disabled = true;
+  const result = await callApi(`/api/experiments/${currentDetail.id}/reveal`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ confirm: true }),
+  });
+  btn.disabled = false;
+  if (!result.ok) {
+    detailError(result.message);
+    closeRevealModal();
+    return;
+  }
+  closeRevealModal();
+  await loadResults();
+  loadTestAudit(currentDetail.id);
+});
+
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   const pop = document.getElementById('snippet-popover');
   if (pop.classList.contains('open')) { closeSnippetPopover(); return; }
+  if (document.getElementById('reveal-modal').classList.contains('active')) { closeRevealModal(); return; }
+  if (document.getElementById('test-traffic-modal').classList.contains('active')) { closeTestTrafficModal(); return; }
   if (document.getElementById('clients-modal').classList.contains('active')) closeClientsModal();
 });
 
@@ -810,15 +907,12 @@ async function loadExperimentList() {
   fillSignals(experiments);
 }
 
-async function fillSignals(experiments) {
-  await Promise.all(experiments.map(async (exp) => {
+function fillSignals(experiments) {
+  experiments.forEach((exp) => {
     const cell = document.querySelector(`[data-signal-for="${exp.id}"]`);
     if (!cell || exp.status === 'draft') return;
-    const result = await callApi(`/api/results/${exp.id}/bayesian`, { headers: authHeaders() });
-    const live = document.querySelector(`[data-signal-for="${exp.id}"]`);
-    if (!live) return;
-    live.textContent = UI.signalText(exp.status, result.ok ? result.data : null);
-  }));
+    cell.textContent = exp.signal || UI.signalText(exp.status, exp.reading || null);
+  });
 }
 
 document.getElementById('exp-list-body').addEventListener('click', (e) => {
@@ -828,7 +922,7 @@ document.getElementById('exp-list-body').addEventListener('click', (e) => {
 });
 
 async function exportResultsCsv(expId) {
-  const res = await fetch(`/api/results/${expId}/export`, { headers: authHeaders() });
+  const res = await fetch(withTestQuery(`/api/results/${expId}/export`), { headers: authHeaders() });
   if (res.status === 401) { window.location.href = '/login.html'; return; }
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
@@ -875,6 +969,10 @@ function rememberPageUrl(id, value) {
 }
 
 async function openExperiment(id, tab, { token, force } = {}) {
+  if (includeTestExperimentId !== id) {
+    includeTestExperimentId = id;
+    includeTestTraffic = false;
+  }
   const requestToken = token || routeToken;
   if (!force && currentDetail && currentDetail.id === id && document.getElementById('detail-header')) {
     if (requestToken !== routeToken) return;
@@ -995,6 +1093,34 @@ function renderDetail() {
     </div>
 
     <div data-tab-panel="results" hidden>
+      <div id="plan-panel"></div>
+      <div class="card" id="test-traffic-card">
+        <h2>Test traffic</h2>
+        <p class="hint" style="margin-top:0;">Test traffic is left out of the table, the chart, the trend and the CSV. Include test traffic puts it back. Remove hides it until you restore it. Nothing here is deleted.</p>
+        <label class="test-toggle" for="include-test-traffic">
+          <input type="checkbox" id="include-test-traffic"${includeTestTraffic ? ' checked' : ''}>
+          Include test traffic
+        </label>
+        <div class="inline-actions" style="margin-top:12px;">
+          <button type="button" class="btn-ghost" data-action="test-traffic" data-mode="test" data-direction="remove">Remove test traffic</button>
+          <button type="button" class="btn-ghost" data-action="test-traffic" data-mode="test" data-direction="restore">Restore test traffic</button>
+        </div>
+        <label for="test-visitor-prefix">Visitor ID prefix</label>
+        <input id="test-visitor-prefix" placeholder="v_ptmuyez2tm_" spellcheck="false" autocomplete="off">
+        <p class="hint">The count is shown before anything is hidden. Underscores are matched exactly.</p>
+        <div class="inline-actions">
+          <button type="button" class="btn-ghost" data-action="test-traffic" data-mode="prefix" data-direction="remove">Remove this prefix</button>
+          <button type="button" class="btn-ghost" data-action="test-traffic" data-mode="prefix" data-direction="restore">Restore this prefix</button>
+        </div>
+        <h3 style="margin-top:18px;">Log</h3>
+        <p id="test-audit-msg" class="hint">Loading…</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Test traffic log (scrolls sideways)">
+          <table id="test-audit-table" style="display:none">
+            <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Criteria</th><th class="num">Visitors</th><th class="num">Events</th></tr></thead>
+            <tbody id="test-audit-body"></tbody>
+          </table>
+        </div>
+      </div>
       <div id="results-gate" class="card">
         <div class="banner" id="results-gate-banner"><span id="results-gate-text">Loading results…</span></div>
         <div class="placeholder"><strong>Conversion chart</strong>Shown once this experiment is running and has visitors.</div>
@@ -1032,7 +1158,7 @@ function renderDetail() {
           <h3 style="margin-top:22px;">Sample ratio check</h3>
           <p class="hint">Whether traffic is actually split the way it is configured.</p>
           <div id="srm-panel" style="display:none;"></div>
-          <h3 style="margin-top:22px;">Bayesian analysis</h3>
+          <h3 id="bayesian-heading" style="margin-top:22px;">Bayesian analysis</h3>
           <details>
             <summary>How probability best is calculated</summary>
             <div class="accordion-body hint">Each variant’s true conversion rate is treated as uncertain, and that range narrows as data comes in. Probability best is the chance that variant is genuinely ahead, not just lucky.</div>
@@ -1051,6 +1177,7 @@ function renderDetail() {
 
     <div data-tab-panel="settings" hidden>
       <div class="card" style="max-width:640px;">
+        <div id="settings-planner"></div>
         <label for="settings-hosts">Site domain(s)</label>
         <textarea id="settings-hosts" class="hosts" spellcheck="false" placeholder="example.com">${UI.escapeHtml((exp.allowed_hosts || []).join('\n'))}</textarea>
         <p class="hint">The experiment only runs on these sites. www and the bare domain are the same. Other subdomains must be listed.</p>
@@ -1081,6 +1208,7 @@ function renderDetail() {
   renderVariantRows();
   renderGoalBlocks();
   loadHealth();
+  mountSettingsPlanner();
   document.querySelectorAll('.picker-bookmarklet').forEach((a) => { a.href = pickerHref; });
   const pageInput = document.getElementById('detail-page-url');
   if (pageInput) {
@@ -1267,7 +1395,7 @@ async function loadHealth() {
     return;
   }
   const expId = currentDetail.id;
-  const result = await callApi(`/api/experiments/${expId}/health`, { headers: authHeaders() });
+  const result = await callApi(withTestQuery(`/api/experiments/${expId}/health`), { headers: authHeaders() });
   if (!currentDetail || currentDetail.id !== expId || !document.getElementById('health-panel')) return;
   if (!result.ok || !result.data.show) {
     panel.hidden = true;
@@ -1498,8 +1626,46 @@ document.getElementById('page-detail').addEventListener('click', async (e) => {
     exportResultsCsv(currentDetail.id);
     return;
   }
+  if (action === 'reveal-early') {
+    openRevealModal();
+    return;
+  }
+  if (action === 'adopt-plan') {
+    if (!currentDetail.suggestedPlan) {
+      detailError('Could not load a suggested plan. Refresh and try again.');
+      return;
+    }
+    btn.disabled = true;
+    const adopted = await callApi(`/api/experiments/${currentDetail.id}/plan`, {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify(currentDetail.suggestedPlan),
+    });
+    btn.disabled = false;
+    if (!adopted.ok) { detailError(adopted.message); return; }
+    detailError('');
+    await reloadDetail();
+    return;
+  }
+  if (action === 'save-plan') {
+    btn.disabled = true;
+    const saved = await saveCurrentPlan(currentDetail.id, 'settings', 'owner');
+    btn.disabled = false;
+    const msg = document.getElementById('settings-plan-msg');
+    if (!saved.ok) {
+      if (msg) msg.textContent = saved.message;
+      return;
+    }
+    if (msg) msg.textContent = 'Plan saved.';
+    await reloadDetail();
+    return;
+  }
   if (action === 'delete-experiment') {
     await deleteExperiment(currentDetail.id, btn);
+    return;
+  }
+  if (action === 'test-traffic') {
+    openTestTrafficDialog(btn.dataset.direction, btn.dataset.mode);
     return;
   }
   if (action === 'refresh-results') loadResults();
@@ -1640,6 +1806,269 @@ function setTrendMode(mode) {
   renderTrendChart();
 }
 
+const PLAN_RELATIVE = { small: 5, medium: 10, big: 20 };
+
+function plannerRoot(prefix) {
+  return document.querySelector(`[data-planner="${prefix}"]`);
+}
+
+function readPlanner(prefix) {
+  const choiceBtn = document.querySelector(`[data-planner="${prefix}"] [data-plan-choice][aria-pressed="true"]`);
+  const choice = choiceBtn ? choiceBtn.dataset.planChoice : 'medium';
+  const baselinePct = Number(document.getElementById(`${prefix}-baseline`).value);
+  const relativePct = Number(document.getElementById(`${prefix}-relative`).value);
+  const weeklyRaw = document.getElementById(`${prefix}-weekly`).value;
+  const weeks = Math.round(Number(document.getElementById(`${prefix}-weeks`).value));
+  const known = PLAN_RELATIVE[choice];
+  const effectChoice = known != null && Math.abs(relativePct - known) < 0.05 ? choice : 'custom';
+  return {
+    baseline_rate: baselinePct / 100,
+    relative_effect: relativePct / 100,
+    effect_choice: effectChoice,
+    weekly_traffic: weeklyRaw === '' ? null : Math.round(Number(weeklyRaw)),
+    min_runtime_days: weeks * 7,
+    baseline_source: plannerRoot(prefix) ? plannerRoot(prefix).dataset.baselineSource : '',
+    baseline_label: plannerRoot(prefix) ? plannerRoot(prefix).dataset.baselineLabel : '',
+    traffic_source: plannerRoot(prefix) ? plannerRoot(prefix).dataset.trafficSource : '',
+    traffic_label: plannerRoot(prefix) ? plannerRoot(prefix).dataset.trafficLabel : '',
+  };
+}
+
+function applyChoice(prefix, choice) {
+  document.querySelectorAll(`[data-planner="${prefix}"] [data-plan-choice]`).forEach((btn) => {
+    btn.setAttribute('aria-pressed', btn.dataset.planChoice === choice ? 'true' : 'false');
+  });
+  const relative = document.getElementById(`${prefix}-relative`);
+  if (relative && PLAN_RELATIVE[choice]) relative.value = PLAN_RELATIVE[choice];
+}
+
+function fillPlannerNotes(prefix, plan) {
+  const sentence = document.getElementById(`${prefix}-plan-sentence`);
+  const meta = document.getElementById(`${prefix}-plan-meta`);
+  const warn = document.getElementById(`${prefix}-week-warn`);
+  const maths = document.getElementById(`${prefix}-maths`);
+  if (sentence) sentence.textContent = plan && plan.sentence ? plan.sentence : '';
+  if (meta) {
+    const bits = [];
+    if (plan && plan.source === 'auto') bits.push('Automatic plan');
+    if (plan && plan.runtime_warning) bits.push(plan.runtime_warning);
+    meta.textContent = bits.join(' · ');
+  }
+  if (warn) warn.textContent = plan && plan.runtime_warning ? plan.runtime_warning : '';
+  if (maths) maths.textContent = plan && plan.explanation ? plan.explanation : '';
+}
+
+async function previewPlanner(prefix, expId) {
+  if (!expId || !document.getElementById(`${prefix}-baseline`)) return;
+  const body = readPlanner(prefix);
+  const result = await callApi(`/api/experiments/${expId}/plan/preview`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!result.ok) {
+    const sentence = document.getElementById(`${prefix}-plan-sentence`);
+    if (sentence) sentence.textContent = result.message;
+    return;
+  }
+  fillPlannerNotes(prefix, result.data.plan);
+}
+
+function bindPlanner(prefix, expId) {
+  const root = plannerRoot(prefix);
+  if (!root || root.dataset.bound === '1') return;
+  root.dataset.bound = '1';
+  root.addEventListener('click', (event) => {
+    const choice = event.target.closest('[data-plan-choice]');
+    if (!choice) return;
+    applyChoice(prefix, choice.dataset.planChoice);
+    previewPlanner(prefix, expId);
+  });
+  ['baseline', 'relative', 'weekly', 'weeks'].forEach((field) => {
+    const input = document.getElementById(`${prefix}-${field}`);
+    if (!input) return;
+    input.addEventListener('input', () => {
+      if (field === 'relative') {
+        const value = Number(input.value);
+        const match = Object.keys(PLAN_RELATIVE).find((key) => Math.abs(PLAN_RELATIVE[key] - value) < 0.05);
+        applyChoice(prefix, match || '');
+        if (!match) {
+          root.querySelectorAll('[data-plan-choice]').forEach((btn) => btn.setAttribute('aria-pressed', 'false'));
+        }
+      }
+      if (field === 'weeks') {
+        const warn = document.getElementById(`${prefix}-week-warn`);
+        if (warn) warn.textContent = Number(input.value) < 2 ? 'One week can miss a weekday pattern. Two weeks is the usual minimum.' : '';
+      }
+      previewPlanner(prefix, expId);
+    });
+  });
+}
+
+function mountPlanner(prefix, expId, payload) {
+  const hostId = prefix === 'wizard' ? 'wizard-planner' : 'settings-planner';
+  const host = document.getElementById(hostId);
+  if (!host) return;
+  const suggestion = (payload && payload.suggestion) || {};
+  const stored = payload && payload.plan;
+  const seed = stored || (payload && payload.preview) || {};
+  host.innerHTML = UI.plannerShell(prefix) + (prefix === 'settings'
+    ? '<div class="inline-actions" style="margin-top:12px;"><button type="button" data-action="save-plan">Save plan</button></div><p id="settings-plan-msg" class="hint"></p>'
+    : '');
+  const root = plannerRoot(prefix);
+  if (root) {
+    root.dataset.baselineSource = seed.baseline_source || suggestion.baseline_source || 'default';
+    root.dataset.baselineLabel = seed.baseline_label || suggestion.baseline_label || '';
+    root.dataset.trafficSource = seed.traffic_source || suggestion.traffic_source || 'unknown';
+    root.dataset.trafficLabel = seed.traffic_label || suggestion.traffic_label || '';
+  }
+  const baseline = document.getElementById(`${prefix}-baseline`);
+  const relative = document.getElementById(`${prefix}-relative`);
+  const weekly = document.getElementById(`${prefix}-weekly`);
+  const weeks = document.getElementById(`${prefix}-weeks`);
+  const rate = seed.baseline_rate != null ? seed.baseline_rate : suggestion.baseline_rate;
+  if (baseline && rate != null) baseline.value = +(rate * 100).toFixed(2);
+  const effect = seed.relative_effect != null ? seed.relative_effect : 0.1;
+  if (relative) relative.value = +(effect * 100).toFixed(2);
+  const traffic = seed.weekly_traffic != null ? seed.weekly_traffic : suggestion.weekly_traffic;
+  if (weekly && traffic != null) weekly.value = traffic;
+  const minDays = seed.min_runtime_days || 14;
+  if (weeks) weeks.value = Math.max(1, Math.round(minDays / 7));
+  applyChoice(prefix, seed.effect_choice && seed.effect_choice !== 'custom' ? seed.effect_choice : 'medium');
+  if (seed.effect_choice === 'custom') {
+    root.querySelectorAll('[data-plan-choice]').forEach((btn) => btn.setAttribute('aria-pressed', 'false'));
+  }
+  const note = document.getElementById(`${prefix}-baseline-note`);
+  if (note) note.textContent = (seed.baseline_label || suggestion.baseline_label || '') + (seed.traffic_label || suggestion.traffic_label ? ` ${seed.traffic_label || suggestion.traffic_label}` : '');
+  fillPlannerNotes(prefix, seed.sentence ? seed : payload.preview);
+  bindPlanner(prefix, expId);
+  if (!seed.sentence) previewPlanner(prefix, expId);
+}
+
+async function loadPlanner(prefix, expId) {
+  const result = await callApi(`/api/experiments/${expId}/plan`, { headers: authHeaders() });
+  if (!result.ok) return null;
+  if (prefix === 'wizard' && wizard.expId !== expId) return null;
+  if (prefix === 'settings' && (!currentDetail || currentDetail.id !== expId)) return null;
+  if (prefix === 'wizard') wizard.planSuggestion = result.data.suggestion || null;
+  mountPlanner(prefix, expId, result.data);
+  return result.data;
+}
+
+function planLeftAsSuggested(prefix, suggestion) {
+  if (!document.getElementById(`${prefix}-baseline`)) return true;
+  const body = readPlanner(prefix);
+  const suggestedRate = suggestion && suggestion.baseline_rate != null ? Number(suggestion.baseline_rate) : 0.03;
+  const suggestedWeekly = suggestion ? suggestion.weekly_traffic : null;
+  const baselineClose = Math.abs(body.baseline_rate - suggestedRate) < 0.0005;
+  const weeklyMatch = (body.weekly_traffic == null && (suggestedWeekly == null || suggestedWeekly === ''))
+    || (body.weekly_traffic != null && suggestedWeekly != null && Number(body.weekly_traffic) === Math.round(Number(suggestedWeekly)));
+  return baselineClose && body.effect_choice === 'medium' && body.min_runtime_days === 14 && weeklyMatch;
+}
+
+async function saveCurrentPlan(expId, prefix, source) {
+  const body = readPlanner(prefix);
+  body.source = source || 'owner';
+  const result = await callApi(`/api/experiments/${expId}/plan`, {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  return result;
+}
+
+async function mountSettingsPlanner() {
+  if (!currentDetail || !document.getElementById('settings-planner')) return;
+  await loadPlanner('settings', currentDetail.id);
+}
+
+function progressWidth(value, target) {
+  if (!(target > 0)) return 0;
+  return Math.max(0, Math.min(100, Math.round((Number(value) || 0) / target * 100)));
+}
+
+function renderProgress(reading) {
+  const variants = (reading && reading.variants) || [];
+  const rows = variants.map((row) => {
+    const target = row.target;
+    const width = progressWidth(row.visitors, target);
+    const targetText = target ? ` of ${Number(target).toLocaleString('en-GB')}` : '';
+    return `<div>
+      <strong>${UI.escapeHtml(row.variant_name)}</strong>
+      <span class="hint"> · ${Number(row.visitors || 0).toLocaleString('en-GB')}${targetText} visitors · ${row.traffic_split}% of traffic</span>
+      <div class="progress-track"><div class="progress-bar" style="width:${width}%"></div></div>
+    </div>`;
+  }).join('');
+  const days = reading ? Number(reading.days_elapsed) || 0 : 0;
+  const min = reading && reading.min_runtime_days ? Number(reading.min_runtime_days) : 0;
+  const dayWidth = progressWidth(days, min);
+  const dayLine = min
+    ? `<div><strong>${days} of ${min} days</strong><div class="progress-track"><div class="progress-bar" style="width:${dayWidth}%"></div></div></div>`
+    : '';
+  return rows + dayLine;
+}
+
+function renderPlanPanel(reading, extras) {
+  const panel = document.getElementById('plan-panel');
+  if (!panel) return;
+  if (!reading) { panel.innerHTML = ''; return; }
+  const plan = reading.plan;
+  if (reading.mode === 'blind') {
+    const auto = plan && plan.source === 'auto' ? '<p class="hint">Automatic plan · medium change, unless you edited it. Change it in Settings.</p>' : '';
+    panel.innerHTML = `<div class="card">
+      <h2>Still running</h2>
+      <p class="plan-sentence">${UI.escapeHtml(plan && plan.sentence ? plan.sentence : '')}</p>
+      ${auto}
+      <p class="hint">The score stays hidden until each variant reaches the planned visitors and the minimum runtime has passed. Health, progress and the traffic split are above and here.</p>
+      ${renderProgress(reading)}
+      <div class="inline-actions">
+        <button type="button" class="btn-danger" data-action="reveal-early">Reveal early</button>
+        <button type="button" class="btn-ghost" data-action="export">Export progress</button>
+      </div>
+    </div>`;
+    return;
+  }
+  if (reading.mode === 'unplanned') {
+    const sentence = extras && extras.sentence ? extras.sentence : '';
+    panel.innerHTML = `<div class="card">
+      <h2>Set a plan</h2>
+      <p>This test has no plan yet, so the figures below are a live look, not a verdict. Nothing has been hidden.</p>
+      <p class="plan-sentence">${UI.escapeHtml(sentence)}</p>
+      <p class="hint">Using this plan hides the score until the visitors and the minimum runtime are both reached. You can reveal early after that, or edit the plan in Settings and leave these numbers as they are.</p>
+      <div class="inline-actions"><button type="button" data-action="adopt-plan">Use this plan</button></div>
+    </div>`;
+    return;
+  }
+  if (reading.mode === 'peeked') {
+    panel.innerHTML = `<div class="peek-banner"><strong>Peeked.</strong> Someone looked before the plan was reached. This is not the verdict. Peeking early raises the chance of a false win.</div>`;
+    return;
+  }
+  if (reading.mode === 'verdict' || reading.mode === 'data_problem') {
+    const peeked = reading.peeked ? '<div class="peek-banner"><strong>Peeked.</strong> The verdict uses the planned sample, and it records that someone looked early.</div>' : '';
+    panel.innerHTML = `${peeked}<div id="verdict-mount"></div>`;
+    return;
+  }
+  panel.innerHTML = '';
+}
+
+function renderVerdict(verdict) {
+  const mount = document.getElementById('verdict-mount');
+  if (!mount || !verdict) return;
+  if (verdict.verdict === 'data_problem' || verdict.label === 'Data problem') {
+    mount.innerHTML = `<section class="verdict-card data_problem"><div class="kicker">Verdict</div><h3>Data problem</h3><p>${UI.escapeHtml(verdict.summary || '')}</p></section>`;
+    return;
+  }
+  const cards = (verdict.challengers || []).map((row) => `<section class="verdict-card ${UI.escapeHtml(row.verdict)}">
+      <div class="kicker">${UI.escapeHtml(row.variant_name)} against ${UI.escapeHtml(row.control_name || 'Control')}</div>
+      <h3>${UI.escapeHtml(row.label)}</h3>
+      <p>Uplift ${UI.escapeHtml(row.uplift_label)} · 95% range ${UI.escapeHtml(row.ci_low_label)} to ${UI.escapeHtml(row.ci_high_label)}</p>
+      <p>${UI.escapeHtml(row.rule_out || '')}</p>
+    </section>`).join('');
+  const secondary = (verdict.probability_best || []).map((row) => `<tr><td>${UI.escapeHtml(row.variant_name)}</td><td class="num">${row.probability_best}%</td></tr>`).join('');
+  const details = secondary ? `<details><summary>Probability best (secondary)</summary><div class="accordion-body"><p class="hint" style="margin-top:0;">This is not the decision. The decision is the verdict above, read once the plan was reached.</p><table><thead><tr><th>Variant</th><th class="num">Probability best</th></tr></thead><tbody>${secondary}</tbody></table></div></details>` : '';
+  mount.innerHTML = cards + details;
+}
+
 function showResultsGate(text) {
   const gate = document.getElementById('results-gate');
   const live = document.getElementById('results-live');
@@ -1660,25 +2089,54 @@ async function loadResults() {
   if (!currentDetail) return;
   const expId = currentDetail.id;
   const status = currentDetail.status;
+  loadTestAudit(expId);
   if (status === 'draft') {
     showResultsGate('Not running — Bayesian and conversion rates stay hidden until you collect traffic. Install the snippet, then start.');
     return;
   }
   const filterEl = document.getElementById('visitor-type-filter');
   const visitorType = filterEl ? filterEl.value : '';
-  const qs = visitorType ? `?visitor_type=${encodeURIComponent(visitorType)}` : '';
-  const result = await callApi(`/api/results/${expId}${qs}`, { headers: authHeaders() });
+  const result = await callApi(withTestQuery(`/api/results/${expId}`, visitorType ? { visitor_type: visitorType } : null), { headers: authHeaders() });
   if (!currentDetail || currentDetail.id !== expId) return;
   if (!result.ok) {
     showResultsGate(`Could not load results: ${result.message}`);
     return;
   }
   const results = result.data.results || [];
-  const visitors = results.reduce((sum, row) => sum + Number(row.visitors || 0), 0);
+  const reading = result.data.reading;
+  const visitors = reading && reading.total_visitors != null
+    ? Number(reading.total_visitors)
+    : results.reduce((sum, row) => sum + Number(row.visitors || 0), 0);
+  if (reading && reading.mode === 'blind') {
+    renderPlanPanel(reading);
+    const gate = document.getElementById('results-gate');
+    const live = document.getElementById('results-live');
+    if (gate) gate.hidden = true;
+    if (live) live.hidden = true;
+    if (rateChart) { rateChart.destroy(); rateChart = null; }
+    if (trendChart) { trendChart.destroy(); trendChart = null; }
+    currentTrendSeries = [];
+    return;
+  }
+  let nudgeSentence = '';
+  if (reading && reading.mode === 'unplanned') {
+    const planResult = await callApi(`/api/experiments/${expId}/plan`, { headers: authHeaders() });
+    if (planResult.ok && planResult.data.preview) nudgeSentence = planResult.data.preview.sentence || '';
+    currentDetail.suggestedPlan = planResult.ok ? planResult.data.preview : null;
+  }
+  renderPlanPanel(reading, { sentence: nudgeSentence });
+  if (reading && (reading.mode === 'verdict' || reading.mode === 'data_problem')) {
+    const verdictResult = await callApi(withTestQuery(`/api/results/${expId}/verdict`), { headers: authHeaders() });
+    if (verdictResult.ok) renderVerdict(verdictResult.data);
+  }
   if (UI.resultsGated(status, visitors)) {
-    showResultsGate(status === 'draft'
+    const testVisitors = result.data.test_traffic ? Number(result.data.test_traffic.visitors) || 0 : 0;
+    const testNote = status !== 'draft' && !includeTestTraffic && testVisitors > 0
+      ? ' Test traffic is excluded. Tick Include test traffic to see it.'
+      : '';
+    showResultsGate((status === 'draft'
       ? 'Not running — Bayesian and conversion rates stay hidden until you collect traffic. Install the snippet, then start.'
-      : 'No traffic yet — rates and probability best stay hidden until visitors arrive.');
+      : 'No traffic yet — rates and probability best stay hidden until visitors arrive.') + testNote);
     return;
   }
   document.getElementById('results-gate').hidden = true;
@@ -1713,12 +2171,12 @@ async function loadResults() {
     });
   }
 
-  const trendResult = await callApi(`/api/results/${expId}/timeseries`, { headers: authHeaders() });
+  const trendResult = await callApi(withTestQuery(`/api/results/${expId}/timeseries`), { headers: authHeaders() });
   currentTrendSeries = (trendResult.ok && trendResult.data.series) ? trendResult.data.series : [];
   renderTrendChart();
 
   const srmPanel = document.getElementById('srm-panel');
-  const srmResult = await callApi(`/api/results/${expId}/srm`, { headers: authHeaders() });
+  const srmResult = await callApi(withTestQuery(`/api/results/${expId}/srm`), { headers: authHeaders() });
   if (!srmResult.ok || !srmResult.data.applicable) {
     srmPanel.style.display = 'none';
   } else {
@@ -1736,7 +2194,17 @@ async function loadResults() {
 
   const bayesianTable = document.getElementById('bayesian-table');
   const bayesianWarning = document.getElementById('bayesian-warning');
-  const bayesianResult = await callApi(`/api/results/${expId}/bayesian`, { headers: authHeaders() });
+  const bayesianHeading = document.getElementById('bayesian-heading');
+  if (reading && (reading.mode === 'verdict' || reading.mode === 'data_problem')) {
+    if (bayesianTable) bayesianTable.style.display = 'none';
+    if (bayesianWarning) bayesianWarning.style.display = 'none';
+    if (bayesianHeading) bayesianHeading.hidden = true;
+    const how = bayesianHeading && bayesianHeading.previousElementSibling;
+    if (how && how.tagName === 'DETAILS') how.hidden = true;
+    return;
+  }
+  if (bayesianHeading) bayesianHeading.hidden = false;
+  const bayesianResult = await callApi(withTestQuery(`/api/results/${expId}/bayesian`), { headers: authHeaders() });
   if (!bayesianResult.ok || !bayesianResult.data.stats || bayesianResult.data.stats.length === 0) {
     bayesianTable.style.display = 'none';
     bayesianWarning.style.display = 'none';
@@ -1788,6 +2256,17 @@ async function loadHostHits() {
   }
   const rows = result.data.rows || [];
   const byHost = result.data.by_host || [];
+  const windows = result.data.excluded_windows || [];
+  const exclusions = document.getElementById('host-hits-exclusions');
+  if (exclusions) {
+    exclusions.textContent = windows.length
+      ? 'Recorded tester windows (daily totals kept, not deleted): ' + windows.map((window) => {
+          const start = formatAuditWhen(window.started_at);
+          const end = formatAuditWhen(window.ended_at);
+          return `${start} – ${end} from ${window.source_ip || 'unknown IP'}, ${window.referrer_origin || 'unknown site'} to ${window.host}`;
+        }).join('; ') + '.'
+      : '';
+  }
   if (summary) {
     summary.textContent = byHost.length
       ? byHost.map((item) => `${item.host}: ${item.hit_count.toLocaleString('en-GB')}`).join(' · ')
@@ -1804,13 +2283,173 @@ async function loadHostHits() {
   body.innerHTML = rows.map((row) => {
     const day = row.day ? new Date(row.day + 'T00:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '';
     const site = row.referrer_origin || 'Unknown';
-    return `<tr><td>${UI.escapeHtml(day)}</td><td class="mono">${UI.escapeHtml(row.host)}</td><td class="mono">${UI.escapeHtml(site)}</td><td class="num">${row.hit_count}</td></tr>`;
+    const note = row.overlaps_excluded_window ? ' <span class="hint">includes a tester window</span>' : '';
+    return `<tr><td>${UI.escapeHtml(day)}</td><td class="mono">${UI.escapeHtml(row.host)}</td><td class="mono">${UI.escapeHtml(site)}</td><td class="num">${row.hit_count}${note}</td></tr>`;
   }).join('');
   if (table) table.style.display = 'table';
 }
 
 document.addEventListener('change', (e) => {
-  if (e.target && e.target.id === 'visitor-type-filter' && currentDetail) loadResults();
+  if (!e.target || !currentDetail) return;
+  if (e.target.id === 'visitor-type-filter') loadResults();
+  if (e.target.id === 'include-test-traffic') {
+    includeTestTraffic = e.target.checked;
+    loadResults();
+    loadHealth();
+  }
+});
+
+function withTestQuery(path, extra) {
+  const params = new URLSearchParams();
+  if (extra) {
+    Object.keys(extra).forEach((key) => {
+      if (extra[key] != null && extra[key] !== '') params.set(key, extra[key]);
+    });
+  }
+  if (includeTestTraffic) params.set('include_test', '1');
+  const qs = params.toString();
+  return qs ? `${path}?${qs}` : path;
+}
+
+function formatAuditWhen(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC';
+}
+
+function auditCriteriaLabel(criteria) {
+  if (!criteria) return '';
+  if (criteria.kind === 'peek') return 'Early look';
+  if (criteria.mode === 'prefix') return `Prefix ${criteria.prefix || ''}`;
+  return 'Test traffic';
+}
+
+function auditActionLabel(action) {
+  if (action === 'restore') return 'Restore';
+  if (action === 'remove') return 'Remove';
+  if (action === 'reveal') return 'Reveal early';
+  return action || '';
+}
+
+async function loadTestAudit(expId) {
+  const msg = document.getElementById('test-audit-msg');
+  const table = document.getElementById('test-audit-table');
+  const body = document.getElementById('test-audit-body');
+  if (!msg || !body) return;
+  const result = await callApi(`/api/experiments/${expId}/test-traffic/audit`, { headers: authHeaders() });
+  if (!currentDetail || currentDetail.id !== expId || !document.getElementById('test-audit-body')) return;
+  if (!result.ok) {
+    msg.className = 'error-msg';
+    msg.textContent = 'Could not load the test traffic log.';
+    if (table) table.style.display = 'none';
+    return;
+  }
+  const entries = result.data.entries || [];
+  if (entries.length === 0) {
+    msg.className = 'hint';
+    msg.textContent = 'Nothing has been removed or restored.';
+    if (table) table.style.display = 'none';
+    body.innerHTML = '';
+    return;
+  }
+  msg.textContent = '';
+  body.innerHTML = entries.map((entry) => `<tr>
+    <td>${UI.escapeHtml(formatAuditWhen(entry.created_at))}</td>
+    <td>${UI.escapeHtml(entry.actor || 'owner')}</td>
+    <td>${UI.escapeHtml(auditActionLabel(entry.action))}</td>
+    <td>${UI.escapeHtml(auditCriteriaLabel(entry.criteria))}</td>
+    <td class="num">${entry.visitor_count}</td>
+    <td class="num">${entry.event_count}</td>
+  </tr>`).join('');
+  if (table) table.style.display = 'table';
+}
+
+function closeTestTrafficModal() {
+  const modal = document.getElementById('test-traffic-modal');
+  if (modal) modal.classList.remove('active');
+  testTrafficPending = null;
+  syncModalScrollLock();
+}
+
+function renderTestTrafficDialog() {
+  const pending = testTrafficPending;
+  if (!pending) return;
+  const preview = pending.preview || {};
+  const restoring = pending.direction === 'restore';
+  const title = document.getElementById('test-traffic-title');
+  const confirmBtn = document.getElementById('test-traffic-confirm');
+  const prefixBit = pending.mode === 'prefix' ? ` starting with ${pending.prefix}` : '';
+  if (title) title.textContent = restoring ? `Restore visitors${prefixBit}` : `Remove visitors${prefixBit}`;
+  if (confirmBtn) {
+    confirmBtn.textContent = restoring ? 'Restore' : 'Remove';
+    confirmBtn.classList.toggle('btn-danger', !restoring);
+    confirmBtn.disabled = !(Number(preview.events) > 0);
+  }
+  const rows = (preview.variants || []).map((row) => `<tr>
+    <td>${UI.escapeHtml(row.variant_name)}</td>
+    <td class="num">${row.visitors}</td>
+    <td class="num">${row.events}</td>
+  </tr>`).join('');
+  const intro = restoring
+    ? 'These visitors will count again. Test traffic stays out of the results unless Include test traffic is ticked. Nothing was deleted.'
+    : 'These visitors will be hidden from results, including when Include test traffic is ticked. Nothing is deleted. You can restore them.';
+  const empty = Number(preview.events) > 0 ? '' : `<p class="hint">${restoring ? 'Nothing to restore.' : 'Nothing to remove.'}</p>`;
+  document.getElementById('test-traffic-body').innerHTML = `
+    <p style="margin-top:0;">${UI.escapeHtml(intro)}</p>
+    <p><strong>${preview.visitors || 0}</strong> visitors, <strong>${preview.events || 0}</strong> events.</p>
+    ${empty}
+    <div class="table-scroll"><table>
+      <thead><tr><th>Variant</th><th class="num">Visitors</th><th class="num">Events</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+
+async function openTestTrafficDialog(direction, mode) {
+  if (!currentDetail) return;
+  const prefixInput = document.getElementById('test-visitor-prefix');
+  const prefix = prefixInput ? prefixInput.value.trim() : '';
+  const payload = { mode, direction: direction === 'restore' ? 'restore' : 'remove' };
+  if (mode === 'prefix') payload.prefix = prefix;
+  const result = await callApi(`/api/experiments/${currentDetail.id}/test-traffic/preview`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!result.ok) { detailError(result.message); return; }
+  detailError('');
+  testTrafficPending = { direction: payload.direction, mode, prefix, preview: result.data };
+  renderTestTrafficDialog();
+  document.getElementById('test-traffic-modal').classList.add('active');
+  syncModalScrollLock();
+  const confirmBtn = document.getElementById('test-traffic-confirm');
+  if (confirmBtn && !confirmBtn.disabled) confirmBtn.focus();
+}
+
+async function confirmTestTraffic() {
+  if (!testTrafficPending || !currentDetail) return;
+  const pending = testTrafficPending;
+  const confirmBtn = document.getElementById('test-traffic-confirm');
+  if (confirmBtn) confirmBtn.disabled = true;
+  const path = pending.direction === 'restore' ? 'restore' : 'remove';
+  const payload = { mode: pending.mode, confirm: true };
+  if (pending.mode === 'prefix') payload.prefix = pending.prefix;
+  const result = await callApi(`/api/experiments/${currentDetail.id}/test-traffic/${path}`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (confirmBtn) confirmBtn.disabled = false;
+  if (!result.ok) { detailError(result.message); return; }
+  closeTestTrafficModal();
+  await loadResults();
+  await loadHealth();
+}
+
+document.getElementById('test-traffic-close').addEventListener('click', closeTestTrafficModal);
+document.getElementById('test-traffic-cancel').addEventListener('click', closeTestTrafficModal);
+document.getElementById('test-traffic-confirm').addEventListener('click', confirmTestTraffic);
+document.getElementById('test-traffic-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'test-traffic-modal') closeTestTrafficModal();
 });
 
 // --- Wizard ---
@@ -1841,6 +2480,7 @@ function resetWizard() {
   wizard.variants = [];
   wizard.goalRows = [];
   wizard.checks = { snippet: false, preview: false, event: false };
+  wizard.planSuggestion = null;
   wizard.busy = false;
   try { sessionStorage.removeItem('pivit_wizard'); } catch (e) {}
   const list = document.getElementById('wizard-goals-list');
@@ -1940,7 +2580,10 @@ async function renderWizard() {
       box.checked = !!wizard.checks[box.dataset.wizardCheck];
     });
   }
-  if (wizard.step === 5) renderWizardSummary();
+  if (wizard.step === 5) {
+    renderWizardSummary();
+    if (wizard.expId) loadPlanner('wizard', wizard.expId);
+  }
   fillInstallSnippets();
 }
 
@@ -2128,8 +2771,32 @@ function renderWizardSummary() {
 
 async function finishWizard(toSettings) {
   const id = wizard.expId;
+  if (id) {
+    let saved;
+    if (document.getElementById('wizard-baseline')) {
+      const source = planLeftAsSuggested('wizard', wizard.planSuggestion) ? 'auto' : 'owner';
+      saved = await saveCurrentPlan(id, 'wizard', source);
+    } else {
+      const fetched = await callApi(`/api/experiments/${id}/plan`, { headers: authHeaders() });
+      if (!fetched.ok) { wizardMsg(fetched.message); return false; }
+      if (fetched.data.plan) {
+        saved = { ok: true };
+      } else if (fetched.data.preview) {
+        saved = await callApi(`/api/experiments/${id}/plan`, {
+          method: 'PUT',
+          headers: authHeaders(),
+          body: JSON.stringify(fetched.data.preview),
+        });
+      } else {
+        wizardMsg('Could not build a plan.');
+        return false;
+      }
+    }
+    if (!saved.ok) { wizardMsg(saved.message); return false; }
+  }
   resetWizard();
   go(toSettings ? `#experiment/${id}/settings` : `#experiment/${id}/overview`);
+  return true;
 }
 
 async function wizardAdvance() {
@@ -2183,8 +2850,15 @@ document.getElementById('wizard-hosts').addEventListener('input', () => {
   saveWizard();
 });
 document.getElementById('wizard-next').addEventListener('click', wizardAdvance);
-document.getElementById('wizard-save-draft').addEventListener('click', () => {
-  if (wizard.expId) finishWizard(false);
+document.getElementById('wizard-save-draft').addEventListener('click', async () => {
+  if (!wizard.expId || wizard.busy) return;
+  wizard.busy = true;
+  wizardMsg('');
+  try {
+    await finishWizard(false);
+  } finally {
+    wizard.busy = false;
+  }
 });
 document.getElementById('wizard-skip').addEventListener('click', async () => {
   wizard.step = 4;

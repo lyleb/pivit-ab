@@ -263,6 +263,17 @@ function visitorTypeClause(visitorType) {
   return '';
 }
 
+function includeTestFrom(options) {
+  return !!(options && options.includeTest);
+}
+
+// Soft-removed rows stay out. is_test stays out unless the owner opted in.
+// paramIndex is the boolean parameter.
+function visibleEventSql(alias, paramIndex) {
+  const prefix = alias ? `${alias}.` : '';
+  return `${prefix}excluded_at IS NULL AND ($${paramIndex}::boolean OR ${prefix}is_test = false)`;
+}
+
 function mapResultRow(row) {
   const visitors = Number(row.visitors) || 0;
   const conversions = Math.min(Number(row.conversions) || 0, visitors);
@@ -282,13 +293,17 @@ function mapResultRow(row) {
 // Unique converting visitors per variant. visitorType limits the visitors,
 // conversions and click totals to new or returning; the new/returning columns
 // themselves stay the full breakdown.
-async function getVariantResults(experimentId, visitorType) {
+async function getVariantResults(experimentId, visitorType, options) {
   const primaryKey = await getPrimaryGoalKey(experimentId);
+  const includeTest = includeTestFrom(options);
   const filter = visitorTypeClause(visitorType);
+  const visible = visibleEventSql('e', 3);
   const { rows } = await db.query(
     `WITH first_seen AS (
        SELECT visitor_id, MIN(created_at)::date AS first_day
-       FROM events WHERE experiment_id = $1 AND event_type = 'view'
+       FROM events
+       WHERE experiment_id = $1 AND event_type = 'view'
+         AND ${visibleEventSql('', 3)}
        GROUP BY visitor_id
      ),
      flags AS (
@@ -303,7 +318,7 @@ async function getVariantResults(experimentId, visitorType) {
          COUNT(*) FILTER (WHERE e.event_type = 'click' ${filter}) AS clicks,
          COUNT(*) FILTER (WHERE ${PRIMARY_CONVERT} ${filter}) AS conversion_events
        FROM variants v
-       LEFT JOIN events e ON e.variant_id = v.id
+       LEFT JOIN events e ON e.variant_id = v.id AND ${visible}
        LEFT JOIN first_seen fs ON fs.visitor_id = e.visitor_id
        WHERE v.experiment_id = $1
        GROUP BY v.id, v.name, e.visitor_id
@@ -320,7 +335,7 @@ async function getVariantResults(experimentId, visitorType) {
      FROM flags
      GROUP BY variant_id, variant_name
      ORDER BY variant_name`,
-    [experimentId, primaryKey]
+    [experimentId, primaryKey, includeTest]
   );
   return {
     primaryKey,
@@ -328,8 +343,8 @@ async function getVariantResults(experimentId, visitorType) {
   };
 }
 
-async function getPrimaryVariantData(experimentId) {
-  const { primaryKey, results } = await getVariantResults(experimentId);
+async function getPrimaryVariantData(experimentId, options) {
+  const { primaryKey, results } = await getVariantResults(experimentId, undefined, options);
   return {
     primaryKey,
     variantData: results.map((row) => ({
@@ -341,16 +356,18 @@ async function getPrimaryVariantData(experimentId) {
   };
 }
 
-async function getGoalBreakdown(experimentId) {
+async function getGoalBreakdown(experimentId, options) {
   const goals = await getGoalDefs(experimentId);
+  const includeTest = includeTestFrom(options);
+  const visible = visibleEventSql('e', 2);
 
   const { rows: visitorRows } = await db.query(
     `SELECT v.id AS variant_id, v.name AS variant_name,
        COUNT(DISTINCT e.visitor_id) FILTER (WHERE e.event_type = 'view') AS visitors
-     FROM variants v LEFT JOIN events e ON e.variant_id = v.id
+     FROM variants v LEFT JOIN events e ON e.variant_id = v.id AND ${visible}
      WHERE v.experiment_id = $1
      GROUP BY v.id, v.name ORDER BY v.name`,
-    [experimentId]
+    [experimentId, includeTest]
   );
 
   // Converters are viewers, so the per-goal rate cannot exceed 100%.
@@ -360,6 +377,7 @@ async function getGoalBreakdown(experimentId) {
        SELECT variant_id, visitor_id
        FROM events
        WHERE experiment_id = $1 AND event_type = 'view'
+         AND ${visibleEventSql('', 2)}
        GROUP BY variant_id, visitor_id
      )
      SELECT e.variant_id, e.goal_id,
@@ -368,8 +386,9 @@ async function getGoalBreakdown(experimentId) {
      FROM events e
      JOIN viewers w ON w.variant_id = e.variant_id AND w.visitor_id = e.visitor_id
      WHERE e.experiment_id = $1 AND e.event_type = 'convert' AND e.goal_id IS NOT NULL
+       AND ${visible}
      GROUP BY e.variant_id, e.goal_id`,
-    [experimentId]
+    [experimentId, includeTest]
   );
 
   const lookup = new Map(goalRows.map((r) => [`${r.variant_id}|${r.goal_id}`, r]));
@@ -393,8 +412,10 @@ async function getGoalBreakdown(experimentId) {
   return { primary_goal: (goals.find((g) => g.primary) || {}).key || null, goals: breakdown };
 }
 
-async function getTimeseries(experimentId) {
+async function getTimeseries(experimentId, options) {
   const primaryKey = await getPrimaryGoalKey(experimentId);
+  const includeTest = includeTestFrom(options);
+  const visible = visibleEventSql('e', 3);
   const { rows: daily } = await db.query(
     `WITH ev AS (
        SELECT
@@ -406,7 +427,7 @@ async function getTimeseries(experimentId) {
          bool_or(${PRIMARY_CONVERT}) AS converted
        FROM events e
        JOIN variants v ON v.id = e.variant_id
-       WHERE e.experiment_id = $1
+       WHERE e.experiment_id = $1 AND ${visible}
        GROUP BY v.id, v.name, e.visitor_id, e.created_at::date
      )
      SELECT variant_id, variant_name, day::text AS day,
@@ -415,7 +436,7 @@ async function getTimeseries(experimentId) {
      FROM ev
      GROUP BY variant_id, variant_name, day
      ORDER BY day`,
-    [experimentId, primaryKey]
+    [experimentId, primaryKey, includeTest]
   );
 
   const { rows: firsts } = await db.query(
@@ -427,9 +448,9 @@ async function getTimeseries(experimentId) {
        (MIN(e.created_at) FILTER (WHERE ${PRIMARY_CONVERT}))::date::text AS first_convert
      FROM events e
      JOIN variants v ON v.id = e.variant_id
-     WHERE e.experiment_id = $1
+     WHERE e.experiment_id = $1 AND ${visible}
      GROUP BY v.id, v.name, e.visitor_id`,
-    [experimentId, primaryKey]
+    [experimentId, primaryKey, includeTest]
   );
 
   const firstViews = [];
@@ -475,4 +496,5 @@ module.exports = {
   getTimeseries,
   PRIMARY_CONVERT,
   visitorTypeClause,
+  visibleEventSql,
 };

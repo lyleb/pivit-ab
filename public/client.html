@@ -43,6 +43,15 @@
   .results-meta { margin: -4px 0 14px; }
   .trend-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
   .portal-foot { margin: 22px 0 0; }
+  .plan-sentence { font-size: 1.05em; font-weight: 750; margin: 8px 0; }
+  .progress-track { height: 8px; background: #262a38; border-radius: 99px; overflow: hidden; margin: 6px 0 14px; }
+  .progress-bar { height: 100%; background: var(--indigo); }
+  .verdict-card { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin: 12px 0; background: var(--card-2); }
+  .verdict-card.win { border-color: #1d6b52; }
+  .verdict-card.loss { border-color: #8a3a3a; }
+  .verdict-card.inconclusive, .verdict-card.data_problem { border-color: #8a6a2f; }
+  .verdict-card h3 { margin: 4px 0 8px; font-size: 1.35em; }
+  .peek-banner { border: 1px solid #8a6a2f; background: var(--warn-bg); color: var(--warn); border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; }
   @media (max-width: 860px) {
     .portal-grid { grid-template-columns: minmax(0, 1fr); }
     .portal-top .welcome { display: none; }
@@ -72,6 +81,7 @@
       <h2 id="results-title">Results</h2>
       <p id="results-meta" class="hint results-meta"></p>
       <p id="results-msg" class="hint"></p>
+      <div id="plan-note"></div>
       <div id="results-live" hidden>
         <div id="bayesian-summary" class="result-summary" hidden></div>
         <div class="table-scroll" tabindex="0" role="region" aria-label="Results by variant (scrolls sideways)">
@@ -155,6 +165,8 @@ async function callApi(path) {
 
 function hideLiveResults() {
   document.getElementById('results-live').hidden = true;
+  const note = document.getElementById('plan-note');
+  if (note) note.innerHTML = '';
   document.getElementById('bayesian-summary').hidden = true;
   const goals = document.getElementById('goal-breakdown');
   if (goals) { goals.hidden = true; goals.innerHTML = ''; }
@@ -301,6 +313,48 @@ function renderGoalBreakdown(goals, primaryGoal) {
 document.getElementById('trend-mode-cumulative').addEventListener('click', () => { trendMode = 'cumulative'; renderTrendChart(); });
 document.getElementById('trend-mode-daily').addEventListener('click', () => { trendMode = 'daily'; renderTrendChart(); });
 
+function progressWidth(value, target) {
+  if (!(target > 0)) return 0;
+  return Math.max(0, Math.min(100, Math.round((Number(value) || 0) / target * 100)));
+}
+
+function renderClientProgress(reading) {
+  const variants = (reading && reading.variants) || [];
+  const rows = variants.map((row) => {
+    const width = progressWidth(row.visitors, row.target);
+    const targetText = row.target ? ` of ${Number(row.target).toLocaleString('en-GB')}` : '';
+    return `<div>
+      <strong>${UI.escapeHtml(row.variant_name)}</strong>
+      <span class="hint"> · ${Number(row.visitors || 0).toLocaleString('en-GB')}${targetText} visitors · ${row.traffic_split == null ? '' : row.traffic_split + '% of traffic'}</span>
+      <div class="progress-track"><div class="progress-bar" style="width:${width}%"></div></div>
+    </div>`;
+  }).join('');
+  const days = reading ? Number(reading.days_elapsed) || 0 : 0;
+  const min = reading && reading.min_runtime_days ? Number(reading.min_runtime_days) : 0;
+  const dayLine = min
+    ? `<div><strong>${days} of ${min} days</strong><div class="progress-track"><div class="progress-bar" style="width:${progressWidth(days, min)}%"></div></div></div>`
+    : '';
+  return rows + dayLine;
+}
+
+function renderClientVerdict(verdict) {
+  if (!verdict) return '';
+  if (verdict.verdict === 'data_problem' || verdict.label === 'Data problem') {
+    return `<section class="verdict-card data_problem"><div class="kicker">Verdict</div><h3>Data problem</h3><p>${UI.escapeHtml(verdict.summary || '')}</p></section>`;
+  }
+  const cards = (verdict.challengers || []).map((row) => `<section class="verdict-card ${UI.escapeHtml(row.verdict)}">
+      <div class="kicker">${UI.escapeHtml(row.variant_name)} against ${UI.escapeHtml(row.control_name || 'Control')}</div>
+      <h3>${UI.escapeHtml(row.label)}</h3>
+      <p>Uplift ${UI.escapeHtml(row.uplift_label)} · 95% range ${UI.escapeHtml(row.ci_low_label)} to ${UI.escapeHtml(row.ci_high_label)}</p>
+      <p>${UI.escapeHtml(row.rule_out || '')}</p>
+    </section>`).join('');
+  const secondary = (verdict.probability_best || []).map((row) => `${UI.escapeHtml(row.variant_name)} ${row.probability_best}%`).join(' · ');
+  const details = secondary
+    ? `<details><summary>Probability best (secondary)</summary><p class="hint">This is not the decision. The decision is the verdict above, read once the plan was reached. ${secondary}.</p></details>`
+    : '';
+  return cards + details;
+}
+
 async function loadResults(exp) {
   document.querySelectorAll('.exp-row').forEach((el) => el.classList.remove('selected'));
   const row = document.getElementById(`exp-row-${exp.id}`);
@@ -326,7 +380,27 @@ async function loadResults(exp) {
   }
 
   const results = result.data.results || [];
-  const visitors = results.reduce((sum, item) => sum + Number(item.visitors || 0), 0);
+  const reading = result.data.reading || {};
+  const visitors = reading.total_visitors != null
+    ? Number(reading.total_visitors)
+    : results.reduce((sum, item) => sum + Number(item.visitors || 0), 0);
+  const note = document.getElementById('plan-note');
+  const blinded = result.data.blinded || reading.mode === 'blind';
+
+  if (blinded) {
+    msgEl.textContent = '';
+    const count = visitors.toLocaleString('en-GB');
+    const days = Number(reading.days_elapsed) || 0;
+    const min = reading.min_runtime_days ? Number(reading.min_runtime_days) : null;
+    const dayText = min ? ` · ${days} of ${min} days` : '';
+    document.getElementById('results-meta').textContent = `${count} visitors${dayText}`;
+    const sentence = reading.plan && reading.plan.sentence ? reading.plan.sentence : '';
+    note.innerHTML = `<p class="plan-sentence">${UI.escapeHtml(sentence)}</p>
+      <p>Results stay hidden until the plan is reached.</p>
+      ${renderClientProgress(reading)}`;
+    return;
+  }
+
   if (UI.resultsGated(exp.status, visitors)) {
     msgEl.textContent = exp.status === 'draft' ? DRAFT_GATE : EMPTY_GATE;
     return;
@@ -339,6 +413,17 @@ async function loadResults(exp) {
   if (exp.status === 'running' && since) meta.textContent = `Running since ${since} · ${count} visitors`;
   else if (since) meta.textContent = `${statusLabel(exp.status)} · since ${since} · ${count} visitors`;
   else meta.textContent = `${count} visitors`;
+
+  if (reading.mode === 'data_problem' || reading.mode === 'verdict') {
+    const peeked = reading.peeked ? '<div class="peek-banner"><strong>Peeked.</strong> Someone looked before the plan was reached. The verdict still uses the planned sample.</div>' : '';
+    note.innerHTML = peeked + renderClientVerdict(result.data.verdict);
+  } else if (reading.mode === 'peeked') {
+    note.innerHTML = '<div class="peek-banner"><strong>Peeked.</strong> Someone looked before the plan was reached. This is not the verdict.</div>';
+  } else if (reading.mode === 'unplanned') {
+    note.innerHTML = '<p>This test has no plan yet, so these figures are a live look, not a verdict.</p>';
+  } else {
+    note.innerHTML = '';
+  }
 
   document.getElementById('results-live').hidden = false;
   renderGoalBreakdown(result.data.goals, result.data.primary_goal);
@@ -379,22 +464,18 @@ async function loadResults(exp) {
   renderTrendChart();
 
   const summaryEl = document.getElementById('bayesian-summary');
+  if (reading.mode === 'verdict' || reading.mode === 'data_problem' || reading.mode === 'peeked' || reading.mode === 'unplanned') {
+    summaryEl.hidden = true;
+    return;
+  }
   const bayesianResult = await callApi(`/api/client/results/${exp.id}/bayesian`);
-  if (!bayesianResult.ok || !bayesianResult.data.stats || bayesianResult.data.stats.length < 2) {
+  if (!bayesianResult.ok || !bayesianResult.data.secondary || !bayesianResult.data.stats || bayesianResult.data.stats.length < 2) {
     summaryEl.hidden = true;
   } else {
     const stats = bayesianResult.data.stats;
-    const best = stats.reduce((a, b) => (b.probability_best > a.probability_best ? b : a));
-    let sentence;
-    if (bayesianResult.data.low_sample_warning) {
-      sentence = `Not enough traffic yet to say with confidence which variant is winning — "${best.variant_name}" is ahead so far (${best.probability_best}% probability), but this could still change.`;
-    } else if (best.probability_best >= 90) {
-      sentence = `"${best.variant_name}" is the likely winner, with a ${best.probability_best}% probability of being the best-performing variant.`;
-    } else {
-      sentence = `No clear winner yet — "${best.variant_name}" is currently ahead with a ${best.probability_best}% probability of being best, but it's not a strong enough lead to be confident.`;
-    }
+    const line = stats.map((item) => `${item.variant_name} ${item.probability_best}%`).join(', ');
     summaryEl.hidden = false;
-    summaryEl.textContent = sentence;
+    summaryEl.textContent = `Probability best, as a secondary detail only: ${line}. The decision is the verdict above.`;
   }
 }
 
