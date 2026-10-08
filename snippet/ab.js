@@ -1,5 +1,5 @@
 /**
- * AB Platform snippet — v0.5
+ * AB Platform snippet — v0.6
  *
  * Usage on client site:
  *   <script src="https://your-api.example.com/snippet/ab.js"
@@ -42,6 +42,11 @@
  */
 (function (root) {
   const api = buildPivitRuntime();
+  const clickSeen = Object.create(null);
+  api.matchUrlGoal = matchUrlGoal;
+  api.isSafeRegex = isSafeRegex;
+  api.claimClick = claimClick;
+  api.clickStorageKey = clickStorageKey;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (!root || !root.document) return;
   root.PivitRuntime = api;
@@ -194,13 +199,27 @@
     }
   }
 
-  function wireConversionTracking(experimentId, variantId, visitorId, variant) {
-    (variant.goals || []).forEach((goal) => {
+  // Experiment goals apply to every variant. An empty list means this test
+  // still keeps a different list on each variant — use that variant's goals.
+  function goalsFor(experiment, variant) {
+    if (experiment && experiment.goals && experiment.goals.length) return experiment.goals;
+    return (variant && variant.goals) || [];
+  }
+
+  function wireConversionTracking(experimentId, variantId, visitorId, goals) {
+    (goals || []).forEach((goal) => {
       const type = goal.type || 'click'; // goals saved before this feature have no "type" — always click
-      if (type !== 'click') return; // 'url' goals are handled by checkUrlGoals below, not here
-      document.querySelectorAll(goal.selector).forEach((el) => {
+      if (type !== 'click' || !goal.selector) return; // 'url' goals are handled by checkUrlGoals below
+      let nodes;
+      try { nodes = document.querySelectorAll(goal.selector); } catch (e) { return; }
+      const goalId = goal.id || goal.selector;
+      nodes.forEach((el) => {
         el.addEventListener('click', () => {
-          sendEvent(experimentId, variantId, visitorId, 'convert', goal.id || goal.selector);
+          // One beacon per visitor per goal. Later clicks are not sent, so
+          // they cannot burn the per-IP event cap. The server still counts
+          // unique conversions from whatever did arrive.
+          if (!claimClick(localStorage, visitorId, experimentId, goalId)) return;
+          sendEvent(experimentId, variantId, visitorId, 'convert', goalId);
         });
       });
     });
@@ -231,9 +250,9 @@
         const variant = (experiment.variants || []).find((v) => v.id === variantId);
         if (!variant) return;
 
-        (variant.goals || []).forEach((goal) => {
+        goalsFor(experiment, variant).forEach((goal) => {
           if (goal.type !== 'url' || !goal.url_match) return;
-          if (window.location.href.indexOf(goal.url_match) === -1) return;
+          if (!matchUrlGoal(goal.url_match, window.location.href, goal.match || 'contains')) return;
 
           const firedKey = '_ab_converted_' + experiment.id + '_' + (goal.id || goal.url_match);
           if (localStorage.getItem(firedKey)) return; // only count once per visitor per goal
@@ -335,7 +354,7 @@
         const variant = pickVariant(experiment, visitorId);
         applyVariantChanges(variant);
         sendEvent(experiment.id, variant.id, visitorId, 'view');
-        wireConversionTracking(experiment.id, variant.id, visitorId, variant);
+        wireConversionTracking(experiment.id, variant.id, visitorId, goalsFor(experiment, variant));
       });
 
       // Reveal now — DOM changes are applied, so this is the earliest safe moment.
@@ -355,6 +374,192 @@
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
+  }
+
+  // One click beacon per visitor + experiment + goal. localStorage is the
+  // record; if it throws, clickSeen still blocks a repeat on this page.
+  function clickStorageKey(visitorId, experimentId, goalId) {
+    return '_ab_click_' + visitorId + '_' + experimentId + '_' + goalId;
+  }
+  function claimClick(storage, visitorId, experimentId, goalId, memory) {
+    const mem = memory || clickSeen;
+    const key = clickStorageKey(visitorId, experimentId, goalId);
+    if (mem[key]) return false;
+    try {
+      if (storage && storage.getItem && storage.getItem(key)) {
+        mem[key] = 1;
+        return false;
+      }
+    } catch (e) { /* private mode or a blocked store — fall through to memory */ }
+    mem[key] = 1;
+    try {
+      if (storage && storage.setItem) storage.setItem(key, '1');
+    } catch (e) { /* the memory flag above is the fallback */ }
+    return true;
+  }
+
+  // Keep in step with public/url-match.js. scripts/goals.test.js checks they agree.
+  function stripEdge(value) {
+    let s = String(value || '').trim();
+    let strippedQuery = false;
+    if (s.endsWith('?')) { s = s.slice(0, -1); strippedQuery = true; }
+    if (s.length > 1 && s.endsWith('/') && !s.endsWith('://')) s = s.slice(0, -1);
+    return { value: s, strippedQuery: strippedQuery };
+  }
+  function urlCandidates(href) {
+    const raw = String(href || '').trim();
+    const out = [];
+    function add(value) { if (value && out.indexOf(value) === -1) out.push(value); }
+    add(raw);
+    try {
+      const u = new URL(raw, 'https://placeholder.invalid');
+      if (/^https?:\/\//i.test(raw) || raw.charAt(0) === '/') {
+        add(u.pathname + u.search + u.hash);
+        add(u.origin + u.pathname + u.search + u.hash);
+        if (!u.search) { add(u.pathname); add(u.origin + u.pathname); }
+      }
+    } catch (e) {}
+    return out;
+  }
+  function pathOnly(value) {
+    const q = value.indexOf('?');
+    const h = value.indexOf('#');
+    let end = value.length;
+    if (q !== -1) end = Math.min(end, q);
+    if (h !== -1 && (q === -1 || h < q)) end = h;
+    return value.slice(0, end);
+  }
+  function sameEdge(left, right) {
+    if (right.value === left.value) return true;
+    if (!left.strippedQuery) return false;
+    return stripEdge(pathOnly(right.value)).value === left.value;
+  }
+  function startsEdge(left, right) {
+    if (!left.value) return false;
+    if (right.value.indexOf(left.value) === 0) return true;
+    if (!left.strippedQuery) return false;
+    return stripEdge(pathOnly(right.value)).value.indexOf(left.value) === 0;
+  }
+  function readQuantifier(source, i) {
+    const c = source.charAt(i);
+    if (c !== '+' && c !== '*' && c !== '?' && c !== '{') return { quantified: false, repeating: false, next: i };
+    if (c !== '{') {
+      let next = i + 1;
+      if (source.charAt(next) === '?' || source.charAt(next) === '+') next += 1;
+      return { quantified: true, repeating: c === '+' || c === '*', next: next };
+    }
+    const m = /^\{(\d+)(,(\d*))?\}/.exec(source.slice(i));
+    if (!m) return { quantified: false, repeating: false, next: i };
+    let next = i + m[0].length;
+    if (source.charAt(next) === '?' || source.charAt(next) === '+') next += 1;
+    const min = Number(m[1]);
+    const max = m[2] == null ? min : (m[3] === '' ? Infinity : Number(m[3]));
+    return { quantified: true, repeating: max > 1, next: next };
+  }
+  function starHeight(source) {
+    let i = 0;
+    const n = source.length;
+    const frames = [{ alt: 0, max: 0, last: 0, altUsed: false }];
+    function frame() { return frames[frames.length - 1]; }
+    while (i < n) {
+      const c = source.charAt(i);
+      if (c === '\\') {
+        if (i + 1 >= n) return -1;
+        frame().last = 0;
+        i += 2;
+        continue;
+      }
+      if (c === '[') {
+        i += 1;
+        if (source.charAt(i) === '^') i += 1;
+        if (source.charAt(i) === ']') i += 1;
+        let closed = false;
+        while (i < n) {
+          if (source.charAt(i) === '\\') { i += 2; continue; }
+          if (source.charAt(i) === ']') { closed = true; i += 1; break; }
+          i += 1;
+        }
+        if (!closed) return -1;
+        frame().last = 0;
+        continue;
+      }
+      if (c === '(') {
+        frames.push({ alt: 0, max: 0, last: 0, altUsed: false });
+        i += 1;
+        if (source.charAt(i) === '?') {
+          i += 1;
+          if (source.charAt(i) === '<') i += 1;
+          while (i < n && source.charAt(i) !== ':' && source.charAt(i) !== ')') i += 1;
+          if (source.charAt(i) === ':') i += 1;
+        }
+        continue;
+      }
+      if (c === ')') {
+        if (frames.length < 2) return -1;
+        const done = frames.pop();
+        const h = Math.max(done.max, done.alt, done.last);
+        i += 1;
+        const q = readQuantifier(source, i);
+        const f = frame();
+        const repeating = q.quantified && q.repeating;
+        if (done.altUsed && repeating) return 99;
+        f.last = repeating ? h + 1 : h;
+        if (f.last > f.alt) f.alt = f.last;
+        if (q.quantified) i = q.next;
+        continue;
+      }
+      if (c === '|') {
+        const f = frame();
+        f.altUsed = true;
+        if (f.alt > f.max) f.max = f.alt;
+        if (f.last > f.max) f.max = f.last;
+        f.alt = 0;
+        f.last = 0;
+        i += 1;
+        continue;
+      }
+      if (c === '+' || c === '*' || c === '?' || c === '{') {
+        const q = readQuantifier(source, i);
+        if (!q.quantified) { frame().last = 0; i += 1; continue; }
+        const f = frame();
+        if (q.repeating) { f.last += 1; if (f.last > f.alt) f.alt = f.last; }
+        i = q.next;
+        continue;
+      }
+      frame().last = 0;
+      i += 1;
+    }
+    if (frames.length !== 1) return -1;
+    const top = frames[0];
+    return Math.max(top.max, top.alt, top.last);
+  }
+  function isSafeRegex(pattern) {
+    if (typeof pattern !== 'string') return false;
+    if (pattern.length < 1 || pattern.length > 200) return false;
+    if (/\\[1-9]/.test(pattern)) return false;
+    try { new RegExp(pattern); } catch (e) { return false; }
+    const height = starHeight(pattern);
+    return height >= 0 && height <= 1;
+  }
+  function matchUrlGoal(pattern, href, matchType) {
+    const type = matchType || 'contains';
+    const pat = String(pattern || '');
+    const url = String(href || '');
+    if (!pat) return false;
+    if (type === 'contains') return url.indexOf(pat) !== -1;
+    if (type === 'regex') {
+      if (!isSafeRegex(pat)) return false;
+      try { return new RegExp(pat).test(url.slice(0, 2000)); } catch (e) { return false; }
+    }
+    if (type !== 'exact' && type !== 'starts_with') return false;
+    const left = stripEdge(pat);
+    const candidates = urlCandidates(url);
+    for (let i = 0; i < candidates.length; i++) {
+      const right = stripEdge(candidates[i]);
+      if (type === 'exact' && sameEdge(left, right)) return true;
+      if (type === 'starts_with' && startsEdge(left, right)) return true;
+    }
+    return false;
   }
 
   // Hoisted. Node can require this file and read the return value; the boot

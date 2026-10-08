@@ -28,7 +28,7 @@ async function recordGoalUsage(goals) {
   for (const goal of goals || []) {
     const type = goal.type || 'click';
     const value = type === 'url' ? (goal.url_match || '') : (goal.selector || '');
-    const label = goal.id || '';
+    const label = goal.name || goal.id || '';
     if (!value) continue;
     try {
       await db.query(

@@ -3,6 +3,7 @@ const db = require('../db');
 const { verifyEditToken } = require('../edit-token');
 const { createPreviewToken } = require('../preview-access');
 const { recordGoalUsage } = require('./goals');
+const { validateGoals, persistGoals } = require('../goals');
 const router = express.Router();
 
 // The editor reads one variant at a time. A cached GET would keep showing the
@@ -29,13 +30,19 @@ function requireValidEditToken(req, res, next) {
 router.get('/variants/:variantId', requireValidEditToken, async (req, res) => {
   try {
     const { rows } = await db.query(
-      `SELECT v.*, e.name AS experiment_name, e.url_match
+      `SELECT v.*, e.name AS experiment_name, e.url_match, e.goals AS experiment_goals, e.goals_scope
        FROM variants v JOIN experiments e ON e.id = v.experiment_id
        WHERE v.id = $1`,
       [req.params.variantId]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id' });
-    res.json(rows[0]);
+    const row = rows[0];
+    // Shared goals are the ones every variant is measured on. The editor
+    // still receives them as `goals` so a save writes the same list back.
+    if (row.goals_scope !== 'divergent' && Array.isArray(row.experiment_goals) && row.experiment_goals.length) {
+      row.goals = row.experiment_goals;
+    }
+    res.json(row);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });
@@ -50,34 +57,14 @@ router.get('/variants/:variantId/preview-token', requireValidEditToken, (req, re
   res.json({ preview_token: createPreviewToken(req.params.variantId) });
 });
 
-// A goal as the snippet understands it: { type: 'click', selector, id } or
-// { type: 'url', url_match, id }. Validated here (not on the owner-session
-// dashboard route) because this endpoint is reachable cross-origin with just a
-// bearer token, so it shouldn't accept arbitrary junk into a column the live
-// snippet reads on every page load.
-function validateGoals(goals) {
-  if (!Array.isArray(goals)) return 'goals must be an array';
-  for (const g of goals) {
-    if (!g || typeof g !== 'object') return 'each goal must be an object';
-    const type = g.type || 'click';
-    if (type === 'click') {
-      if (typeof g.selector !== 'string' || !g.selector.trim()) return 'a click goal needs a selector';
-    } else if (type === 'url') {
-      if (typeof g.url_match !== 'string' || !g.url_match.trim()) return 'a url goal needs a url_match';
-    } else {
-      return `unknown goal type "${type}"`;
-    }
-    if (g.id !== undefined && (typeof g.id !== 'string' || g.id.length > 100)) return 'a goal id must be a string of 100 characters or fewer';
-  }
-  return null;
-}
-
 // PATCH /api/editor/variants/:variantId?token=...  { changes?: [...], goals?: [...] }
 // Deliberately narrow — only touches what the visual editor authors (changes
 // and goals), nothing else (name, traffic split stay untouched). Each field is
 // only written when it's present in the request, so saving one never resets
-// the other.
+// the other. On a shared experiment, goals are saved once and copied to every
+// variant. On a divergent experiment they stay on this variant.
 router.patch('/variants/:variantId', requireValidEditToken, async (req, res) => {
+  const client = await db.pool.connect();
   try {
     const { changes, goals } = req.body;
     if (changes === undefined && goals === undefined) return res.status(400).json({ error: 'send changes and/or goals' });
@@ -87,22 +74,40 @@ router.patch('/variants/:variantId', requireValidEditToken, async (req, res) => 
       if (problem) return res.status(400).json({ error: problem });
     }
 
-    const { rows } = await db.query(
+    await client.query('BEGIN');
+    const { rows } = await client.query(
       `UPDATE variants
-       SET changes = COALESCE($1::jsonb, changes), goals = COALESCE($2::jsonb, goals)
-       WHERE id = $3 RETURNING *`,
+       SET changes = COALESCE($1::jsonb, changes)
+       WHERE id = $2 RETURNING *`,
       [
         changes === undefined ? null : JSON.stringify(changes),
-        goals === undefined ? null : JSON.stringify(goals),
         req.params.variantId,
       ]
     );
-    if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id' });
-    if (goals !== undefined) await recordGoalUsage(goals); // keeps the dashboard's "popular goals" chips in step
+    if (rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'no variant found with that id' });
+    }
+    if (goals !== undefined) {
+      const saved = await persistGoals(client.query.bind(client), {
+        experimentId: rows[0].experiment_id,
+        variantId: req.params.variantId,
+        goals,
+        unify: false,
+      });
+      rows[0].goals = saved.goals;
+      rows[0].goals_scope = saved.goals_scope;
+      await recordGoalUsage(saved.goals);
+    }
+    await client.query('COMMIT');
     res.json(rows[0]);
   } catch (err) {
+    await client.query('ROLLBACK').catch((rollbackErr) => console.error('Rollback failed:', rollbackErr));
     console.error(err);
+    if (err.status) return res.status(err.status).json({ error: err.message });
     res.status(500).json({ error: 'internal error', detail: err.message });
+  } finally {
+    client.release();
   }
 });
 

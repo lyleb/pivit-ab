@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { isLikelyBot, isRateLimited } = require('../bot-filter');
 const { checkHost, originHostFromRequest, hostScopingMode } = require('../host-scope');
+const { scheduleEventDrop } = require('../event-drops');
 const router = express.Router();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -32,9 +33,13 @@ router.post('/', async (req, res) => {
 
   // Basic bot/abuse filtering — dropped silently (still 204) rather than
   // erroring, since a sendBeacon caller never looks at the response anyway and
-  // there's no reason to reveal to a bot that it was filtered. See
-  // src/bot-filter.js for what's actually being checked and why.
-  if (isLikelyBot(req.get('user-agent')) || isRateLimited(req.ip)) {
+  // there's no reason to reveal to a bot that it was filtered. The drop is
+  // counted for the owner health panel. A counter failure must not change
+  // this response. See src/bot-filter.js and src/event-drops.js.
+  const bot = isLikelyBot(req.get('user-agent'));
+  const limited = !bot && isRateLimited(req.ip);
+  if (bot || limited) {
+    scheduleEventDrop(experiment_id, bot ? 'bot' : 'rate_limited');
     return res.status(204).end();
   }
 
@@ -59,6 +64,7 @@ router.post('/', async (req, res) => {
     const drop = !decision.serve && decision.reason !== 'host-unknown';
     if (drop) {
       warnDrop(experiment_id, pageHost, decision.reason);
+      scheduleEventDrop(experiment_id, 'host');
       return res.status(204).end();
     }
 

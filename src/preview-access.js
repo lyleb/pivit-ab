@@ -83,6 +83,9 @@ function buildPublicExperimentList({ running, variants, previewExperiment, previ
     id: exp.id,
     name: exp.name,
     url_match: exp.url_match,
+    // Empty for a test whose goals still differ per variant. The snippet
+    // then uses each variant's own list. Older snippets ignore this field.
+    goals: Array.isArray(exp.goals) ? exp.goals : [],
     variants: (byExperiment.get(exp.id) || [])
       .filter((variant) => variant.enabled !== false)
       .map(publicVariant),
@@ -100,6 +103,7 @@ function buildPublicExperimentList({ running, variants, previewExperiment, previ
           id: previewExperiment.id,
           name: previewExperiment.name,
           url_match: previewExperiment.url_match,
+          goals: Array.isArray(previewExperiment.goals) ? previewExperiment.goals : [],
           variants: [],
         };
         experiments.push(exp);

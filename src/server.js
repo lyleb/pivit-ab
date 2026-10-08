@@ -9,6 +9,7 @@ const sessionMiddleware = require('./session');
 const { hostScopingMode } = require('./host-scope');
 const { configuredAppOrigin, sendPublicConfig } = require('./app-origin');
 const { hostHitMiddleware } = require('./host-hits');
+const { backfillExperimentGoals } = require('./goals');
 const { hstsMiddleware } = require('./hsts');
 const { PUBLIC_ERROR } = require('./public-error');
 const experimentsRouter = require('./routes/experiments');
@@ -139,6 +140,12 @@ function logAppOrigin() {
 const PORT = process.env.PORT || 3000;
 logAppOrigin();
 runMigrations().then(async () => {
+  try {
+    const migrated = await backfillExperimentGoals();
+    if (migrated) console.log(`Migrated goals for ${migrated} experiment(s).`);
+  } catch (err) {
+    console.error('Goal migration failed:', err);
+  }
   await logHostScoping();
   app.listen(PORT, () => console.log(`AB platform running on port ${PORT}`));
 });
