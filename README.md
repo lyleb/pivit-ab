@@ -21,6 +21,12 @@ Basic A/B testing platform: snippet + API + results dashboard.
 4. On your app service, set `NODE_ENV=production`, `ADMIN_API_KEY` (a generated secret — see step 3 in Local setup) and `SESSION_SECRET` (at least 32 characters, any character set — see `.env.example`) in the Variables tab. If `NODE_ENV=production` and `SESSION_SECRET` is missing or shorter than 32 characters, the process exits at startup and the site will not boot. Set it before deploying. Do not rotate an existing secret that is already long enough.
 5. Deploy — tables are created automatically on first startup, no manual migration step
 
+## Search indexing
+
+This repository is the app only (the admin dashboard, the client portal, the snippet and the API). Nothing here should appear in search results. Every response sends `X-Robots-Tag: noindex, nofollow`, and the HTML pages repeat that in a robots meta tag. Canonical links point at the pivitlab.com page, or at `APP_ORIGIN` when that is set. `robots.txt` disallows `/api/` and `/snippet/` only, so the HTML stays crawlable and Google can read the noindex.
+
+There is no `sitemap.xml` in this app, because there are no pages to index. A sitemap belongs on the future marketing site.
+
 ## How it works
 
 1. **Create an experiment** via the dashboard — give it a name and a `url_match` (a substring the page URL must contain, e.g. `/pricing`).
@@ -256,7 +262,7 @@ A second, separate login exists for clients — read-only, scoped to only the ex
 
 The public snippet endpoints (`GET /api/experiments`, `POST /api/event`, `GET /api/experiments/by-ids`) stay open on purpose — they're called from any visitor's browser and have no sensitive data to protect (just "which experiments run on this URL" and "log this event"). Those responses do not include the site-domain list. A public fetch is filtered by the page host (the `url` query, then `Origin`, then `Referer` — never this server's own hostname). `POST /api/event` checks that the variant belongs to the experiment, then drops the event with a normal 204 when the `Origin` or `Referer` host is known and not in the experiment's domains, and drops events for an experiment with no domains when `HOST_SCOPING=enforce`.
 
-`GET /api/experiments/host-report` and `PATCH /api/experiments/:id/hosts` are owner-only. `GET /api/host-hits` is owner-only too: a daily rollup of hits to the snippet and the public API (`/snippet`, `GET /api/experiments`, `GET /api/experiments/by-ids`, `POST /api/event`), keyed by the request host and the customer-site origin. `/health` is not counted. The counter is an upsert and never blocks or fails the request. The home page shows the last 30 days. Rows are kept until you delete them. Everything else requires an active session with the right role (`owner` or `client`), enforced per-route.
+`GET /api/experiments/host-report` and `PATCH /api/experiments/:id/hosts` are owner-only. `GET /api/host-hits` is owner-only too: a daily rollup of hits to the snippet and the public API (`/snippet`, `GET /api/experiments`, `GET /api/experiments/by-ids`, `POST /api/event`), keyed by the request host and the customer-site origin. `/health` and `/robots.txt` are not counted. The counter is an upsert and never blocks or fails the request. The home page shows the last 30 days. Rows are kept until you delete them. Everything else requires an active session with the right role (`owner` or `client`), enforced per-route.
 
 A conversion in results, the Bayesian panel, the client portal, the trend chart and the CSV `unique_conversion` column is a unique visitor per variant (and per goal, when goals are listed separately). Repeat clicks stay visible on the owner results table as **Conversion events**. The rate uses the unique count, so it cannot exceed 100%. The Bayesian calculation itself is unchanged; it is only fed that unique count.
 

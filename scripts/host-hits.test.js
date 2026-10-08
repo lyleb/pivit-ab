@@ -18,6 +18,9 @@ function req({ method = 'GET', path: reqPath = '/', hostname = 'pivit.click', or
 
 assert.strictEqual(hits.shouldCountRequest(req({ path: '/health' })), false);
 assert.strictEqual(hits.shouldCountRequest(req({ path: '/health/' })), false);
+assert.strictEqual(hits.shouldCountRequest(req({ path: '/robots.txt' })), false);
+assert.strictEqual(hits.shouldCountRequest(req({ path: '/robots.txt/' })), false);
+assert.strictEqual(hits.shouldCountRequest(req({ path: '/robots.txt?x=1' })), false);
 assert.strictEqual(hits.shouldCountRequest(req({ path: '/' })), false);
 assert.strictEqual(hits.shouldCountRequest(req({ path: '/index.html' })), false);
 assert.strictEqual(hits.shouldCountRequest(req({ path: '/api/host-hits' })), false);
@@ -65,6 +68,7 @@ assert.deepStrictEqual(calls[0].params, ['2026-10-07', 'pivit.click', 'https://c
 
 let healthCalls = 0;
 hits.scheduleHostHit(req({ path: '/health' }), () => { healthCalls += 1; return Promise.resolve(); });
+hits.scheduleHostHit(req({ path: '/robots.txt' }), () => { healthCalls += 1; return Promise.resolve(); });
 assert.strictEqual(healthCalls, 0);
 
 const logged = [];
