@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const db = require('../db');
 const { publicServerError } = require('../public-error');
+const { legacyAccount, snippetSiteKey } = require('../tenant');
 const router = express.Router();
 
 // Basic brute-force throttle: an in-memory counter per (ip + purpose), reset on
@@ -46,7 +47,7 @@ function timingSafeStringEqual(a, b) {
 }
 
 // POST /api/auth/login  { password }  — owner login
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   const key = `${req.ip}:owner`;
   const secondsLeft = checkThrottle(key);
   if (secondsLeft) return res.status(429).json({ error: `too many attempts — try again in ${secondsLeft}s` });
@@ -65,6 +66,16 @@ router.post('/login', (req, res) => {
 
   clearThrottle(key);
   req.session.role = 'owner';
+  try {
+    const legacy = await legacyAccount();
+    if (legacy) {
+      req.session.accountId = legacy.id;
+      if (legacy.user_id) req.session.userId = legacy.user_id;
+    }
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json(publicServerError(err));
+  }
   req.session.save((err) => {
     if (err) return res.status(500).json(publicServerError(err));
     res.json({ role: 'owner' });
@@ -100,6 +111,7 @@ router.post('/client-login', async (req, res) => {
     req.session.role = 'client';
     req.session.clientId = client.id;
     req.session.clientName = client.name;
+    if (client.account_id) req.session.accountId = client.account_id;
     req.session.save((err) => {
       if (err) return res.status(500).json(publicServerError(err));
       res.json({ role: 'client', client: { id: client.id, name: client.name } });
@@ -120,10 +132,23 @@ router.post('/logout', (req, res) => {
 
 // GET /api/auth/me — lets the dashboard/client page check login state on load
 // without storing anything itself; the session cookie (if any) does the work.
-router.get('/me', (req, res) => {
+router.get('/me', async (req, res) => {
   const role = (req.session && req.session.role) || null;
   const client = role === 'client' ? { id: req.session.clientId, name: req.session.clientName } : null;
-  res.json({ role, client });
+  const body = { role, client };
+  if (role === 'owner') {
+    try {
+      const legacy = req.session.accountId
+        ? { id: req.session.accountId }
+        : await legacyAccount();
+      if (legacy && legacy.id) {
+        body.snippet_site_key = await snippetSiteKey(legacy.id);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
+  res.json(body);
 });
 
 module.exports = router;

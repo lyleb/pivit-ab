@@ -184,8 +184,17 @@ function validateGoals(goals) {
 // on the experiment and copies it onto every variant, so an older snippet
 // that still reads variant.goals keeps firing the same goals. A divergent
 // experiment keeps the per-variant lists unless unify is set.
-async function persistGoals(query, { experimentId, variantId, goals, unify = false } = {}) {
-  const { rows } = await query(`SELECT goals, goals_scope FROM experiments WHERE id = $1`, [experimentId]);
+async function persistGoals(query, { experimentId, variantId, goals, unify = false, accountId } = {}) {
+  const params = [experimentId];
+  let accountSql = '';
+  if (accountId) {
+    params.push(accountId);
+    accountSql = ` AND account_id = $${params.length}`;
+  }
+  const { rows } = await query(
+    `SELECT goals, goals_scope FROM experiments WHERE id = $1${accountSql}`,
+    params
+  );
   if (rows.length === 0) {
     const err = new Error('no experiment found with that id');
     err.status = 404;
@@ -217,9 +226,15 @@ async function persistGoals(query, { experimentId, variantId, goals, unify = fal
   variantGoals.rows.forEach((row) => prior.push(...asGoalList(row.goals)));
   const prepared = prepareGoalsForSave(goals, prior);
   const payload = JSON.stringify(prepared);
+  const updateParams = [payload, experimentId];
+  let updateAccount = '';
+  if (accountId) {
+    updateParams.push(accountId);
+    updateAccount = ` AND account_id = $${updateParams.length}`;
+  }
   await query(
-    `UPDATE experiments SET goals = $1::jsonb, goals_scope = 'shared', goals_migrated = true WHERE id = $2`,
-    [payload, experimentId]
+    `UPDATE experiments SET goals = $1::jsonb, goals_scope = 'shared', goals_migrated = true WHERE id = $2${updateAccount}`,
+    updateParams
   );
   await query(`UPDATE variants SET goals = $1::jsonb WHERE experiment_id = $2`, [payload, experimentId]);
   return { goals: prepared, goals_scope: 'shared' };

@@ -8,9 +8,19 @@ const { flagIsOn, summariseTestTraffic } = require('../test-traffic');
 const { outcomeGate } = require('../experiment-plan');
 const { hideOutcomeRow } = require('../reading');
 const { buildVerdict } = require('../verdict');
+const { ownedExperiment } = require('../tenant');
 const router = express.Router();
 
 router.use(requireAuth(['owner'])); // results are for your eyes only, not the public snippet
+
+async function assertOwned(req, res, experimentId) {
+  const row = await ownedExperiment(req.account.id, experimentId);
+  if (!row) {
+    res.status(404).json({ error: 'no experiment found with that id' });
+    return null;
+  }
+  return row;
+}
 
 function wantsTestTraffic(req) {
   return flagIsOn(req.query && req.query.include_test);
@@ -42,13 +52,14 @@ router.get('/:experimentId', async (req, res) => {
   const includeTest = wantsTestTraffic(req);
 
   try {
+    if (!(await assertOwned(req, res, experimentId))) return;
     const [{ results, primaryKey }, breakdown, testTraffic] = await Promise.all([
       getVariantResults(experimentId, req.query.visitor_type, { includeTest }),
       getGoalBreakdown(experimentId, { includeTest }),
       summariseTestTraffic(experimentId),
     ]);
 
-    const gate = await outcomeGate(experimentId, includeTest);
+    const gate = await outcomeGate(experimentId, includeTest, req.account.id);
     const visible = gate.visible;
     res.json({
       experiment_id: experimentId,
@@ -75,8 +86,9 @@ router.get('/:experimentId/timeseries', async (req, res) => {
   const { experimentId } = req.params;
 
   try {
+    if (!(await assertOwned(req, res, experimentId))) return;
     const includeTest = wantsTestTraffic(req);
-    const gate = await outcomeGate(experimentId, includeTest);
+    const gate = await outcomeGate(experimentId, includeTest, req.account.id);
     if (!gate.visible) {
       res.json({ experiment_id: experimentId, include_test: includeTest, series: [], blinded: true, reading: gate.reading });
       return;
@@ -95,8 +107,9 @@ router.get('/:experimentId/timeseries', async (req, res) => {
 router.get('/:experimentId/recent', async (req, res) => {
   const { experimentId } = req.params;
   try {
+    if (!(await assertOwned(req, res, experimentId))) return;
     const includeTest = wantsTestTraffic(req);
-    const gate = await outcomeGate(experimentId, includeTest);
+    const gate = await outcomeGate(experimentId, includeTest, req.account.id);
     const outcomeSql = gate.visible ? '' : ` AND e.event_type = 'view'`;
     const { rows } = await db.query(
       `SELECT e.event_type, e.goal_id, e.created_at, v.name AS variant_name
@@ -127,8 +140,9 @@ function csvField(value) {
 router.get('/:experimentId/export', async (req, res) => {
   const { experimentId } = req.params;
   try {
+    if (!(await assertOwned(req, res, experimentId))) return;
     const includeTest = wantsTestTraffic(req);
-    const gate = await outcomeGate(experimentId, includeTest);
+    const gate = await outcomeGate(experimentId, includeTest, req.account.id);
     if (!gate.visible) {
       const header = ['variant_name', 'visitors', 'target_visitors', 'traffic_split_percent', 'days_elapsed', 'minimum_days'];
       const lines = [header.join(',')];
@@ -184,8 +198,9 @@ router.get('/:experimentId/export', async (req, res) => {
 router.get('/:experimentId/bayesian', async (req, res) => {
   const { experimentId } = req.params;
   try {
+    if (!(await assertOwned(req, res, experimentId))) return;
     const includeTest = wantsTestTraffic(req);
-    const gate = await outcomeGate(experimentId, includeTest);
+    const gate = await outcomeGate(experimentId, includeTest, req.account.id);
     const { variantData } = await getPrimaryVariantData(experimentId, { includeTest });
     const totalVisitors = variantData.reduce((sum, v) => sum + v.visitors, 0);
     if (!gate.visible) {
@@ -223,6 +238,7 @@ router.get('/:experimentId/bayesian', async (req, res) => {
 router.get('/:experimentId/srm', async (req, res) => {
   const { experimentId } = req.params;
   try {
+    if (!(await assertOwned(req, res, experimentId))) return;
     const includeTest = wantsTestTraffic(req);
     const { rows } = await db.query(
       `SELECT
@@ -257,8 +273,9 @@ router.get('/:experimentId/srm', async (req, res) => {
 router.get('/:experimentId/verdict', async (req, res) => {
   const { experimentId } = req.params;
   try {
+    if (!(await assertOwned(req, res, experimentId))) return;
     const includeTest = wantsTestTraffic(req);
-    const gate = await outcomeGate(experimentId, includeTest);
+    const gate = await outcomeGate(experimentId, includeTest, req.account.id);
     if (!gate.loaded) return res.status(404).json({ error: 'no experiment found with that id' });
     if (!gate.reading.plan_met) {
       return res.json({ ready: false, reading: gate.reading, peeked: gate.reading.peeked });

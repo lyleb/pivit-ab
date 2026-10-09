@@ -12,40 +12,52 @@ function sign(payload) {
   return crypto.createHmac('sha256', getSessionSecret()).update(payload).digest('base64url');
 }
 
-function createPreviewToken(variantId, expiresInMs = PREVIEW_TTL_MS, now = Date.now()) {
+function createPreviewToken(variantId, expiresInMs = PREVIEW_TTL_MS, now = Date.now(), scope) {
   if (!variantId) throw new Error('variantId is required');
   const exp = now + expiresInMs;
-  const payload = `preview.${variantId}.${exp}`;
+  let payload = `preview.${variantId}.${exp}`;
+  if (scope && scope.accountId) payload += `.${scope.accountId}.${scope.siteId || '-'}`;
   return Buffer.from(payload).toString('base64url') + '.' + sign(payload);
 }
 
-function verifyPreviewToken(token, variantId, now = Date.now()) {
-  if (!token || typeof token !== 'string' || !variantId) return false;
+function inspectPreviewToken(token, variantId, now = Date.now()) {
+  if (!token || typeof token !== 'string' || !variantId) return null;
   const parts = token.split('.');
-  if (parts.length !== 2) return false;
+  if (parts.length !== 2) return null;
   const [payloadB64, sig] = parts;
 
   let payload;
   try {
     payload = Buffer.from(payloadB64, 'base64url').toString();
   } catch (err) {
-    return false;
+    return null;
   }
 
   const expectedSig = sign(payload);
   const sigBuf = Buffer.from(sig);
   const expectedBuf = Buffer.from(expectedSig);
-  if (sigBuf.length !== expectedBuf.length) return false;
-  if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return false;
+  if (sigBuf.length !== expectedBuf.length) return null;
+  if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
 
   const payloadParts = payload.split('.');
-  if (payloadParts.length !== 3) return false;
+  if (payloadParts.length !== 3 && payloadParts.length !== 5) return null;
   const [kind, tokenVariantId, expStr] = payloadParts;
-  if (kind !== 'preview' || tokenVariantId !== String(variantId)) return false;
+  if (kind !== 'preview' || tokenVariantId !== String(variantId)) return null;
 
   const exp = parseInt(expStr, 10);
-  if (!Number.isFinite(exp) || now > exp) return false;
-  return true;
+  if (!Number.isFinite(exp) || now > exp) return null;
+
+  let accountId = null;
+  let siteId = null;
+  if (payloadParts.length === 5) {
+    accountId = payloadParts[3] || null;
+    siteId = payloadParts[4] && payloadParts[4] !== '-' ? payloadParts[4] : null;
+  }
+  return { variantId: String(variantId), accountId, siteId };
+}
+
+function verifyPreviewToken(token, variantId, now = Date.now()) {
+  return !!inspectPreviewToken(token, variantId, now);
 }
 
 // preview=1 on its own is ignored. Both the variant id and a token that was
@@ -53,8 +65,14 @@ function verifyPreviewToken(token, variantId, now = Date.now()) {
 function authorisePreview({ preview, previewVariant, previewToken, now } = {}) {
   const on = preview === '1' || preview === 'true' || preview === true;
   if (!on || !previewVariant || !previewToken) return { ok: false };
-  if (!verifyPreviewToken(String(previewToken), String(previewVariant), now)) return { ok: false };
-  return { ok: true, variantId: String(previewVariant) };
+  const claims = inspectPreviewToken(String(previewToken), String(previewVariant), now);
+  if (!claims) return { ok: false };
+  const result = { ok: true, variantId: claims.variantId };
+  // Tokens minted before accounts existed have neither id. Leave those fields
+  // off so the old return shape stays the same.
+  if (claims.accountId) result.accountId = claims.accountId;
+  if (claims.siteId) result.siteId = claims.siteId;
+  return result;
 }
 
 function publicVariant(variant) {
@@ -165,6 +183,7 @@ module.exports = {
   PREVIEW_TTL_MS,
   createPreviewToken,
   verifyPreviewToken,
+  inspectPreviewToken,
   authorisePreview,
   buildPublicExperimentList,
   previewUrl,

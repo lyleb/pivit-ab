@@ -8,9 +8,9 @@ const router = express.Router({ mergeParams: true });
 // Stored plan, plus a pre-filled suggestion the owner can accept unchanged.
 router.get('/', async (req, res) => {
   try {
-    const suggestion = await suggest(req.params.id);
+    const suggestion = await suggest(req.params.id, undefined, req.account.id);
     if (!suggestion) return res.status(404).json({ error: 'no experiment found with that id' });
-    const loaded = await loadReading(req.params.id, { includeTest: false });
+    const loaded = await loadReading(req.params.id, { includeTest: false, accountId: req.account.id });
     const variants = (suggestion.variants || []).filter((variant) => variant.enabled);
     const weights = variants.length >= 2 ? variants.map((variant) => variant.traffic_split) : null;
     const draft = buildPlan({
@@ -51,7 +51,7 @@ router.get('/', async (req, res) => {
 // Calculates the sentence without saving.
 router.post('/preview', async (req, res) => {
   try {
-    const suggestion = await suggest(req.params.id);
+    const suggestion = await suggest(req.params.id, undefined, req.account.id);
     if (!suggestion) return res.status(404).json({ error: 'no experiment found with that id' });
     const variants = (suggestion.variants || []).filter((variant) => variant.enabled);
     const body = req.body || {};
@@ -80,7 +80,7 @@ router.post('/preview', async (req, res) => {
 // PUT /api/experiments/:id/plan
 router.put('/', async (req, res) => {
   try {
-    const result = await savePlan(req.params.id, req.body || {});
+    const result = await savePlan(req.params.id, req.body || {}, undefined, req.account.id);
     if (!result.ok) return res.status(result.status || 400).json({ error: result.error });
     res.json({ plan: result.plan });
   } catch (err) {

@@ -1,3 +1,7 @@
+-- Migration 000, the baseline. src/db/migrate.js runs this file once and records
+-- it in schema_migrations. Everything below stays safe to re-run, and this file
+-- does not remove rows.
+
 -- A/B Testing Platform — Schema v1
 
 CREATE TABLE IF NOT EXISTS experiments (

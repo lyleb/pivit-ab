@@ -108,14 +108,20 @@ function matchSql(criteria, params) {
   return `left(e.visitor_id, char_length($${params.length})) = $${params.length}`;
 }
 
-async function experimentExists(query, experimentId) {
-  const { rows } = await query('SELECT id FROM experiments WHERE id = $1', [experimentId]);
+async function experimentExists(query, experimentId, accountId) {
+  const params = [experimentId];
+  let accountSql = '';
+  if (accountId) {
+    params.push(accountId);
+    accountSql = ` AND account_id = $${params.length}`;
+  }
+  const { rows } = await query(`SELECT id FROM experiments WHERE id = $1${accountSql}`, params);
   return rows.length > 0;
 }
 
-async function previewTestTraffic(experimentId, criteria, direction, query = db.query.bind(db)) {
+async function previewTestTraffic(experimentId, criteria, direction, query = db.query.bind(db), accountId) {
   if (!UUID_RE.test(experimentId)) return { ok: false, status: 400, error: 'experiment id must be a UUID' };
-  if (!(await experimentExists(query, experimentId))) {
+  if (!(await experimentExists(query, experimentId, accountId))) {
     return { ok: false, status: 404, error: 'no experiment found with that id' };
   }
   const params = [experimentId];
@@ -188,12 +194,12 @@ function countsFromUpdated(rows) {
   return { visitors: visitors.size, events: rows.length, variants };
 }
 
-async function applyTestTraffic({ experimentId, criteria, direction, actor, actorIp, queryPool = db.pool }) {
+async function applyTestTraffic({ experimentId, criteria, direction, actor, actorIp, queryPool = db.pool, accountId }) {
   if (!UUID_RE.test(experimentId)) return { ok: false, status: 400, error: 'experiment id must be a UUID' };
   const client = await queryPool.connect();
   try {
     await client.query('BEGIN');
-    if (!(await experimentExists(client.query.bind(client), experimentId))) {
+    if (!(await experimentExists(client.query.bind(client), experimentId, accountId))) {
       await client.query('ROLLBACK');
       return { ok: false, status: 404, error: 'no experiment found with that id' };
     }
@@ -261,9 +267,9 @@ async function applyTestTraffic({ experimentId, criteria, direction, actor, acto
   }
 }
 
-async function listTestTrafficAudit(experimentId, query = db.query.bind(db)) {
+async function listTestTrafficAudit(experimentId, query = db.query.bind(db), accountId) {
   if (!UUID_RE.test(experimentId)) return { ok: false, status: 400, error: 'experiment id must be a UUID' };
-  if (!(await experimentExists(query, experimentId))) {
+  if (!(await experimentExists(query, experimentId, accountId))) {
     return { ok: false, status: 404, error: 'no experiment found with that id' };
   }
   const { rows } = await query(

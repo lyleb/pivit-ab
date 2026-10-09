@@ -10,7 +10,7 @@ Basic A/B testing platform: snippet + API + results dashboard.
    ```
    node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
    ```
-4. `npm run dev` — starts the server on `http://localhost:3000` (tables are created automatically on startup, no separate migrate step needed)
+4. `npm run dev` — starts the server on `http://localhost:3000`. Startup applies any missing database versions (see [docs/tenancy.md](docs/tenancy.md)). A failed migration rolls back and the process exits.
 5. Open `http://localhost:3000` for the admin dashboard, paste your `ADMIN_API_KEY` into the "Admin API Key" field at the top before using anything else on the page
 
 ## Deploying (recommended: Railway)
@@ -19,7 +19,7 @@ Basic A/B testing platform: snippet + API + results dashboard.
 2. Create a new Railway project → "Deploy from GitHub repo" → select this repo
 3. Add a Postgres database: in your Railway project, click "+ New" → "Database" → "Add PostgreSQL". Railway auto-connects it and injects `DATABASE_URL` into your app service.
 4. On your app service, set `NODE_ENV=production`, `ADMIN_API_KEY` (a generated secret — see step 3 in Local setup) and `SESSION_SECRET` (at least 32 characters, any character set — see `.env.example`) in the Variables tab. If `NODE_ENV=production` and `SESSION_SECRET` is missing or shorter than 32 characters, the process exits at startup and the site will not boot. Set it before deploying. Do not rotate an existing secret that is already long enough.
-5. Deploy — tables are created automatically on first startup, no manual migration step
+5. Take a database backup before deploying a migration, and keep it off Railway. See [docs/backups.md](docs/backups.md). Deploy — missing database versions run on startup. If a version fails, that version rolls back and the process exits; redeploy the previous release. Do not rotate `SESSION_SECRET` or rename the `pivit.sid` cookie. Account #1 and the site key are described in [docs/tenancy.md](docs/tenancy.md).
 
 ## Search indexing
 

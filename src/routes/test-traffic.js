@@ -31,7 +31,7 @@ router.post('/preview', async (req, res) => {
   const direction = parseDirection(req.body && req.body.direction);
   if (!direction) return res.status(400).json({ error: 'direction must be remove or restore' });
   try {
-    sendResult(res, await previewTestTraffic(req.params.id, criteria, direction));
+    sendResult(res, await previewTestTraffic(req.params.id, criteria, direction, undefined, req.account.id));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });
@@ -53,6 +53,7 @@ router.post('/remove', async (req, res) => {
       direction: 'remove',
       actor: 'owner',
       actorIp: actorIp(req),
+      accountId: req.account.id,
     }));
   } catch (err) {
     console.error(err);
@@ -75,6 +76,7 @@ router.post('/restore', async (req, res) => {
       direction: 'restore',
       actor: 'owner',
       actorIp: actorIp(req),
+      accountId: req.account.id,
     }));
   } catch (err) {
     console.error(err);
@@ -85,7 +87,7 @@ router.post('/restore', async (req, res) => {
 // GET /api/experiments/:id/test-traffic/audit
 router.get('/audit', async (req, res) => {
   try {
-    sendResult(res, await listTestTrafficAudit(req.params.id));
+    sendResult(res, await listTestTrafficAudit(req.params.id, undefined, req.account.id));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });

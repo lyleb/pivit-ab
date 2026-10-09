@@ -15,15 +15,17 @@ router.get('/', async (req, res) => {
     const { rows } = await db.query(
       `SELECT day::text AS day, host, referrer_origin, hit_count
        FROM host_hits
-       WHERE day >= $1::date
+       WHERE day >= $1::date AND account_id = $2
        ORDER BY day DESC, hit_count DESC, host, referrer_origin`,
-      [start]
+      [start, req.account.id]
     );
-    const { rows: windowRows } = await db.query(
-      `SELECT host, referrer_origin, source_ip, started_at, ended_at, note
-       FROM host_hit_exclusions
-       ORDER BY started_at`
-    );
+    const windowRows = req.account.legacy
+      ? (await db.query(
+        `SELECT host, referrer_origin, source_ip, started_at, ended_at, note
+         FROM host_hit_exclusions
+         ORDER BY started_at`
+      )).rows
+      : [];
     const excludedWindows = windowRows.map((row) => ({
       host: row.host,
       referrer_origin: row.referrer_origin,

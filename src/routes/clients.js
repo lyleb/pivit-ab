@@ -12,9 +12,11 @@ router.get('/', async (req, res) => {
     const { rows } = await db.query(
       `SELECT c.id, c.name, c.username, c.created_at, COUNT(e.id)::int AS experiment_count
        FROM clients c
-       LEFT JOIN experiments e ON e.client_id = c.id
+       LEFT JOIN experiments e ON e.client_id = c.id AND e.account_id = c.account_id
+       WHERE c.account_id = $1
        GROUP BY c.id
-       ORDER BY c.name`
+       ORDER BY c.name`,
+      [req.account.id]
     );
     res.json({ clients: rows });
   } catch (err) {
@@ -32,9 +34,9 @@ router.post('/', async (req, res) => {
 
     const password_hash = await bcrypt.hash(password, 10);
     const { rows } = await db.query(
-      `INSERT INTO clients (name, username, password_hash) VALUES ($1, $2, $3)
+      `INSERT INTO clients (name, username, password_hash, account_id) VALUES ($1, $2, $3, $4)
        RETURNING id, name, username, created_at`,
-      [name, username.trim().toLowerCase(), password_hash]
+      [name, username.trim().toLowerCase(), password_hash, req.account.id]
     );
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -52,7 +54,10 @@ router.patch('/:id', async (req, res) => {
     if (!name && !username && !password) return res.status(400).json({ error: 'nothing to update' });
     if (password && password.length < 8) return res.status(400).json({ error: 'password must be at least 8 characters' });
 
-    const { rows: existingRows } = await db.query(`SELECT * FROM clients WHERE id = $1`, [id]);
+    const { rows: existingRows } = await db.query(
+      `SELECT * FROM clients WHERE id = $1 AND account_id = $2`,
+      [id, req.account.id]
+    );
     if (existingRows.length === 0) return res.status(404).json({ error: 'no client found with that id' });
     const existing = existingRows[0];
 
@@ -61,9 +66,10 @@ router.patch('/:id', async (req, res) => {
     const newHash = password ? await bcrypt.hash(password, 10) : existing.password_hash;
 
     const { rows } = await db.query(
-      `UPDATE clients SET name = $1, username = $2, password_hash = $3 WHERE id = $4
+      `UPDATE clients SET name = $1, username = $2, password_hash = $3
+       WHERE id = $4 AND account_id = $5
        RETURNING id, name, username, created_at`,
-      [newName, newUsername, newHash, id]
+      [newName, newUsername, newHash, id, req.account.id]
     );
     res.json(rows[0]);
   } catch (err) {
@@ -76,7 +82,10 @@ router.patch('/:id', async (req, res) => {
 // DELETE /api/clients/:id — their experiments stay, just unassigned (ON DELETE SET NULL)
 router.delete('/:id', async (req, res) => {
   try {
-    const { rows } = await db.query(`DELETE FROM clients WHERE id = $1 RETURNING id`, [req.params.id]);
+    const { rows } = await db.query(
+      `DELETE FROM clients WHERE id = $1 AND account_id = $2 RETURNING id`,
+      [req.params.id, req.account.id]
+    );
     if (rows.length === 0) return res.status(404).json({ error: 'no client found with that id' });
     res.status(204).end();
   } catch (err) {

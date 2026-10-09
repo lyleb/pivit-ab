@@ -1,30 +1,23 @@
 // Runs the conversion and host-hit SQL against Postgres when one is reachable.
 // Skips (exit 0) when it is not, so `npm test` still passes without a database.
+// Never reads DATABASE_URL. This file keeps a hand-built schema with no
+// account columns, because src/metrics.js stays unscoped. TEST_DATABASE_URL
+// (CI) fails the run if that server cannot be reached.
 const assert = require('assert');
-const { Client } = require('pg');
-
-// Local socket only. Never reads DATABASE_URL, so this cannot run against Railway.
-// Peer auth on /var/run/postgresql; TCP to 127.0.0.1 requires a password this script does not have.
-function localUrl(database) {
-  return `postgres://ubuntu@/${database}?host=/var/run/postgresql`;
-}
-
-const connectionString = localUrl('postgres');
+const pg = require('./test-postgres');
 
 async function main() {
-  const admin = new Client({ connectionString });
-  try {
-    await admin.connect();
-  } catch (err) {
-    console.log('metrics-db tests skipped:', err.message);
+  const admin = await pg.connectAdmin();
+  if (!admin) {
+    console.log('metrics-db tests skipped: postgres not reachable');
     return;
   }
 
   const dbName = 'pivit_metrics_' + Date.now().toString(36);
-  await admin.query(`CREATE DATABASE ${dbName}`);
+  await pg.createDatabase(admin, dbName);
   await admin.end();
 
-  const url = localUrl(dbName);
+  const url = pg.databaseUrl(dbName);
   process.env.DATABASE_URL = url;
   process.env.NODE_ENV = 'test';
 
@@ -294,10 +287,7 @@ async function main() {
     console.log('metrics-db tests passed');
   } finally {
     await db.pool.end();
-    const drop = new Client({ connectionString });
-    await drop.connect();
-    await drop.query(`DROP DATABASE ${dbName}`);
-    await drop.end();
+    await pg.dropDatabase(dbName);
   }
 }
 

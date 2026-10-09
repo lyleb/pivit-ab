@@ -14,10 +14,11 @@ router.use(requireAuth(['client']));
 // Every route below double-checks client_id server-side before returning
 // anything — a client's session can never be used to view another client's
 // experiment just by guessing/changing an id in the URL.
-async function assertOwnsExperiment(clientId, experimentId) {
+async function assertOwnsExperiment(clientId, experimentId, accountId) {
   const { rows } = await db.query(
-    `SELECT id, name, status, url_match FROM experiments WHERE id = $1 AND client_id = $2`,
-    [experimentId, clientId]
+    `SELECT id, name, status, url_match FROM experiments
+     WHERE id = $1 AND client_id = $2 AND account_id = $3`,
+    [experimentId, clientId, accountId]
   );
   return rows[0] || null;
 }
@@ -27,8 +28,8 @@ router.get('/experiments', async (req, res) => {
   try {
     const { rows } = await db.query(
       `SELECT id, name, status, url_match, created_at FROM experiments
-       WHERE client_id = $1 ORDER BY url_match, created_at DESC`,
-      [req.session.clientId]
+       WHERE client_id = $1 AND account_id = $2 ORDER BY url_match, created_at DESC`,
+      [req.session.clientId, req.account.id]
     );
     res.json({ experiments: rows });
   } catch (err) {
@@ -41,13 +42,13 @@ router.get('/experiments', async (req, res) => {
 // anything an owner-only view would need.
 router.get('/results/:experimentId', async (req, res) => {
   try {
-    const experiment = await assertOwnsExperiment(req.session.clientId, req.params.experimentId);
+    const experiment = await assertOwnsExperiment(req.session.clientId, req.params.experimentId, req.account.id);
     if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
 
     const [{ results, primaryKey }, breakdown, gate] = await Promise.all([
       getVariantResults(req.params.experimentId),
       getGoalBreakdown(req.params.experimentId),
-      outcomeGate(req.params.experimentId, false),
+      outcomeGate(req.params.experimentId, false, req.account.id),
     ]);
     const visible = gate.visible;
     let verdict = null;
@@ -78,10 +79,10 @@ router.get('/results/:experimentId', async (req, res) => {
 // GET /api/client/results/:experimentId/timeseries — trend chart data, same ownership check
 router.get('/results/:experimentId/timeseries', async (req, res) => {
   try {
-    const experiment = await assertOwnsExperiment(req.session.clientId, req.params.experimentId);
+    const experiment = await assertOwnsExperiment(req.session.clientId, req.params.experimentId, req.account.id);
     if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
 
-    const gate = await outcomeGate(req.params.experimentId, false);
+    const gate = await outcomeGate(req.params.experimentId, false, req.account.id);
     if (!gate.visible) return res.json({ series: [], blinded: true, reading: gate.reading });
     const series = await getTimeseries(req.params.experimentId);
     res.json({ series, blinded: false, reading: gate.reading });
@@ -95,10 +96,10 @@ router.get('/results/:experimentId/timeseries', async (req, res) => {
 // generate one plain-English sentence rather than a full table.
 router.get('/results/:experimentId/bayesian', async (req, res) => {
   try {
-    const experiment = await assertOwnsExperiment(req.session.clientId, req.params.experimentId);
+    const experiment = await assertOwnsExperiment(req.session.clientId, req.params.experimentId, req.account.id);
     if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
 
-    const gate = await outcomeGate(req.params.experimentId, false);
+    const gate = await outcomeGate(req.params.experimentId, false, req.account.id);
     const { variantData } = await getPrimaryVariantData(req.params.experimentId);
     if (!gate.visible) {
       return res.json({ low_sample_warning: false, stats: [], blinded: true, reading: gate.reading });
