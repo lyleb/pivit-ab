@@ -10,6 +10,10 @@
 // serves these same pages with a 200. The canonical points at the pivitlab.com
 // equivalent (or APP_ORIGIN when that is set) so Google knows which host to
 // keep. This does not redirect pivit.click — that is a separate migration.
+//
+// / is the public landing page and is served on its own. The dashboard stays
+// at /index.html. Its canonical is /index.html, so it does not compete with
+// the landing page. The dashboard remains noindexed.
 
 const fs = require('fs');
 const path = require('path');
@@ -17,17 +21,15 @@ const { displayOrigin } = require('../public/admin-ui');
 
 const DEFAULT_CANONICAL_ORIGIN = 'https://pivitlab.com';
 
-// / and /index.html are the same dashboard. The canonical is the root URL,
-// which is the address the app is actually opened at.
 const CANONICAL_PAGES = {
-  '/': { file: 'index.html', pathname: '/' },
-  '/index.html': { file: 'index.html', pathname: '/' },
+  '/index.html': { file: 'index.html', pathname: '/index.html' },
   '/login.html': { file: 'login.html', pathname: '/login.html' },
   '/client.html': { file: 'client.html', pathname: '/client.html' },
   '/signup.html': { file: 'signup.html', pathname: '/signup.html' },
   '/check-email.html': { file: 'check-email.html', pathname: '/check-email.html' },
   '/sign-in.html': { file: 'sign-in.html', pathname: '/sign-in.html' },
   '/legal.html': { file: 'legal.html', pathname: '/legal.html' },
+  '/privacy.html': { file: 'privacy.html', pathname: '/privacy.html' },
 };
 
 function normaliseAppOrigin(raw) {

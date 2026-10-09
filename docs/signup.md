@@ -14,7 +14,9 @@ Set this on the app service:
 | `EMAIL_FROM` | No | From address. Default `no-reply@pivitlab.com`. |
 | `EMAIL_REPLY_TO` | No | Reply-To on every message. Default `info@heclr.com`. pivitlab.com has a null MX, so replies cannot go to the from address. |
 | `POSTMARK_WEBHOOK_TOKEN` | No | Only if you turn on the bounce webhook. Postmark must send the same value in the `X-Postmark-Token` header. Leave unset and `POST /api/webhooks/postmark` stays closed. |
-| `TURNSTILE_SECRET_KEY` | No | Leave unset. Turnstile runs only when this is set. Sign-up stays invite-only. |
+| `TURNSTILE_SECRET_KEY` | No | Leave unset. Turnstile runs only when this is set. Sign-up stays invite-only. The access-request form uses the same check. |
+| `ACCESS_REQUESTS_ENABLED` | No | Leave unset. The landing-page form stores nothing until this is `true`, `1`, `yes` or `on`. `/privacy.html` is still a placeholder, so leave the form off until that page has real wording. |
+| `ACCESS_REQUEST_EMAIL` | No | Inbox for each access request. Defaults to `EMAIL_REPLY_TO` (`info@heclr.com`). |
 
 Do not change `ADMIN_API_KEY`, `SESSION_SECRET`, `DATABASE_URL`, or the cookie name.
 
@@ -45,3 +47,13 @@ State-changing requests must come from this app's origin. The snippet and the vi
 `audit_log` records sign-up, sign-in, failed codes, invites, sites, verification, Reveal early, test-traffic remove and restore, and superadmin view-as. An account owner sees their own rows. A superadmin sees the whole log, except while using view-as, which is limited to that account and cannot change anything.
 
 The experiment screen still reads `test_traffic_audit`. New remove, restore and Reveal rows are written there and copied into `audit_log`. Rows that already existed are copied once by migration 002.
+
+## Access requests
+
+The landing page at `/` is public. Logged-in owners and customers are redirected to `/index.html`. Client sessions go to `/client.html`.
+
+The request form (name, work email, website) is off until `ACCESS_REQUESTS_ENABLED` is set. Until then the page says to email info@pivitlab.com, and `POST /api/access-requests` returns 404 and stores nothing.
+
+When the form is on, a request is stored in `access_requests` (migration 003, next to invite codes) and an email is sent to `ACCESS_REQUEST_EMAIL`, or to `EMAIL_REPLY_TO` when that is unset. The message still goes out through Postmark. If the email fails, the row is kept. A honeypot field and a rate limit (5 per email address and 10 per IP, each hour) sit in front of it. Turnstile runs only when `TURNSTILE_SECRET_KEY` is already set.
+
+The superadmin invite card on the dashboard lists the requests. **Create invite code** makes one code for that person, with their name, email and website in the note, and shows the code once. A second click does not make another code. Do not turn the form on until `/privacy.html` has Lyle's wording. That page is a placeholder.

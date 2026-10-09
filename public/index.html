@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
-<link rel="canonical" href="https://pivitlab.com/">
+<link rel="canonical" href="https://pivitlab.com/index.html">
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" type="image/svg+xml" href="/assets/pivitlab-icon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
@@ -345,6 +345,17 @@
             <tbody id="invite-body"></tbody>
           </table>
         </div>
+        <h2 style="margin-top:28px">Access requests</h2>
+        <p id="access-requests-flag" class="hint" style="margin-top:0;">From the public landing page. Create an invite code to reply.</p>
+        <p id="access-requests-empty" class="hint">No requests yet.</p>
+        <div class="table-scroll" id="access-requests-wrap" hidden>
+          <table>
+            <thead><tr><th>Name</th><th>Email</th><th>Website</th><th>When</th><th></th></tr></thead>
+            <tbody id="access-requests-body"></tbody>
+          </table>
+        </div>
+        <p id="access-requests-fresh" class="ok-msg" hidden></p>
+        <p id="access-requests-error" class="error-msg"></p>
       </div>
     </div>
 
@@ -668,6 +679,7 @@ function applySessionChrome() {
     if (stop) stop.hidden = true;
     loadViewAsAccounts();
     loadInvites();
+    loadAccessRequests();
   } else if (bar) {
     bar.hidden = true;
   }
@@ -694,6 +706,46 @@ async function loadViewAsAccounts() {
     `<option value="${UI.escapeHtml(account.id)}">${UI.escapeHtml(account.name)}</option>`
   ).join('');
   bar.hidden = false;
+}
+
+async function loadAccessRequests() {
+  const body = document.getElementById('access-requests-body');
+  const empty = document.getElementById('access-requests-empty');
+  const wrap = document.getElementById('access-requests-wrap');
+  const flag = document.getElementById('access-requests-flag');
+  if (!body) return;
+  const result = await callApi('/api/access-requests');
+  if (!result.ok) return;
+  const enabled = !!(result.data && result.data.enabled);
+  if (flag) {
+    flag.textContent = enabled
+      ? 'From the public landing page. Create an invite code to reply.'
+      : 'The request form on the website is switched off, so nothing new will arrive until it is turned on.';
+  }
+  const rows = (result.data && result.data.requests) || [];
+  if (!rows.length) {
+    if (empty) empty.hidden = false;
+    if (wrap) wrap.hidden = true;
+    body.innerHTML = '';
+    return;
+  }
+  if (empty) empty.hidden = true;
+  if (wrap) wrap.hidden = false;
+  body.innerHTML = rows.map((row) => {
+    const when = new Date(row.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    const site = UI.escapeHtml(row.website || '');
+    const link = site ? `<a href="https://${site}" rel="noopener noreferrer">${site}</a>` : '—';
+    const action = row.invite_id
+      ? 'Invite created'
+      : `<button type="button" data-access-invite="${UI.escapeHtml(row.id)}">Create invite code</button>`;
+    return `<tr>
+      <td>${UI.escapeHtml(row.name || '')}</td>
+      <td>${UI.escapeHtml(row.email || '')}</td>
+      <td>${link}</td>
+      <td>${UI.escapeHtml(when)}</td>
+      <td>${action}</td>
+    </tr>`;
+  }).join('');
 }
 
 async function loadInvites() {
@@ -3870,6 +3922,28 @@ document.getElementById('invite-create').addEventListener('click', async () => {
   fresh.hidden = false;
   fresh.textContent = `Invite code: ${result.data.code}`;
   document.getElementById('invite-note').value = '';
+  await loadInvites();
+});
+
+document.getElementById('access-requests-body').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-access-invite]');
+  if (!button) return;
+  const errorEl = document.getElementById('access-requests-error');
+  const fresh = document.getElementById('access-requests-fresh');
+  errorEl.textContent = '';
+  fresh.hidden = true;
+  button.disabled = true;
+  const result = await callApi(`/api/access-requests/${button.getAttribute('data-access-invite')}/invite`, { method: 'POST' });
+  if (!result.ok) {
+    errorEl.textContent = result.message;
+    button.disabled = false;
+    return;
+  }
+  fresh.hidden = false;
+  fresh.textContent = result.data && result.data.code
+    ? `Invite code: ${result.data.code}`
+    : 'An invite code was already created for that request.';
+  await loadAccessRequests();
   await loadInvites();
 });
 
