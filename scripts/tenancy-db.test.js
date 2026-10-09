@@ -214,6 +214,9 @@ async function main() {
       await client.query('BEGIN');
       await applyTenancy(client);
       await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
     } finally {
       client.release();
     }

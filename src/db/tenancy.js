@@ -337,7 +337,7 @@ async function tighten(client) {
       ALTER TABLE goal_templates
         ADD CONSTRAINT goal_templates_account_goal_key UNIQUE (account_id, type, value, label);
     EXCEPTION
-      WHEN duplicate_object THEN NULL;
+      WHEN duplicate_object OR duplicate_table THEN NULL;
     END $$
   `);
 }
@@ -348,7 +348,7 @@ async function addFk(client, table, name, column, ref) {
        ALTER TABLE ${table}
          ADD CONSTRAINT ${name} FOREIGN KEY (${column}) REFERENCES ${ref}(id);
      EXCEPTION
-       WHEN duplicate_object THEN NULL;
+       WHEN duplicate_object OR duplicate_table THEN NULL;
      END $$`
   );
 }

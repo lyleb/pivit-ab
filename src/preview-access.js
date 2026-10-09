@@ -67,12 +67,12 @@ function authorisePreview({ preview, previewVariant, previewToken, now } = {}) {
   if (!on || !previewVariant || !previewToken) return { ok: false };
   const claims = inspectPreviewToken(String(previewToken), String(previewVariant), now);
   if (!claims) return { ok: false };
-  return {
-    ok: true,
-    variantId: claims.variantId,
-    accountId: claims.accountId,
-    siteId: claims.siteId,
-  };
+  const result = { ok: true, variantId: claims.variantId };
+  // Tokens minted before accounts existed have neither id. Leave those fields
+  // off so the old return shape stays the same.
+  if (claims.accountId) result.accountId = claims.accountId;
+  if (claims.siteId) result.siteId = claims.siteId;
+  return result;
 }
 
 function publicVariant(variant) {

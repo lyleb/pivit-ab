@@ -48,7 +48,7 @@ function appFor(session) {
   app.use('/api/experiments', require('../src/routes/experiments'));
   app.use('/api/event', require('../src/routes/events'));
   app.use('/api/results', require('../src/routes/results'));
-  app.use('/api/goals', require('../src/routes/goals'));
+  app.use('/api/goals', require('../src/routes/goals').router);
   app.use('/api/clients', require('../src/routes/clients'));
   app.use('/api/client', require('../src/routes/client'));
   app.use('/api/editor', require('../src/routes/editor'));
@@ -209,9 +209,21 @@ async function main() {
     const unknown = await request(publicServer, 'GET', page + '&site=' + encodeURIComponent(newSiteKey()));
     assert.deepStrictEqual(unknown.json.experiments, []);
 
-    const byIds = await request(publicServer, 'GET', `/api/experiments/by-ids?ids=${aExp.id},${bExp.id}`);
+    const byIds = await request(
+      publicServer,
+      'GET',
+      `/api/experiments/by-ids?ids=${aExp.id},${bExp.id}`,
+      null,
+      { origin: 'https://shop-a.example' }
+    );
     assert.deepStrictEqual(byIds.json.experiments.map((exp) => exp.id), [aExp.id]);
-    const byIdsB = await request(publicServer, 'GET', `/api/experiments/by-ids?ids=${aExp.id},${bExp.id}&site=${bKey}`);
+    const byIdsB = await request(
+      publicServer,
+      'GET',
+      `/api/experiments/by-ids?ids=${aExp.id},${bExp.id}&site=${bKey}`,
+      null,
+      { origin: 'https://shop-a.example' }
+    );
     assert.ok(byIdsB.json.experiments.every((exp) => exp.id !== aExp.id));
     assert.ok(byIdsB.json.experiments.some((exp) => exp.id === bExp.id));
 
