@@ -27,6 +27,7 @@ const {
 } = require('../host-scope');
 const { publicScope, ownedExperiment, placeOnSite } = require('../tenant');
 const { noteSnippetSeen } = require('../site-verify');
+const { normaliseStatusChange } = require('../experiment-status');
 const router = express.Router();
 
 function publicScopeSql(accountParam, siteParam) {
@@ -319,6 +320,7 @@ router.get('/all', async (req, res) => {
         signal: listSignal(row.status, reading),
       });
     });
+    res.set('Cache-Control', 'no-store');
     res.json({ experiments });
   } catch (err) {
     console.error(err);
@@ -339,6 +341,7 @@ router.get('/:id', async (req, res) => {
       `SELECT * FROM variants WHERE experiment_id = $1 ORDER BY created_at`,
       [id]
     );
+    res.set('Cache-Control', 'no-store');
     res.json({ ...expRows[0], variants });
   } catch (err) {
     console.error(err);
@@ -823,13 +826,17 @@ router.patch('/:id/hosts', async (req, res) => {
 router.patch('/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
     if (!id) return res.status(400).json({ error: 'experiment id is required in the URL' });
-    const allowed = ['draft', 'running', 'paused', 'archived'];
-    if (!allowed.includes(status)) return res.status(400).json({ error: `status must be one of ${allowed.join(', ')}` });
 
     const existing = await ownedExperiment(req.account.id, id);
     if (!existing) return res.status(404).json({ error: 'no experiment found with that id' });
+    const change = normaliseStatusChange(existing.status, req.body);
+    if (!change.ok) return res.status(change.statusCode || 400).json({ error: change.error });
+    if (change.unchanged) {
+      res.set('Cache-Control', 'no-store');
+      return res.json(existing);
+    }
+    const { status } = change;
     if (status === 'running') {
       const hosts = existing.allowed_hosts || [];
       if (hosts.length === 0) {
@@ -856,6 +863,7 @@ router.patch('/:id/status', async (req, res) => {
       [status, id, req.account.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
+    res.set('Cache-Control', 'no-store');
     res.json(rows[0]);
   } catch (err) {
     console.error(err);

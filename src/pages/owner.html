@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<link rel="canonical" href="https://pivitlab.com/owner">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/svg+xml" href="/assets/pivitlab-icon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<title>pivitlab — Owner sign-in</title>
+<link rel="stylesheet" href="/assets/pivit.css?v=5">
+<style>
+  body.login-page {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px;
+  }
+  .login-card { width: 360px; max-width: 100%; padding: 36px 32px; }
+  .login-card .brand { text-align: center; }
+  .login-card .brand-logo { height: 56px; display: block; margin: 0 auto 18px; }
+  .login-card label { margin: 0 0 6px; }
+  .login-card input { margin-bottom: 14px; }
+  .login-card form button { width: 100%; margin-top: 4px; }
+  .login-card .error-msg { margin-top: 14px; min-height: 1.2em; font-weight: 600; }
+  .forgot-link {
+    display: block; text-align: center; margin-top: 14px; font-size: 0.82em;
+    color: var(--text-muted); cursor: pointer; text-decoration: underline;
+  }
+  .forgot-link:hover { color: var(--indigo); }
+  .forgot-note {
+    display: none; background: rgba(86,53,251,0.12); border: 1px solid rgba(86,53,251,0.45);
+    border-radius: 8px; padding: 12px 14px; font-size: 0.85em; margin-top: 12px; line-height: 1.5;
+  }
+  .login-card a { color: var(--mint-dark); }
+  @media (max-width: 640px) {
+    .login-card { width: 100%; padding: 28px 20px; }
+  }
+</style>
+</head>
+<body class="login-page">
+<div class="card login-card">
+  <div class="brand">
+    <span class="brand-logo" role="img" aria-label="pivitlab"></span>
+  </div>
+  <p class="hint" style="text-align:center;margin-top:0;">Owner password. Once email sign-in is set up, use that instead.</p>
+  <form id="owner-form">
+    <label for="password">Password</label>
+    <input id="password" type="password" placeholder="Enter your password" autofocus required>
+    <button id="owner-btn" type="submit">Log in</button>
+    <a class="forgot-link" id="owner-forgot">Forgot password?</a>
+    <div id="owner-forgot-note" class="forgot-note">The owner password is managed in your hosting settings. There's no in-app reset for it.</div>
+  </form>
+  <p id="login-error" class="error-msg"></p>
+  <p class="hint" style="text-align:center;margin-top:16px;"><a href="/login.html">Email sign-in</a></p>
+</div>
+<script>
+document.getElementById('owner-forgot').addEventListener('click', () => {
+  const el = document.getElementById('owner-forgot-note');
+  el.style.display = el.style.display === 'block' ? 'none' : 'block';
+});
+
+document.getElementById('owner-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const btn = document.getElementById('owner-btn');
+  const errorEl = document.getElementById('login-error');
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Logging in…';
+  errorEl.textContent = '';
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: document.getElementById('password').value }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      window.location.href = '/index.html';
+      return;
+    }
+    errorEl.textContent = data.error || `Login failed (${res.status})`;
+  } catch (err) {
+    errorEl.textContent = "Couldn't reach pivitlab. Check your connection and try again.";
+  }
+  btn.disabled = false;
+  btn.textContent = original;
+});
+</script>
+</body>
+</html>

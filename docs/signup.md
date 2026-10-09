@@ -1,6 +1,6 @@
 # Sign-up and sign-in (Sprint 1b)
 
-Invite-only. A customer enters a work email and a website, then signs in from a link or a 6-digit code. There is no customer password. The emergency owner password (`ADMIN_API_KEY`) still works. The session cookie is still `pivit.sid`. Do not rotate `SESSION_SECRET`.
+Invite-only. A customer enters a work email and a website, then signs in from a link or a 6-digit code. There is no customer password. The owner password (`ADMIN_API_KEY`) still works, on the unlisted page `/owner`. That page is not linked from sign-in, is noindexed, and is left out of `robots.txt`. The public sign-in page is email sign-in and client login. The session cookie is still `pivit.sid`. Do not rotate `SESSION_SECRET`.
 
 Account #1 stays **Heclr**. The superadmin is **info@heclr.com**. The first email sign-in sets `verified_at`.
 

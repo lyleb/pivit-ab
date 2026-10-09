@@ -71,6 +71,7 @@
         <button type="button" class="choice" data-plan-choice="small" aria-pressed="false">Small change<span>about 5% relative</span></button>
         <button type="button" class="choice" data-plan-choice="medium" aria-pressed="true">Medium<span>about 10% relative</span></button>
         <button type="button" class="choice" data-plan-choice="big" aria-pressed="false">Big<span>about 20% relative</span></button>
+        <button type="button" class="choice" data-plan-choice="custom" aria-pressed="false">Custom<span>your own figures</span></button>
       </div>
       <p class="plan-sentence" id="${id}-plan-sentence"></p>
       <p class="hint" id="${id}-plan-meta"></p>
@@ -124,6 +125,49 @@
     if (status === 'running') return { label: 'Pause', next: 'paused' };
     if (status === 'paused') return { label: 'Resume', next: 'running' };
     return null;
+  }
+
+  // A read that started before a confirmed write must not paint the old status.
+  // A read that started after the write is the newer server state.
+  function displayedStatus(readStatus, confirm, readStartedAt) {
+    if (!confirm || confirm.status == null || confirm.status === '') return readStatus;
+    if (Number(readStartedAt) < Number(confirm.at) && readStatus !== confirm.status) return confirm.status;
+    return readStatus;
+  }
+
+  const PLAN_PRESETS = { small: 5, medium: 10, big: 20 };
+
+  function plannerChoice(relativePct) {
+    const value = Number(relativePct);
+    if (!Number.isFinite(value)) return 'custom';
+    const match = Object.keys(PLAN_PRESETS).find((key) => Math.abs(PLAN_PRESETS[key] - value) < 0.05);
+    return match || 'custom';
+  }
+
+  // Typing any figure leaves the presets. A relative value that lands on
+  // 5, 10 or 20 selects that preset again.
+  function plannerSelectionAfterEdit(field, relativePct) {
+    if (field === 'relative') return plannerChoice(relativePct);
+    return 'custom';
+  }
+
+  function showSupportBar({ superadmin, viewing, otherAccounts } = {}) {
+    if (viewing) return true;
+    return superadmin === true && Number(otherAccounts) > 0;
+  }
+
+  function supportViewCopy(viewing, name) {
+    if (viewing) {
+      const label = name ? String(name) : 'this account';
+      return `Support view: you are looking at ${label}, read-only. This view is logged.`;
+    }
+    return 'Support view: see another customer\'s account read-only. Every view is logged.';
+  }
+
+  const OWNER_PASSWORD_BANNER = 'You signed in with the owner password. Once email sign-in is set up, use that instead.';
+
+  function showOwnerPasswordBanner(emergency, dismissed) {
+    return emergency === true && dismissed !== true;
   }
 
   const MAX_VARIANTS = 3;
@@ -228,6 +272,14 @@
     overviewBanner,
     showNextSteps,
     statusAction,
+    displayedStatus,
+    PLAN_PRESETS,
+    plannerChoice,
+    plannerSelectionAfterEdit,
+    showSupportBar,
+    supportViewCopy,
+    OWNER_PASSWORD_BANNER,
+    showOwnerPasswordBanner,
     describeGoal,
     MAX_VARIANTS,
     canAddVariant,
