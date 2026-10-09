@@ -1,16 +1,11 @@
 // Plan, blind mode, reveal and verdict against local Postgres.
-// Skips (exit 0) when Postgres is not reachable. Never reads DATABASE_URL
-// from the environment before choosing the local socket.
+// Skips (exit 0) when Postgres is not reachable. Never reads DATABASE_URL.
+// TEST_DATABASE_URL (CI) is the only other connection, and a failure there
+// fails the run instead of skipping.
 const assert = require('assert');
-const fs = require('fs');
 const http = require('http');
-const path = require('path');
-const { Client } = require('pg');
 const express = require('express');
-
-function localUrl(database) {
-  return `postgres://ubuntu@/${database}?host=/var/run/postgresql`;
-}
+const pg = require('./test-postgres');
 
 function request(server, method, urlPath, body, headers) {
   return new Promise((resolve, reject) => {
@@ -62,40 +57,40 @@ function listen(app) {
 }
 
 async function main() {
-  const admin = new Client({ connectionString: localUrl('postgres') });
-  try {
-    await admin.connect();
-  } catch (err) {
-    console.log('plan db tests skipped:', err.message);
+  const admin = await pg.connectAdmin();
+  if (!admin) {
+    console.log('plan db tests skipped: postgres not reachable');
     return;
   }
 
   const dbName = 'pivit_plan_' + Date.now().toString(36);
-  await admin.query(`CREATE DATABASE ${dbName}`);
+  await pg.createDatabase(admin, dbName);
   await admin.end();
 
-  process.env.DATABASE_URL = localUrl(dbName);
+  process.env.DATABASE_URL = pg.databaseUrl(dbName);
   process.env.NODE_ENV = 'test';
   process.env.HOST_SCOPING = 'transition';
+  delete process.env.PIVIT_TENANCY_FAULT;
 
   const db = require('../src/db');
+  const { migrate } = require('../src/db/migrate');
   let ownerServer;
   let clientServer;
   try {
-    await db.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
-    const schema = fs.readFileSync(path.join(__dirname, '../src/db/schema.sql'), 'utf8');
-    await db.query(schema);
+    await migrate();
+    const account = await db.query(`SELECT id FROM accounts WHERE legacy IS TRUE`);
+    const accountId = account.rows[0].id;
 
     const clientRow = await db.query(
-      `INSERT INTO clients (name, username, password_hash) VALUES ('Acme', $1, 'x') RETURNING id`,
-      ['acme-plan-' + Date.now().toString(36)]
+      `INSERT INTO clients (name, username, password_hash, account_id) VALUES ('Acme', $1, 'x', $2) RETURNING id`,
+      ['acme-plan-' + Date.now().toString(36), accountId]
     );
     const clientId = clientRow.rows[0].id;
 
     async function makeExperiment({ name, status, hosts, plan, startedAt, client, url }) {
       const inserted = await db.query(
-        `INSERT INTO experiments (name, url_match, status, allowed_hosts, goals, goals_scope, goals_migrated, plan, started_at, client_id)
-         VALUES ($1, $2, $3, $4::text[], '[]'::jsonb, 'shared', true, $5::jsonb, $6, $7)
+        `INSERT INTO experiments (name, url_match, status, allowed_hosts, goals, goals_scope, goals_migrated, plan, started_at, client_id, account_id)
+         VALUES ($1, $2, $3, $4::text[], '[]'::jsonb, 'shared', true, $5::jsonb, $6, $7, $8)
          RETURNING id`,
         [
           name,
@@ -105,6 +100,7 @@ async function main() {
           plan ? JSON.stringify(plan) : null,
           startedAt || null,
           client || null,
+          accountId,
         ]
       );
       const experimentId = inserted.rows[0].id;
@@ -407,10 +403,7 @@ async function main() {
     if (ownerServer) await new Promise((resolve) => ownerServer.close(resolve));
     if (clientServer) await new Promise((resolve) => clientServer.close(resolve));
     await db.pool.end();
-    const drop = new Client({ connectionString: localUrl('postgres') });
-    await drop.connect();
-    await drop.query(`DROP DATABASE ${dbName}`);
-    await drop.end();
+    await pg.dropDatabase(dbName);
   }
 }
 

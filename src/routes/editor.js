@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('../db');
-const { verifyEditToken } = require('../edit-token');
+const { inspectEditToken } = require('../edit-token');
 const { createPreviewToken } = require('../preview-access');
 const { recordGoalUsage } = require('./goals');
 const { validateGoals, persistGoals } = require('../goals');
@@ -18,10 +18,16 @@ router.use((req, res, next) => {
 function requireValidEditToken(req, res, next) {
   const { variantId } = req.params;
   const { token } = req.query;
-  if (!verifyEditToken(token, variantId)) {
+  const claims = inspectEditToken(token, variantId);
+  if (!claims) {
     return res.status(401).json({ error: 'invalid or expired edit link — generate a new one from the dashboard' });
   }
+  req.editClaims = claims;
   next();
+}
+
+function claimsMatch(claims, accountId) {
+  return !claims || !claims.accountId || claims.accountId === accountId;
 }
 
 // GET /api/editor/variants/:variantId?token=...
@@ -36,6 +42,9 @@ router.get('/variants/:variantId', requireValidEditToken, async (req, res) => {
       [req.params.variantId]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id' });
+    if (!claimsMatch(req.editClaims, rows[0].account_id)) {
+      return res.status(401).json({ error: 'invalid or expired edit link — generate a new one from the dashboard' });
+    }
     const row = rows[0];
     // Shared goals are the ones every variant is measured on. The editor
     // still receives them as `goals` so a save writes the same list back.
@@ -53,8 +62,29 @@ router.get('/variants/:variantId', requireValidEditToken, async (req, res) => {
 // The editor runs on the customer origin. Exchange the edit token for a
 // preview token so Desktop/Tablet/Mobile can open a preview that does not
 // carry the more powerful edit token in the URL.
-router.get('/variants/:variantId/preview-token', requireValidEditToken, (req, res) => {
-  res.json({ preview_token: createPreviewToken(req.params.variantId) });
+router.get('/variants/:variantId/preview-token', requireValidEditToken, async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT e.account_id, e.site_id
+       FROM variants v
+       JOIN experiments e ON e.id = v.experiment_id
+       WHERE v.id = $1`,
+      [req.params.variantId]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id' });
+    if (!claimsMatch(req.editClaims, rows[0].account_id)) {
+      return res.status(401).json({ error: 'invalid or expired edit link — generate a new one from the dashboard' });
+    }
+    res.json({
+      preview_token: createPreviewToken(req.params.variantId, undefined, undefined, {
+        accountId: rows[0].account_id,
+        siteId: rows[0].site_id,
+      }),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
 });
 
 // PATCH /api/editor/variants/:variantId?token=...  { changes?: [...], goals?: [...] }
@@ -88,16 +118,21 @@ router.patch('/variants/:variantId', requireValidEditToken, async (req, res) => 
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'no variant found with that id' });
     }
+    if (!claimsMatch(req.editClaims, rows[0].account_id)) {
+      await client.query('ROLLBACK');
+      return res.status(401).json({ error: 'invalid or expired edit link — generate a new one from the dashboard' });
+    }
     if (goals !== undefined) {
       const saved = await persistGoals(client.query.bind(client), {
         experimentId: rows[0].experiment_id,
         variantId: req.params.variantId,
         goals,
         unify: false,
+        accountId: rows[0].account_id,
       });
       rows[0].goals = saved.goals;
       rows[0].goals_scope = saved.goals_scope;
-      await recordGoalUsage(saved.goals);
+      await recordGoalUsage(saved.goals, rows[0].account_id);
     }
     await client.query('COMMIT');
     res.json(rows[0]);

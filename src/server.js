@@ -2,8 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const fs = require('fs');
 const db = require('./db');
+const { migrate } = require('./db/migrate');
 const sessionMiddleware = require('./session');
 
 const { hostScopingMode } = require('./host-scope');
@@ -108,17 +108,17 @@ app.use((err, req, res, next) => {
 process.on('unhandledRejection', (err) => console.error('Unhandled rejection:', err));
 process.on('uncaughtException', (err) => console.error('Uncaught exception:', err));
 
-// Auto-migrate on startup: schema.sql uses CREATE TABLE/EXTENSION IF NOT EXISTS,
-// so this is safe to run every time the server boots — no separate CLI step needed.
-// This means a pure browser-based deploy (no terminal) works end to end.
+// Auto-migrate on startup. Version 000 is schema.sql. Later versions run once
+// inside a transaction. A failure rolls that version back and stops the
+// process, so a bad migration cannot serve traffic against a half-changed
+// database. Roll the deploy back; the previous release still matches the data.
 async function runMigrations() {
   try {
-    const sql = fs.readFileSync(path.join(__dirname, 'db/schema.sql'), 'utf8');
-    await db.query('CREATE EXTENSION IF NOT EXISTS pgcrypto;');
-    await db.query(sql);
-    console.log('Database schema is up to date.');
+    const applied = await migrate();
+    if (applied.length === 0) console.log('Database schema is up to date.');
   } catch (err) {
     console.error('Migration on startup failed:', err);
+    process.exit(1);
   }
 }
 

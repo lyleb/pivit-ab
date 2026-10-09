@@ -25,7 +25,12 @@ const {
   parseHostList,
   hostScopingMode,
 } = require('../host-scope');
+const { publicScope, ownedExperiment, placeOnSite } = require('../tenant');
 const router = express.Router();
+
+function publicScopeSql(accountParam, siteParam) {
+  return `($${siteParam}::uuid IS NULL AND account_id = $${accountParam}) OR ($${siteParam}::uuid IS NOT NULL AND site_id = $${siteParam})`;
+}
 
 // url_match stays in SQL. Domain rules depend on HOST_SCOPING and on whether
 // the experiment has a list yet, so they are applied in JS. allowed_hosts is
@@ -72,10 +77,14 @@ router.get('/', async (req, res) => {
   });
 
   try {
+    const scope = await publicScope(req.query.site);
+    if (!scope.ok) return res.json({ experiments: [] });
+
     const { rows: experiments } = await db.query(
       `SELECT id, name, url_match, allowed_hosts, goals FROM experiments
-       WHERE $1 ILIKE '%' || url_match || '%' AND status = 'running'`,
-      [url]
+       WHERE $1 ILIKE '%' || url_match || '%' AND status = 'running'
+         AND (${publicScopeSql(2, 3)})`,
+      [url, scope.accountId, scope.siteId]
     );
 
     const visible = applyHostScope(experiments, req);
@@ -83,13 +92,19 @@ router.get('/', async (req, res) => {
     let previewExperiment = null;
     if (previewAuth.ok) {
       const { rows: previewRows } = await db.query(
-        `SELECT e.id, e.name, e.url_match, e.allowed_hosts, e.status, e.goals
+        `SELECT e.id, e.name, e.url_match, e.allowed_hosts, e.status, e.goals, e.account_id, e.site_id
          FROM variants v
          JOIN experiments e ON e.id = v.experiment_id
          WHERE v.id = $1
-           AND $2 ILIKE '%' || e.url_match || '%'`,
-        [previewAuth.variantId, url]
+           AND $2 ILIKE '%' || e.url_match || '%'
+           AND (( $4::uuid IS NULL AND e.account_id = $3) OR ($4::uuid IS NOT NULL AND e.site_id = $4))`,
+        [previewAuth.variantId, url, scope.accountId, scope.siteId]
       );
+      if (previewAuth.accountId) {
+        for (let i = previewRows.length - 1; i >= 0; i -= 1) {
+          if (previewRows[i].account_id !== previewAuth.accountId) previewRows.splice(i, 1);
+        }
+      }
       if (previewRows[0]) {
         const already = visible.find((exp) => exp.id === previewRows[0].id);
         previewExperiment = already || applyHostScope(previewRows, req)[0] || null;
@@ -136,9 +151,13 @@ router.get('/by-ids', async (req, res) => {
   if (idList.length === 0) return res.json({ experiments: [] });
 
   try {
+    const scope = await publicScope(req.query.site);
+    if (!scope.ok) return res.json({ experiments: [] });
     const { rows: experiments } = await db.query(
-      `SELECT id, name, allowed_hosts, goals FROM experiments WHERE id = ANY($1::uuid[])`,
-      [idList]
+      `SELECT id, name, allowed_hosts, goals FROM experiments
+       WHERE id = ANY($1::uuid[])
+         AND (${publicScopeSql(2, 3)})`,
+      [idList, scope.accountId, scope.siteId]
     );
     const visible = applyHostScope(experiments, req);
     if (visible.length === 0) return res.json({ experiments: [] });
@@ -186,9 +205,10 @@ router.post('/:id/reveal', async (req, res) => {
       experimentId: req.params.id,
       actor: 'owner',
       actorIp: actorIp(req),
+      accountId: req.account.id,
     });
     if (!result.ok) return res.status(result.status || 400).json({ error: result.error });
-    const loaded = await loadReading(req.params.id, { includeTest: false });
+    const loaded = await loadReading(req.params.id, { includeTest: false, accountId: req.account.id });
     res.json({
       peeked_at: result.peeked_at,
       audit_id: result.audit_id,
@@ -204,8 +224,23 @@ router.post('/:id/reveal', async (req, res) => {
 // Hosts the snippet has asked about since this process started. In-memory, so
 // it resets on deploy — that is what Settings calls "since last deploy".
 // Registered before /:id so "host-report" is not captured as an id.
-router.get('/host-report', (req, res) => {
-  res.json(seenReport());
+router.get('/host-report', async (req, res) => {
+  try {
+    const report = seenReport();
+    const { rows } = await db.query(
+      `SELECT id FROM experiments WHERE account_id = $1`,
+      [req.account.id]
+    );
+    const allowed = new Set(rows.map((row) => row.id));
+    const experiments = {};
+    Object.keys(report.experiments).forEach((id) => {
+      if (allowed.has(id)) experiments[id] = report.experiments[id];
+    });
+    res.json({ since: report.since, experiments });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
 });
 
 // GET /api/experiments/all — every experiment regardless of status, with a variant
@@ -217,9 +252,11 @@ router.get('/all', async (req, res) => {
       `SELECT e.*, COUNT(v.id)::int AS variant_count, c.name AS client_name
        FROM experiments e
        LEFT JOIN variants v ON v.experiment_id = e.id
-       LEFT JOIN clients c ON c.id = e.client_id
+       LEFT JOIN clients c ON c.id = e.client_id AND c.account_id = e.account_id
+       WHERE e.account_id = $1
        GROUP BY e.id, c.name
-       ORDER BY e.created_at DESC`
+       ORDER BY e.created_at DESC`,
+      [req.account.id]
     );
     const ids = rows.map((row) => row.id);
     let variantRows = [];
@@ -292,8 +329,9 @@ router.get('/all', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { rows: expRows } = await db.query(`SELECT * FROM experiments WHERE id = $1`, [id]);
-    if (expRows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
+    const experiment = await ownedExperiment(req.account.id, id);
+    if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
+    const expRows = [experiment];
 
     const { rows: variants } = await db.query(
       `SELECT * FROM variants WHERE experiment_id = $1 ORDER BY created_at`,
@@ -314,11 +352,9 @@ router.get('/:id/health', async (req, res) => {
   try {
     const { id } = req.params;
     const includeTest = flagIsOn(req.query.include_test);
-    const { rows: expRows } = await db.query(
-      `SELECT status, goals, goals_scope FROM experiments WHERE id = $1`,
-      [id]
-    );
-    if (expRows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
+    const owned = await ownedExperiment(req.account.id, id);
+    if (!owned) return res.status(404).json({ error: 'no experiment found with that id' });
+    const expRows = [owned];
     const exp = expRows[0];
 
     const { rows: splitRows } = await db.query(
@@ -393,15 +429,25 @@ router.post('/', async (req, res) => {
     hosts = parsed.hosts;
   }
 
+  const accountId = req.account.id;
+  if (client_id) {
+    const ownedClient = await db.query(
+      `SELECT id FROM clients WHERE id = $1 AND account_id = $2`,
+      [client_id, accountId]
+    );
+    if (ownedClient.rows.length === 0) return res.status(404).json({ error: 'no client found with that id' });
+  }
+
   let client;
   try {
     client = await db.pool.connect(); // inside the try too — a connection failure must produce a clean error, not an unhandled rejection
     await client.query('BEGIN');
+    const placed = await placeOnSite(client.query.bind(client), accountId, null, hosts);
 
     const { rows: expRows } = await client.query(
-      `INSERT INTO experiments (name, url_match, client_id, allowed_hosts, goals, goals_scope, goals_migrated)
-       VALUES ($1, $2, $3, $4::text[], '[]'::jsonb, 'shared', true) RETURNING *`,
-      [name, url_match, client_id || null, hosts]
+      `INSERT INTO experiments (name, url_match, client_id, allowed_hosts, goals, goals_scope, goals_migrated, account_id, site_id, needs_site)
+       VALUES ($1, $2, $3, $4::text[], '[]'::jsonb, 'shared', true, $5, $6, $7) RETURNING *`,
+      [name, url_match, client_id || null, hosts, accountId, placed.siteId, placed.needsSite]
     );
     const experiment = expRows[0];
 
@@ -429,9 +475,16 @@ router.patch('/:id/client', async (req, res) => {
   try {
     const { id } = req.params;
     const { client_id } = req.body;
+    if (client_id) {
+      const ownedClient = await db.query(
+        `SELECT id FROM clients WHERE id = $1 AND account_id = $2`,
+        [client_id, req.account.id]
+      );
+      if (ownedClient.rows.length === 0) return res.status(404).json({ error: 'no client found with that id' });
+    }
     const { rows } = await db.query(
-      `UPDATE experiments SET client_id = $1 WHERE id = $2 RETURNING *`,
-      [client_id || null, id]
+      `UPDATE experiments SET client_id = $1 WHERE id = $2 AND account_id = $3 RETURNING *`,
+      [client_id || null, id, req.account.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
     res.json(rows[0]);
@@ -452,8 +505,8 @@ router.post('/:id/variants', async (req, res) => {
 
     await client.query('BEGIN');
     const locked = await client.query(
-      `SELECT goals, goals_scope FROM experiments WHERE id = $1 FOR UPDATE`,
-      [id]
+      `SELECT goals, goals_scope, account_id FROM experiments WHERE id = $1 AND account_id = $2 FOR UPDATE`,
+      [id, req.account.id]
     );
     if (locked.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -486,7 +539,7 @@ router.post('/:id/variants', async (req, res) => {
       [id, name, traffic_split ?? 50, JSON.stringify(changes ?? []), JSON.stringify(goalList)]
     );
     await client.query('COMMIT');
-    if (scope === 'divergent') await recordGoalUsage(goalList);
+    if (scope === 'divergent') await recordGoalUsage(goalList, req.account.id);
     res.status(201).json(rows[0]);
   } catch (err) {
     await client.query('ROLLBACK').catch((rollbackErr) => console.error('Rollback failed:', rollbackErr));
@@ -518,6 +571,14 @@ router.patch('/:id/variants/:variantId', async (req, res) => {
     const changesParam = changes === undefined ? null : JSON.stringify(Array.isArray(changes) ? changes : []);
 
     await client.query('BEGIN');
+    const owned = await client.query(
+      `SELECT id FROM experiments WHERE id = $1 AND account_id = $2`,
+      [id, req.account.id]
+    );
+    if (owned.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'no experiment found with that id' });
+    }
     const { rows } = await client.query(
       `UPDATE variants SET name = $1, traffic_split = $2, changes = COALESCE($3::jsonb, changes)
        WHERE id = $4 AND experiment_id = $5 RETURNING *`,
@@ -534,7 +595,10 @@ router.patch('/:id/variants/:variantId', async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: problem });
       }
-      const { rows: expRows } = await client.query(`SELECT goals, goals_scope FROM experiments WHERE id = $1`, [id]);
+      const { rows: expRows } = await client.query(
+        `SELECT goals, goals_scope FROM experiments WHERE id = $1 AND account_id = $2`,
+        [id, req.account.id]
+      );
       const shared = expRows[0] && expRows[0].goals_scope !== 'divergent';
       const wipingShared = shared && goals.length === 0 && (expRows[0].goals || []).length > 0;
       if (!wipingShared) {
@@ -545,7 +609,7 @@ router.patch('/:id/variants/:variantId', async (req, res) => {
           unify: false,
         });
         rows[0].goals = saved.goals;
-        await recordGoalUsage(saved.goals);
+        await recordGoalUsage(saved.goals, req.account.id);
       }
     }
 
@@ -576,9 +640,10 @@ router.put('/:id/goals', async (req, res) => {
       experimentId: req.params.id,
       goals,
       unify: !!(req.body && req.body.unify),
+      accountId: req.account.id,
     });
     await client.query('COMMIT');
-    await recordGoalUsage(saved.goals);
+    await recordGoalUsage(saved.goals, req.account.id);
     res.json(saved);
   } catch (err) {
     await client.query('ROLLBACK').catch((rollbackErr) => console.error('Rollback failed:', rollbackErr));
@@ -599,12 +664,18 @@ router.post('/:id/variants/:variantId/preview-link', async (req, res) => {
     if (!page_url) return res.status(400).json({ error: 'page_url is required' });
 
     const { rows } = await db.query(
-      `SELECT id FROM variants WHERE id = $1 AND experiment_id = $2`,
-      [req.params.variantId, req.params.id]
+      `SELECT v.id, e.account_id, e.site_id
+       FROM variants v
+       JOIN experiments e ON e.id = v.experiment_id
+       WHERE v.id = $1 AND v.experiment_id = $2 AND e.account_id = $3`,
+      [req.params.variantId, req.params.id, req.account.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id on that experiment' });
 
-    const token = createPreviewToken(req.params.variantId);
+    const token = createPreviewToken(req.params.variantId, undefined, undefined, {
+      accountId: rows[0].account_id,
+      siteId: rows[0].site_id,
+    });
     res.json({ preview_url: previewUrl(page_url, req.params.variantId, token) });
   } catch (err) {
     console.error(err);
@@ -624,12 +695,18 @@ router.post('/:id/variants/:variantId/edit-link', async (req, res) => {
     if (!page_url) return res.status(400).json({ error: 'page_url is required' });
 
     const { rows } = await db.query(
-      `SELECT id FROM variants WHERE id = $1 AND experiment_id = $2`,
-      [req.params.variantId, req.params.id]
+      `SELECT v.id, e.account_id, e.site_id
+       FROM variants v
+       JOIN experiments e ON e.id = v.experiment_id
+       WHERE v.id = $1 AND v.experiment_id = $2 AND e.account_id = $3`,
+      [req.params.variantId, req.params.id, req.account.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id on that experiment' });
 
-    const token = createEditToken(req.params.variantId);
+    const token = createEditToken(req.params.variantId, undefined, {
+      accountId: rows[0].account_id,
+      siteId: rows[0].site_id,
+    });
     res.json({ edit_url: editUrl(page_url, req.params.variantId, token) });
   } catch (err) {
     console.error(err);
@@ -645,6 +722,8 @@ router.patch('/:id/variants/:variantId/enabled', async (req, res) => {
     const { enabled } = req.body;
     if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be true or false' });
 
+    const owned = await ownedExperiment(req.account.id, id);
+    if (!owned) return res.status(404).json({ error: 'no experiment found with that id' });
     const { rows } = await db.query(
       `UPDATE variants SET enabled = $1 WHERE id = $2 AND experiment_id = $3 RETURNING *`,
       [enabled, variantId, id]
@@ -664,6 +743,8 @@ router.patch('/:id/variants/:variantId/enabled', async (req, res) => {
 router.delete('/:id/variants/:variantId', async (req, res) => {
   try {
     const { id, variantId } = req.params;
+    const owned = await ownedExperiment(req.account.id, id);
+    if (!owned) return res.status(404).json({ error: 'no experiment found with that id' });
     const { rows } = await db.query(
       `DELETE FROM variants WHERE id = $1 AND experiment_id = $2 RETURNING id`,
       [variantId, id]
@@ -683,12 +764,12 @@ router.delete('/:id/variants/:variantId', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { rows: expRows } = await db.query(`SELECT status FROM experiments WHERE id = $1`, [id]);
+    const expRows = [await ownedExperiment(req.account.id, id)].filter(Boolean);
     if (expRows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
     if (expRows[0].status !== 'archived') {
       return res.status(400).json({ error: 'only archived experiments can be deleted — archive it first, and export the CSV if you want to keep the data' });
     }
-    await db.query(`DELETE FROM experiments WHERE id = $1`, [id]);
+    await db.query(`DELETE FROM experiments WHERE id = $1 AND account_id = $2`, [id, req.account.id]);
     res.status(204).end();
   } catch (err) {
     console.error(err);
@@ -707,12 +788,30 @@ router.patch('/:id/hosts', async (req, res) => {
     const parsed = parseHostList(req.body.allowed_hosts);
     if (!parsed.ok) return res.status(400).json({ error: parsed.error });
 
-    const { rows } = await db.query(
-      `UPDATE experiments SET allowed_hosts = $1::text[] WHERE id = $2 RETURNING *`,
-      [parsed.hosts, id]
-    );
-    if (rows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
-    res.json(rows[0]);
+    const client = await db.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const placed = await placeOnSite(client.query.bind(client), req.account.id, id, parsed.hosts);
+      const { rows } = await client.query(
+        `UPDATE experiments
+         SET allowed_hosts = $1::text[], site_id = $2, needs_site = $3
+         WHERE id = $4 AND account_id = $5
+         RETURNING *`,
+        [parsed.hosts, placed.siteId, placed.needsSite, id, req.account.id]
+      );
+      if (rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'no experiment found with that id' });
+      }
+      await client.query('COMMIT');
+      return res.json(rows[0]);
+    } catch (err) {
+      await client.query('ROLLBACK').catch((rollbackErr) => console.error('Rollback failed:', rollbackErr));
+      console.error(err);
+      return res.status(500).json({ error: 'internal error', detail: err.message });
+    } finally {
+      client.release();
+    }
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });
@@ -727,9 +826,8 @@ router.patch('/:id/status', async (req, res) => {
     const allowed = ['draft', 'running', 'paused', 'archived'];
     if (!allowed.includes(status)) return res.status(400).json({ error: `status must be one of ${allowed.join(', ')}` });
 
-    const { rows: existingRows } = await db.query(`SELECT * FROM experiments WHERE id = $1`, [id]);
-    if (existingRows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
-    const existing = existingRows[0];
+    const existing = await ownedExperiment(req.account.id, id);
+    if (!existing) return res.status(404).json({ error: 'no experiment found with that id' });
     if (status === 'running') {
       const hosts = existing.allowed_hosts || [];
       if (hosts.length === 0) {
@@ -740,9 +838,9 @@ router.patch('/:id/status', async (req, res) => {
 
     const { rows } = await db.query(
       status === 'running'
-        ? `UPDATE experiments SET status = $1, started_at = COALESCE(started_at, now()) WHERE id = $2 RETURNING *`
-        : `UPDATE experiments SET status = $1 WHERE id = $2 RETURNING *`,
-      [status, id]
+        ? `UPDATE experiments SET status = $1, started_at = COALESCE(started_at, now()) WHERE id = $2 AND account_id = $3 RETURNING *`
+        : `UPDATE experiments SET status = $1 WHERE id = $2 AND account_id = $3 RETURNING *`,
+      [status, id, req.account.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
     res.json(rows[0]);

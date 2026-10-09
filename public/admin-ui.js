@@ -201,9 +201,11 @@
     return url.origin;
   }
 
-  function snippetTag(origin) {
+  function snippetTag(origin, siteKey) {
     const closeTag = '</' + 'script>';
-    return `<script src="${origin}/snippet/ab.js" data-api="${origin}">${closeTag}`;
+    const key = typeof siteKey === 'string' ? siteKey.trim() : '';
+    const siteAttr = /^site_[a-f0-9]{16,80}$/i.test(key) ? ` data-site="${key}"` : '';
+    return `<script src="${origin}/snippet/ab.js" data-api="${origin}"${siteAttr}>${closeTag}`;
   }
 
   function clientLoginUrl(origin) {

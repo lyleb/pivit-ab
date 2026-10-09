@@ -1,13 +1,23 @@
-// Role-based session check. Only 'owner' exists today; this shape (a list of
-// allowed roles) exists so adding a 'client' role later — read-only, scoped to
-// their own experiments — is a new route + requireAuth(['client']), not a rework
-// of how auth itself works.
+const { resolveSessionAccount } = require('../tenant');
+
+// Role check, then the account on the session. Owner requests with no account
+// id yet (a session from before accounts existed) use the legacy account, so
+// the shared password keeps working. A client session is tied to that client's
+// account. Missing either one is the same 401 as being signed out.
 function requireAuth(allowedRoles) {
-  return (req, res, next) => {
-    if (req.session && req.session.role && allowedRoles.includes(req.session.role)) {
-      return next();
+  return async (req, res, next) => {
+    if (!(req.session && req.session.role && allowedRoles.includes(req.session.role))) {
+      return res.status(401).json({ error: 'not authenticated' });
     }
-    res.status(401).json({ error: 'not authenticated' });
+    try {
+      const account = await resolveSessionAccount(req);
+      if (!account) return res.status(401).json({ error: 'not authenticated' });
+      req.account = account;
+      return next();
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'internal error' });
+    }
   };
 }
 

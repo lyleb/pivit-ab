@@ -1,16 +1,12 @@
 // Test-traffic SQL against local Postgres. Skips (exit 0) when Postgres is
 // not reachable, so npm test still passes without a database. This file never
-// reads DATABASE_URL from the environment before choosing the local socket.
+// reads DATABASE_URL. TEST_DATABASE_URL (CI) fails the run if it cannot connect.
 const assert = require('assert');
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
-const { Client } = require('pg');
 const express = require('express');
-
-function localUrl(database) {
-  return `postgres://ubuntu@/${database}?host=/var/run/postgresql`;
-}
+const pg = require('./test-postgres');
 
 function request(server, method, urlPath, body, headers) {
   return new Promise((resolve, reject) => {
@@ -57,40 +53,41 @@ function appFor(session) {
 }
 
 async function main() {
-  const admin = new Client({ connectionString: localUrl('postgres') });
-  try {
-    await admin.connect();
-  } catch (err) {
-    console.log('test-traffic db tests skipped:', err.message);
+  const admin = await pg.connectAdmin();
+  if (!admin) {
+    console.log('test-traffic db tests skipped: postgres not reachable');
     return;
   }
 
   const dbName = 'pivit_test_traffic_' + Date.now().toString(36);
-  await admin.query(`CREATE DATABASE ${dbName}`);
+  await pg.createDatabase(admin, dbName);
   await admin.end();
 
-  process.env.DATABASE_URL = localUrl(dbName);
+  process.env.DATABASE_URL = pg.databaseUrl(dbName);
   process.env.NODE_ENV = 'test';
   process.env.HOST_SCOPING = 'transition';
+  delete process.env.PIVIT_TENANCY_FAULT;
 
   const db = require('../src/db');
+  const { migrate } = require('../src/db/migrate');
   const metrics = require('../src/metrics');
   const hits = require('../src/host-hits');
   const traffic = require('../src/test-traffic');
 
-  const ownerApp = appFor({ role: 'owner' });
   let ownerServer;
   let clientServer;
   try {
-    await db.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
+    await migrate();
+    const account = await db.query(`SELECT id FROM accounts WHERE legacy IS TRUE`);
+    const accountId = account.rows[0].id;
     const schema = fs.readFileSync(path.join(__dirname, '../src/db/schema.sql'), 'utf8');
-    await db.query(schema);
+    const ownerApp = appFor({ role: 'owner' });
 
     const exp = await db.query(
-      `INSERT INTO experiments (name, url_match, status, goals, goals_scope, goals_migrated)
-       VALUES ('Homepage', 'https://cantsaythat.co.uk/', 'running', $1::jsonb, 'shared', true)
+      `INSERT INTO experiments (name, url_match, status, goals, goals_scope, goals_migrated, account_id)
+       VALUES ('Homepage', 'https://cantsaythat.co.uk/', 'running', $1::jsonb, 'shared', true, $2)
        RETURNING id`,
-      [JSON.stringify([{ type: 'click', selector: '.buy', id: 'buy', name: 'Buy', primary: true }])]
+      [JSON.stringify([{ type: 'click', selector: '.buy', id: 'buy', name: 'Buy', primary: true }]), accountId]
     );
     const experimentId = exp.rows[0].id;
     const control = await db.query(
@@ -282,7 +279,8 @@ async function main() {
     assert.ok(csvIncluded.text.includes('v_ptmuyez2tm_a'));
 
     const clientRow = await db.query(
-      `INSERT INTO clients (name, username, password_hash) VALUES ('Can not say', 'cst', 'x') RETURNING id`
+      `INSERT INTO clients (name, username, password_hash, account_id) VALUES ('Can not say', 'cst', 'x', $1) RETURNING id`,
+      [accountId]
     );
     await db.query(`UPDATE experiments SET client_id = $1 WHERE id = $2`, [clientRow.rows[0].id, experimentId]);
     const clientApp = appFor({ role: 'client', clientId: clientRow.rows[0].id });
@@ -360,10 +358,7 @@ async function main() {
     if (ownerServer) await new Promise((resolve) => ownerServer.close(resolve));
     if (clientServer) await new Promise((resolve) => clientServer.close(resolve));
     await db.pool.end();
-    const drop = new Client({ connectionString: localUrl('postgres') });
-    await drop.connect();
-    await drop.query(`DROP DATABASE ${dbName}`);
-    await drop.end();
+    await pg.dropDatabase(dbName);
   }
 }
 

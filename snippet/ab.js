@@ -3,7 +3,11 @@
  *
  * Usage on client site:
  *   <script src="https://your-api.example.com/snippet/ab.js"
- *           data-api="https://your-api.example.com"></script>
+ *           data-api="https://your-api.example.com"
+ *           data-site="site_…"></script>
+ *
+ * data-site is the public site key. Tags that omit it (including ones that
+ * still point at pivit.click) keep working for the original account only.
  *
  * Fetches active experiments for the current page, assigns the visitor
  * to a variant per experiment (sticky via localStorage), applies DOM
@@ -58,6 +62,7 @@
   api.readQaFlag = readQaFlag;
   api.eventBody = eventBody;
   api.withQaQuery = withQaQuery;
+  api.withSite = withSite;
   api.TEST_VISITOR_PREFIX = 'v_pt';
   api.QA_STORAGE_KEY = 'pivit_qa';
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
@@ -87,6 +92,8 @@
       }
     }
   }
+  const rawSite = scriptTag && scriptTag.getAttribute('data-site');
+  const SITE_KEY = withSite('http://s', rawSite) === 'http://s' ? '' : String(rawSite).trim();
   const VISITOR_KEY = '_ab_visitor_id';
   let qaOn = false;
   const ASSIGNMENT_PREFIX = '_ab_assign_';
@@ -200,13 +207,15 @@
   function sendEvent(experimentId, variantId, visitorId, eventType, goalId) {
     // is_test is a JSON field. sendBeacon cannot set X-Pivit-Test, and the
     // field is omitted for real visitors so their body stays the same.
-    const body = JSON.stringify(api.eventBody({
+    const fields = {
       experiment_id: experimentId,
       variant_id: variantId,
       visitor_id: visitorId,
       event_type: eventType,
       goal_id: goalId || null,
-    }, qaOn));
+    };
+    if (SITE_KEY) fields.site = SITE_KEY;
+    const body = JSON.stringify(api.eventBody(fields, qaOn));
     // sendBeacon is fire-and-forget and survives page navigation, ideal for tracking calls.
     if (navigator.sendBeacon) {
       navigator.sendBeacon(API_BASE + '/api/event', new Blob([body], { type: 'application/json' }));
@@ -258,7 +267,7 @@
     if (experimentIds.length === 0) return;
 
     try {
-      const res = await fetch(api.withQaQuery(`${API_BASE}/api/experiments/by-ids?ids=${experimentIds.join(',')}`, qaOn));
+      const res = await fetch(api.withQaQuery(api.withSite(`${API_BASE}/api/experiments/by-ids?ids=${experimentIds.join(',')}`, SITE_KEY), qaOn));
       const data = await res.json();
 
       (data.experiments || []).forEach((experiment) => {
@@ -344,7 +353,7 @@
 
     try {
       const res = await fetch(
-        api.withQaQuery(`${API_BASE}/api/experiments?url=${url}${previewQuery}`, qaOn),
+        api.withQaQuery(api.withSite(`${API_BASE}/api/experiments?url=${url}${previewQuery}`, SITE_KEY), qaOn),
         wantsPreview ? { cache: 'no-store' } : undefined
       );
       const data = await res.json();
@@ -614,7 +623,14 @@
     };
     const id = fields.visitor_id;
     if (flagged || (typeof id === 'string' && id.indexOf('v_pt') === 0)) body.is_test = true;
+    if (fields.site && /^site_[a-f0-9]{16,80}$/i.test(fields.site)) body.site = fields.site;
     return body;
+  }
+
+  function withSite(url, siteKey) {
+    const key = typeof siteKey === 'string' ? siteKey.trim() : '';
+    if (!/^site_[a-f0-9]{16,80}$/i.test(key)) return url;
+    return url + (String(url).indexOf('?') === -1 ? '?' : '&') + 'site=' + encodeURIComponent(key);
   }
 
   function withQaQuery(url, flagged) {

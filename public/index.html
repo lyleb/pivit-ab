@@ -549,6 +549,7 @@ async function requireOwnerSession() {
       window.location.href = '/login.html';
       return false;
     }
+    if (typeof data.snippet_site_key === 'string') snippetSiteKey = data.snippet_site_key;
     return true;
   } catch (err) {
     window.location.href = '/login.html';
@@ -3284,6 +3285,7 @@ function openStatusSettings() {
 // snippet tag and the client login link. Unset or invalid keeps today's host.
 let configuredAppOrigin = null;
 let appOriginRequest = null;
+let snippetSiteKey = '';
 
 function publicOrigin() {
   return UI.displayOrigin(configuredAppOrigin, location.origin);
@@ -3309,12 +3311,12 @@ function applyDisplayedOrigins() {
   if (login) login.textContent = UI.clientLoginUrl(origin);
   ['wizard-snippet-code', 'snippet-code'].forEach((id) => {
     const el = document.getElementById(id);
-    if (el) el.textContent = UI.snippetTag(origin);
+    if (el) el.textContent = UI.snippetTag(origin, snippetSiteKey);
   });
 }
 
 function snippetTag() {
-  return UI.snippetTag(publicOrigin());
+  return UI.snippetTag(publicOrigin(), snippetSiteKey);
 }
 
 function antiflickerSnippet() {

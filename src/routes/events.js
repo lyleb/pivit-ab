@@ -4,6 +4,7 @@ const { isLikelyBot, isRateLimited } = require('../bot-filter');
 const { checkHost, originHostFromRequest, hostScopingMode } = require('../host-scope');
 const { scheduleEventDrop } = require('../event-drops');
 const { requestIsTestTraffic } = require('../test-traffic');
+const { publicScope } = require('../tenant');
 const router = express.Router();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -50,8 +51,9 @@ router.post('/', async (req, res) => {
   }
 
   try {
+    const scope = await publicScope(req.body && req.body.site);
     const { rows } = await db.query(
-      `SELECT e.allowed_hosts
+      `SELECT e.allowed_hosts, e.account_id, e.site_id
        FROM variants v
        JOIN experiments e ON e.id = v.experiment_id
        WHERE v.id = $1 AND v.experiment_id = $2`,
@@ -59,6 +61,19 @@ router.post('/', async (req, res) => {
     );
     if (rows.length === 0) {
       return res.status(400).json({ error: 'variant does not belong to experiment' });
+    }
+
+    // A site key reaches only that site. A tag with no key reaches only the
+    // legacy account, using the same host rules as before. A bad or unknown
+    // key does not fall back to the legacy account. The drop is silent, same
+    // as a host that is not on the list.
+    const row = rows[0];
+    const wrongAccount = !scope.ok
+      || (scope.legacy ? row.account_id !== scope.accountId : row.site_id !== scope.siteId);
+    if (wrongAccount) {
+      warnDrop(experiment_id, originHostFromRequest(req), scope.ok ? 'account' : 'site-key');
+      scheduleEventDrop(experiment_id, 'host');
+      return res.status(204).end();
     }
 
     // Origin/Referer only. A known host outside the list is dropped. An

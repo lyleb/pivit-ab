@@ -28,11 +28,17 @@ function percentText(rate) {
   return Number.isInteger(rounded) ? String(rounded) : String(rounded);
 }
 
-async function loadExperiment(experimentId, query = db.query.bind(db)) {
+async function loadExperiment(experimentId, query = db.query.bind(db), accountId) {
+  const params = [experimentId];
+  let accountSql = '';
+  if (accountId) {
+    params.push(accountId);
+    accountSql = ` AND account_id = $${params.length}`;
+  }
   const { rows } = await query(
-    `SELECT id, name, status, url_match, allowed_hosts, goals, plan, started_at, peeked_at, created_at, client_id
-     FROM experiments WHERE id = $1`,
-    [experimentId]
+    `SELECT id, name, status, url_match, allowed_hosts, goals, plan, started_at, peeked_at, created_at, client_id, account_id, site_id
+     FROM experiments WHERE id = $1${accountSql}`,
+    params
   );
   return rows[0] || null;
 }
@@ -86,14 +92,20 @@ async function rateFor(experimentIds, goalId, query) {
 
 async function relatedIds(experiment, query) {
   const hosts = Array.isArray(experiment.allowed_hosts) ? experiment.allowed_hosts : [];
+  const params = [experiment.id, experiment.url_match || '', hosts];
+  let accountSql = '';
+  if (experiment.account_id) {
+    params.push(experiment.account_id);
+    accountSql = ` AND account_id = $${params.length}`;
+  }
   const { rows } = await query(
     `SELECT id FROM experiments
      WHERE id <> $1
        AND (
          ($2 <> '' AND url_match = $2)
          OR (cardinality($3::text[]) > 0 AND allowed_hosts && $3::text[])
-       )`,
-    [experiment.id, experiment.url_match || '', hosts]
+       )${accountSql}`,
+    params
   );
   return rows.map((row) => row.id);
 }
@@ -139,13 +151,19 @@ async function weeklyFromHostHits(experiment, query) {
     if (fromUrl) hosts.add(fromUrl);
   }
   if (hosts.size === 0) return null;
+  const params = [TRAFFIC_DAYS];
+  let accountSql = '';
+  if (experiment.account_id) {
+    params.push(experiment.account_id);
+    accountSql = ` AND account_id = $${params.length}`;
+  }
   const { rows } = await query(
     `SELECT referrer_origin, SUM(hit_count)::int AS hits
      FROM host_hits
      WHERE day >= (CURRENT_DATE - $1::int)
-       AND referrer_origin <> ''
+       AND referrer_origin <> ''${accountSql}
      GROUP BY referrer_origin`,
-    [TRAFFIC_DAYS]
+    params
   );
   let hits = 0;
   rows.forEach((row) => {
@@ -160,8 +178,8 @@ async function weeklyFromHostHits(experiment, query) {
   };
 }
 
-async function suggest(experimentId, query = db.query.bind(db)) {
-  const experiment = await loadExperiment(experimentId, query);
+async function suggest(experimentId, query = db.query.bind(db), accountId) {
+  const experiment = await loadExperiment(experimentId, query, accountId);
   if (!experiment) return null;
   const goalId = primaryGoalId(experiment.goals);
   const related = await relatedIds(experiment, query);
@@ -200,8 +218,8 @@ function srmFor(variants) {
   })));
 }
 
-async function loadReading(experimentId, { includeTest = false, now = new Date(), query = db.query.bind(db) } = {}) {
-  const experiment = await loadExperiment(experimentId, query);
+async function loadReading(experimentId, { includeTest = false, now = new Date(), query = db.query.bind(db), accountId } = {}) {
+  const experiment = await loadExperiment(experimentId, query, accountId);
   if (!experiment) return null;
   const variants = await visitorRows(experimentId, includeTest, query);
   const progress = planProgress({
@@ -242,14 +260,14 @@ function readingPayload(loaded) {
   };
 }
 
-async function outcomeGate(experimentId, includeTest) {
-  const loaded = await loadReading(experimentId, { includeTest: !!includeTest });
+async function outcomeGate(experimentId, includeTest, accountId) {
+  const loaded = await loadReading(experimentId, { includeTest: !!includeTest, accountId });
   const reading = loaded ? readingPayload(loaded) : null;
   return { loaded, reading, visible: !reading || reading.outcome_visible };
 }
 
-async function savePlan(experimentId, input, query = db.query.bind(db)) {
-  const experiment = await loadExperiment(experimentId, query);
+async function savePlan(experimentId, input, query = db.query.bind(db), accountId) {
+  const experiment = await loadExperiment(experimentId, query, accountId);
   if (!experiment) return { ok: false, status: 404, error: 'no experiment found with that id' };
   const variants = await visitorRows(experimentId, false, query);
   const enabled = variants.filter((variant) => variant.enabled);
@@ -259,27 +277,31 @@ async function savePlan(experimentId, input, query = db.query.bind(db)) {
   }));
   if (!built.ok) return { ok: false, status: 400, error: built.error };
   const { rows } = await query(
-    `UPDATE experiments SET plan = $2::jsonb WHERE id = $1 RETURNING plan`,
-    [experimentId, JSON.stringify(built.plan)]
+    `UPDATE experiments SET plan = $2::jsonb
+     WHERE id = $1 AND ($3::uuid IS NULL OR account_id = $3)
+     RETURNING plan`,
+    [experimentId, JSON.stringify(built.plan), accountId || null]
   );
+  if (rows.length === 0) return { ok: false, status: 404, error: 'no experiment found with that id' };
   return { ok: true, plan: rows[0].plan };
 }
 
 async function ensurePlanOnStart(experiment, query = db.query.bind(db)) {
   if (experiment.plan && experiment.plan.visitors_per_variant) return experiment.plan;
-  const suggestion = await suggest(experiment.id, query);
+  const suggestion = await suggest(experiment.id, query, experiment.account_id);
   const variants = suggestion ? suggestion.variants : [];
   const built = buildPlan(autoPlanInput(suggestion, variants));
   if (!built.ok) return null;
   await query(
-    `UPDATE experiments SET plan = $2::jsonb WHERE id = $1 AND plan IS NULL`,
-    [experiment.id, JSON.stringify(built.plan)]
+    `UPDATE experiments SET plan = $2::jsonb
+     WHERE id = $1 AND plan IS NULL AND ($3::uuid IS NULL OR account_id = $3)`,
+    [experiment.id, JSON.stringify(built.plan), experiment.account_id || null]
   );
   return built.plan;
 }
 
-async function recordReveal({ experimentId, actor, actorIp, query = db.query.bind(db) }) {
-  const experiment = await loadExperiment(experimentId, query);
+async function recordReveal({ experimentId, actor, actorIp, query = db.query.bind(db), accountId } = {}) {
+  const experiment = await loadExperiment(experimentId, query, accountId);
   if (!experiment) return { ok: false, status: 404, error: 'no experiment found with that id' };
   if (!experiment.plan) {
     return { ok: false, status: 400, error: 'Set a plan before revealing early. There is nothing to peek yet.' };
@@ -290,10 +312,14 @@ async function recordReveal({ experimentId, actor, actorIp, query = db.query.bin
     const updated = await client.query(
       `UPDATE experiments
        SET peeked_at = COALESCE(peeked_at, now())
-       WHERE id = $1
+       WHERE id = $1 AND ($2::uuid IS NULL OR account_id = $2)
        RETURNING peeked_at`,
-      [experimentId]
+      [experimentId, accountId || null]
     );
+    if (updated.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { ok: false, status: 404, error: 'no experiment found with that id' };
+    }
     const audit = await client.query(
       `INSERT INTO test_traffic_audit
          (experiment_id, action, actor, actor_ip, criteria, visitor_count, event_count, variant_counts)
