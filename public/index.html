@@ -98,6 +98,8 @@
   .verdict-card.inconclusive, .verdict-card.data_problem { border-color: #8a6a2f; }
   .verdict-card h3 { margin: 4px 0 8px; font-size: 1.45em; }
   .peek-banner { border: 1px solid #8a6a2f; background: var(--warn-bg); color: var(--warn); border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; }
+  .test-data-banner { border: 1px solid #1d6b52; background: rgba(2, 222, 181, 0.08); color: var(--ink); border-radius: 10px; padding: 12px 14px; margin: 12px 0; }
+  .badge.every-page { background: var(--warn-bg); color: var(--warn); }
   .steps { display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 8px 0 16px; }
   .step-pill {
     display: flex; align-items: center; gap: 8px; background: transparent; border: none;
@@ -364,15 +366,22 @@
         <div id="wizard-step-1" class="wizard-step">
           <label for="wizard-name">Experiment name</label>
           <input id="wizard-name" placeholder="Homepage CTA copy">
-          <label for="wizard-url">Page URL match</label>
+          <label for="wizard-url">Page URL</label>
           <input id="wizard-url" placeholder="https://example.com/about or /about" spellcheck="false">
-          <p class="hint">The page address must contain this text. A path such as /about, or the full URL, both work.</p>
+          <label for="wizard-match">Match</label>
+          <select id="wizard-match">
+            <option value="contains">Contains</option>
+            <option value="exact">Exact</option>
+            <option value="starts_with">Starts with</option>
+            <option value="regex">Regular expression</option>
+          </select>
+          <p class="hint" id="wizard-match-hint">Contains. The test runs on any page whose address includes this text.</p>
           <label for="wizard-hosts">Site domain(s)</label>
           <textarea id="wizard-hosts" class="hosts" placeholder="example.com" spellcheck="false"></textarea>
           <p class="hint">Sites this experiment may run on. Separate extra domains with a comma or a new line. www and the bare domain count as the same.</p>
           <label for="wizard-client">Client (optional)</label>
           <select id="wizard-client"><option value="">None — internal only</option></select>
-          <p id="wizard-lock-hint" class="hint" hidden>Name and URL are fixed once the draft exists. Client and site domains can still be changed.</p>
+          <p id="wizard-lock-hint" class="hint" hidden>Name and URL are fixed once the draft exists. Match, client and site domains can still be changed. Match can also be changed later in Settings.</p>
         </div>
 
         <div id="wizard-step-2" class="wizard-step" hidden>
@@ -574,6 +583,8 @@ const wizard = {
   expId: null,
   name: '',
   url: '',
+  match: 'contains',
+  matchTouched: false,
   clientId: '',
   pageUrl: '',
   hosts: '',
@@ -1160,7 +1171,7 @@ async function loadExperimentList() {
     return `<tr>
       <td class="card-title" data-label="Name"><button type="button" class="name-btn" data-open="${exp.id}">${UI.escapeHtml(exp.name)}</button></td>
       <td class="card-status" data-label="Status"><span class="badge ${STATUS_CLASS[exp.status] || 'paused'}">${UI.escapeHtml(exp.status)}</span></td>
-      <td class="mono" data-label="URL match" title="${UI.escapeHtml(exp.url_match || '')}">${UI.escapeHtml(UI.shortUrl(exp.url_match))}${noDomainBadge(exp)}</td>
+      <td class="mono" data-label="URL match" title="${UI.escapeHtml(exp.url_match || '')}">${UI.escapeHtml(UI.shortUrl(exp.url_match))}${matchBadge(exp)}${noDomainBadge(exp)}</td>
       <td data-label="Client">${UI.escapeHtml(client)}</td>
       <td data-label="Variants">${exp.variant_count}</td>
       <td class="hint" data-label="Signal" data-signal-for="${exp.id}">${exp.status === 'draft' ? 'No data yet' : '…'}</td>
@@ -1185,6 +1196,66 @@ document.getElementById('exp-list-body').addEventListener('click', (e) => {
   if (!btn) return;
   go(`#experiment/${btn.dataset.open}/overview`);
 });
+
+async function exportTestTrafficCsv(expId) {
+  const res = await fetch(`/api/results/${expId}/export?test_only=1`, { headers: authHeaders() });
+  if (res.status === 401) { window.location.href = '/login.html'; return; }
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try { const data = await res.json(); message = data.detail ? `${data.error} — ${data.detail}` : data.error; } catch (e) {}
+    alert(`Export failed: ${message}`);
+    return;
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `experiment-${expId}-test-traffic.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function renderTestTrafficResults(data) {
+  const rows = (data && data.results) || [];
+  const visitors = rows.reduce((sum, row) => sum + Number(row.visitors || 0), 0);
+  if (!visitors) {
+    return '<p class="hint">No test traffic yet. A fake-traffic run shows its visitors and conversions here, without revealing real visitors.</p>';
+  }
+  const body = rows.map((row) => `<tr>
+    <td>${UI.escapeHtml(row.variant_name)}</td>
+    <td class="num">${row.visitors}</td>
+    <td class="num">${row.conversions}</td>
+    <td class="num">${row.conversion_events != null ? row.conversion_events : ''}</td>
+    <td class="num">${row.conversion_rate}%</td>
+  </tr>`).join('');
+  const goals = (data.goals || []).length > 1
+    ? (data.goals || []).map((goal) => {
+      const goalRows = (goal.variants || []).map((row) => `<tr><td>${UI.escapeHtml(row.variant_name)}</td><td class="num">${row.conversions}</td><td class="num">${row.conversion_events}</td><td class="num">${row.conversion_rate}%</td></tr>`).join('');
+      return `<h4 style="margin-top:14px;">${UI.escapeHtml(goal.label || goal.key)}</h4>
+        <div class="table-scroll"><table><thead><tr><th>Variant</th><th class="num">Conversions</th><th class="num">Conversion events</th><th class="num">Rate</th></tr></thead><tbody>${goalRows}</tbody></table></div>`;
+    }).join('')
+    : '';
+  return `<div class="table-scroll" tabindex="0" role="region" aria-label="Test traffic results (scrolls sideways)">
+    <table>
+      <thead><tr><th>Variant</th><th class="num">Visitors</th><th class="num">Conversions</th><th class="num">Conversion events</th><th class="num">Rate</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+  </div>${goals}`;
+}
+
+async function loadTestTrafficResults(expId) {
+  const mount = document.getElementById('test-results-body');
+  if (!mount) return;
+  const result = await callApi(`/api/results/${expId}/test-traffic`, { headers: authHeaders() });
+  if (!currentDetail || currentDetail.id !== expId || !document.getElementById('test-results-body')) return;
+  if (!result.ok) {
+    mount.innerHTML = '<p class="error-msg">Could not load test traffic results.</p>';
+    return;
+  }
+  mount.innerHTML = renderTestTrafficResults(result.data);
+}
 
 async function exportResultsCsv(expId) {
   const res = await fetch(withTestQuery(`/api/results/${expId}/export`), { headers: authHeaders() });
@@ -1301,6 +1372,7 @@ function renderDetail() {
         <div class="meta-line">
           <span class="badge ${STATUS_CLASS[exp.status] || 'paused'}">${UI.escapeHtml(exp.status)}</span>
           <span class="mono">${UI.escapeHtml(exp.url_match || '—')}</span>
+          ${matchBadge(exp)}
           ${noDomainBadge(exp)}
           <span>Client · ${UI.escapeHtml(client)}</span>
           <span>${variants.length} variant${variants.length === 1 ? '' : 's'}</span>
@@ -1375,6 +1447,14 @@ function renderDetail() {
       <div class="card" id="test-traffic-card">
         <h2>Test traffic</h2>
         <p class="hint" style="margin-top:0;">Test traffic is left out of the table, the chart, the trend and the CSV. Include test traffic puts it back. Remove hides it until you restore it. Nothing here is deleted.</p>
+        <section id="test-results-panel" aria-labelledby="test-results-title">
+          <h3 id="test-results-title">Test traffic results</h3>
+          <div class="test-data-banner"><strong>Test data only.</strong> Real visitors are not shown. Opening this does not count as an early look, and it is not the verdict.</div>
+          <div id="test-results-body"><p class="hint">Loading test traffic…</p></div>
+          <div class="inline-actions" style="margin-top:12px;">
+            <button type="button" class="btn-ghost" data-action="export-test">Export test traffic CSV</button>
+          </div>
+        </section>
         <label class="test-toggle" for="include-test-traffic">
           <input type="checkbox" id="include-test-traffic"${includeTestTraffic ? ' checked' : ''}>
           Include test traffic
@@ -1456,6 +1536,13 @@ function renderDetail() {
     <div data-tab-panel="settings" hidden>
       <div class="card" style="max-width:640px;">
         <div id="settings-planner"></div>
+        <label for="settings-url">Page URL</label>
+        <input id="settings-url" class="mono" readonly value="${UI.escapeHtml(exp.url_match || '')}">
+        <label for="settings-match">Match</label>
+        <select id="settings-match">
+          ${['contains', 'exact', 'starts_with', 'regex'].map((type) => `<option value="${type}"${(exp.url_match_type || 'contains') === type ? ' selected' : ''}>${UI.escapeHtml(window.PivitUrl.pageMatchLabel(type))}</option>`).join('')}
+        </select>
+        <p class="hint" id="settings-match-hint"></p>
         <label for="settings-hosts">Site domain(s)</label>
         <textarea id="settings-hosts" class="hosts" spellcheck="false" placeholder="example.com">${UI.escapeHtml((exp.allowed_hosts || []).join('\n'))}</textarea>
         <p class="hint">The experiment only runs on these sites. www and the bare domain are the same. Other subdomains must be listed.</p>
@@ -1481,6 +1568,7 @@ function renderDetail() {
 
   fillClientSelect(document.getElementById('settings-client'), 'None — internal only', exp.client_id || '');
   document.getElementById('settings-status').value = exp.status;
+  refreshSettingsMatchHint();
   loadSeenHosts(exp.id);
   renderVariantRows();
   renderGoalBlocks();
@@ -1940,6 +2028,10 @@ document.getElementById('page-detail').addEventListener('click', async (e) => {
     exportResultsCsv(currentDetail.id);
     return;
   }
+  if (action === 'export-test') {
+    exportTestTrafficCsv(currentDetail.id);
+    return;
+  }
   if (action === 'reveal-early') {
     openRevealModal();
     return;
@@ -1993,6 +2085,7 @@ document.getElementById('page-detail').addEventListener('click', async (e) => {
 });
 
 document.getElementById('page-detail').addEventListener('change', (e) => {
+  if (e.target && e.target.id === 'settings-match') refreshSettingsMatchHint();
   if (!e.target.classList.contains('g-type')) return;
   const draft = e.target.closest('[data-goal-draft]');
   if (!draft) return;
@@ -2005,6 +2098,23 @@ function noDomainBadge(exp) {
   const hosts = exp && exp.allowed_hosts;
   if (hosts && hosts.length) return '';
   return '<span class="badge no-domain">No domain</span>';
+}
+
+function matchBadge(exp) {
+  if (!window.PivitUrl) return '';
+  const type = (exp && exp.url_match_type) || 'contains';
+  const label = PivitUrl.pageMatchLabel(type);
+  if (type === 'contains' && PivitUrl.isSiteRoot(exp && exp.url_match)) {
+    return ` <span class="badge every-page" title="${UI.escapeHtml(PivitUrl.pageMatchHint(type, exp.url_match))}">Every page</span>`;
+  }
+  return ` <span class="hint">${UI.escapeHtml(label)}</span>`;
+}
+
+function refreshSettingsMatchHint() {
+  const hint = document.getElementById('settings-match-hint');
+  const select = document.getElementById('settings-match');
+  if (!hint || !select || !currentDetail || !window.PivitUrl) return;
+  hint.textContent = PivitUrl.pageMatchHint(select.value, currentDetail.url_match);
 }
 
 async function loadSeenHosts(experimentId) {
@@ -2027,6 +2137,14 @@ async function saveDetailSettings() {
   const hostsField = document.getElementById('settings-hosts');
   const clientId = document.getElementById('settings-client').value || null;
   const status = document.getElementById('settings-status').value;
+  const matchField = document.getElementById('settings-match');
+  const matchResult = await callApi(`/api/experiments/${currentDetail.id}/url-match`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ url_match_type: matchField ? matchField.value : 'contains' }),
+  });
+  if (!matchResult.ok) { msg.className = 'error-msg'; msg.textContent = matchResult.message; return; }
+  currentDetail.url_match_type = matchResult.data.url_match_type;
   const hostsResult = await callApi(`/api/experiments/${currentDetail.id}/hosts`, {
     method: 'PATCH',
     headers: authHeaders(),
@@ -2427,6 +2545,7 @@ async function loadResults() {
   const expId = currentDetail.id;
   const status = currentDetail.status;
   loadTestAudit(expId);
+  loadTestTrafficResults(expId);
   if (status === 'draft') {
     showResultsGate('Not running — Bayesian and conversion rates stay hidden until you collect traffic. Install the snippet, then start.');
     return;
@@ -2810,6 +2929,8 @@ function resetWizard() {
   wizard.expId = null;
   wizard.name = '';
   wizard.url = '';
+  wizard.match = 'contains';
+  wizard.matchTouched = false;
   wizard.clientId = '';
   wizard.pageUrl = '';
   wizard.hosts = '';
@@ -2834,9 +2955,21 @@ function wizardMsg(text, ok) {
 function readWizardBasics() {
   wizard.name = document.getElementById('wizard-name').value.trim();
   wizard.url = document.getElementById('wizard-url').value.trim();
+  const matchEl = document.getElementById('wizard-match');
+  if (matchEl) wizard.match = matchEl.value || 'contains';
   wizard.hosts = document.getElementById('wizard-hosts').value.trim();
   wizard.clientId = document.getElementById('wizard-client').value;
   saveWizard();
+}
+
+function syncWizardMatch(fromUser) {
+  if (!window.PivitUrl) return;
+  if (fromUser) wizard.matchTouched = true;
+  else if (!wizard.matchTouched) wizard.match = PivitUrl.defaultPageMatch(wizard.url);
+  const matchEl = document.getElementById('wizard-match');
+  if (matchEl) matchEl.value = wizard.match || 'contains';
+  const hint = document.getElementById('wizard-match-hint');
+  if (hint) hint.textContent = PivitUrl.pageMatchHint(wizard.match || 'contains', wizard.url);
 }
 
 function hostFromPageUrl(value) {
@@ -2884,6 +3017,7 @@ async function renderWizard() {
 
   document.getElementById('wizard-name').value = wizard.name;
   document.getElementById('wizard-url').value = wizard.url;
+  syncWizardMatch(false);
   if (!wizard.hostsEdited) wizard.hosts = suggestedSiteDomains();
   document.getElementById('wizard-hosts').value = wizard.hosts || '';
   fillClientSelect(document.getElementById('wizard-client'), 'None — internal only', wizard.clientId || '');
@@ -2986,6 +3120,7 @@ function rememberSavedHosts(data) {
 }
 
 async function persistWizardBasics() {
+  if (!wizard.matchTouched) syncWizardMatch(false);
   readWizardBasics();
   if (!wizard.name || !wizard.url) { wizardMsg('Add a name and a URL match.'); return false; }
   if (!wizard.hosts) { wizardMsg('Add at least one site domain.'); return false; }
@@ -2995,6 +3130,7 @@ async function persistWizardBasics() {
       body: JSON.stringify({
         name: wizard.name,
         url_match: wizard.url,
+        url_match_type: wizard.match || (window.PivitUrl ? PivitUrl.defaultPageMatch(wizard.url) : 'contains'),
         client_id: wizard.clientId || null,
         allowed_hosts: wizard.hosts,
       }),
@@ -3008,10 +3144,17 @@ async function persistWizardBasics() {
       { id: null, name: 'variant-b', split: 50 },
     ];
     if (/^https?:\/\//i.test(wizard.url)) wizard.pageUrl = wizard.url;
+    if (result.data.url_match_type) wizard.match = result.data.url_match_type;
     saveWizard();
     loadExperimentList();
     return true;
   }
+  const matchResult = await callApi(`/api/experiments/${wizard.expId}/url-match`, {
+    method: 'PATCH', headers: authHeaders(),
+    body: JSON.stringify({ url_match_type: wizard.match || 'contains' }),
+  });
+  if (!matchResult.ok) { wizardMsg(matchResult.message); return false; }
+  if (matchResult.data.url_match_type) wizard.match = matchResult.data.url_match_type;
   const result = await callApi(`/api/experiments/${wizard.expId}/client`, {
     method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ client_id: wizard.clientId || null }),
   });
@@ -3100,7 +3243,9 @@ function renderWizardSummary() {
   const client = clientNameById(wizard.clientId) || 'None';
   document.getElementById('wizard-summary').innerHTML = `
     <dt>Name</dt><dd>${UI.escapeHtml(wizard.name)}</dd>
-    <dt>URL match</dt><dd class="mono">${UI.escapeHtml(wizard.url)}</dd>
+    <dt>Page URL</dt><dd class="mono">${UI.escapeHtml(wizard.url)}</dd>
+    <dt>Match</dt><dd>${UI.escapeHtml(window.PivitUrl ? PivitUrl.pageMatchLabel(wizard.match || 'contains') : (wizard.match || 'Contains'))}</dd>
+    <dt>Where it runs</dt><dd>${UI.escapeHtml(window.PivitUrl ? PivitUrl.pageMatchHint(wizard.match || 'contains', wizard.url) : '')}</dd>
     <dt>Site domain(s)</dt><dd class="mono">${UI.escapeHtml(wizard.hosts || '—')}</dd>
     <dt>Client</dt><dd>${UI.escapeHtml(client)}</dd>
     <dt>Variants</dt><dd>${UI.escapeHtml(variants)}</dd>
@@ -3198,7 +3343,13 @@ async function wizardAdvance() {
 
 document.getElementById('wizard-url').addEventListener('input', () => {
   wizard.url = document.getElementById('wizard-url').value.trim();
+  syncWizardMatch(false);
   applyHostSuggestion();
+  saveWizard();
+});
+document.getElementById('wizard-match').addEventListener('change', () => {
+  wizard.match = document.getElementById('wizard-match').value;
+  syncWizardMatch(true);
   saveWizard();
 });
 document.getElementById('wizard-client').addEventListener('change', () => {

@@ -196,6 +196,15 @@ assert.ok(adminHtml.includes('id="include-test-traffic"'));
 assert.ok(adminHtml.includes('id="test-traffic-modal"'));
 assert.ok(adminHtml.includes('id="test-audit-table"'));
 assert.ok(adminHtml.includes('Remove test traffic'));
+assert.ok(adminHtml.includes('Test traffic results'));
+assert.ok(adminHtml.includes('id="test-results-panel"'));
+assert.ok(adminHtml.includes('Export test traffic CSV'));
+assert.ok(adminHtml.includes('does not count as an early look'));
+assert.ok(!clientHtml.includes('Test traffic results'));
+assert.ok(!clientHtml.includes('test_only'));
+assert.ok(!clientRoute.includes('test_only'));
+assert.ok(schema.includes("url_match_type TEXT NOT NULL DEFAULT 'contains'"));
+assert.ok(!/UPDATE\s+experiments[\s\S]{0,400}url_match_type\s*=\s*'exact'/i.test(schema));
 
 const serverSrc = fs.readFileSync(path.join(__dirname, '../src/server.js'), 'utf8');
 assert.ok(serverSrc.includes("res.json({ ok: true })"));

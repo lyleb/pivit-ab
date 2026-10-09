@@ -201,6 +201,14 @@ CREATE TABLE IF NOT EXISTS test_traffic_audit (
 CREATE INDEX IF NOT EXISTS idx_test_traffic_audit_experiment
   ON test_traffic_audit (experiment_id, created_at DESC);
 
+-- How the page URL is compared. contains is the historical behaviour
+-- (case-insensitive substring, the same SQL match the snippet already used).
+-- The default fills existing rows with contains and does not rewrite them:
+-- a live homepage test such as Home - Winter Sale keeps running on every
+-- page until an owner chooses Exact in Settings. New tests whose page URL
+-- is a site root or homepage are stored as exact by the create route.
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS url_match_type TEXT NOT NULL DEFAULT 'contains';
+
 -- Fixed-horizon plan. Null means the owner has not adopted one. Existing
 -- running tests stay without a plan until someone saves one. started_at is
 -- the first time the test was set to running (backfilled from the earliest
