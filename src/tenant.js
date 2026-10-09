@@ -50,26 +50,69 @@ async function legacyAccount() {
   return cachedLegacy;
 }
 
+async function sessionActor(req) {
+  const session = (req && req.session) || {};
+  if (session.userId) {
+    const { rows } = await db.query(
+      `SELECT id, email, is_superadmin FROM users WHERE id = $1`,
+      [session.userId]
+    );
+    return rows[0] || null;
+  }
+  if (session.role === 'owner' && !session.accountId) {
+    const legacy = await legacyAccount();
+    if (!legacy || !legacy.user_id) return null;
+    const { rows } = await db.query(
+      `SELECT id, email, is_superadmin FROM users WHERE id = $1`,
+      [legacy.user_id]
+    );
+    return rows[0] || null;
+  }
+  return null;
+}
+
+function accountShape(row, extra) {
+  return {
+    id: row.id,
+    name: row.name,
+    legacy: row.legacy === true,
+    role: 'owner',
+    userId: extra.userId || null,
+    superadmin: extra.superadmin === true,
+    viewAs: extra.viewAs === true,
+    readOnly: extra.readOnly === true,
+  };
+}
+
 async function resolveSessionAccount(req) {
   const session = (req && req.session) || {};
   if (session.role === 'owner') {
+    const actor = await sessionActor(req);
+    if (session.viewAsAccountId && actor && actor.is_superadmin === true) {
+      const { rows } = await db.query(
+        `SELECT id, name, legacy FROM accounts WHERE id = $1`,
+        [session.viewAsAccountId]
+      );
+      if (!rows[0]) return null;
+      return accountShape(rows[0], { userId: actor.id, superadmin: true, viewAs: true, readOnly: true });
+    }
     if (session.accountId) {
       const { rows } = await db.query(
         `SELECT id, name, legacy FROM accounts WHERE id = $1`,
         [session.accountId]
       );
       if (!rows[0]) return null;
-      return {
-        id: rows[0].id,
-        name: rows[0].name,
-        legacy: rows[0].legacy === true,
-        role: 'owner',
+      return accountShape(rows[0], {
         userId: session.userId || null,
-      };
+        superadmin: !!(actor && actor.is_superadmin),
+      });
     }
     const legacy = await legacyAccount();
     if (!legacy) return null;
-    return { id: legacy.id, name: legacy.name, legacy: true, role: 'owner', userId: legacy.user_id || null };
+    return accountShape(
+      { id: legacy.id, name: legacy.name, legacy: true },
+      { userId: legacy.user_id || null, superadmin: !!(actor && actor.is_superadmin) }
+    );
   }
   if (session.role === 'client' && session.clientId) {
     const { rows } = await db.query(
@@ -190,6 +233,7 @@ module.exports = {
   clearLegacyCache,
   normaliseSiteKey,
   legacyAccount,
+  sessionActor,
   resolveSessionAccount,
   ownedExperiment,
   snippetSiteKey,

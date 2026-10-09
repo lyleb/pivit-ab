@@ -12,6 +12,7 @@ Account #1 is named **Heclr**. The superadmin user is **info@heclr.com**, with `
 |---|---|
 | 000 | `src/db/schema.sql`, the baseline that already matches the live database. Safe to re-run. It does not delete `events` or `host_hits`. |
 | 001 | `src/db/tenancy.js`. Creates accounts, users, memberships and sites, attaches existing rows to Heclr, then checks totals. |
+| 002 | `src/db/signup.js`. Invite codes, sign-in tokens, rate limits and the audit log. See [signup.md](signup.md). |
 
 On a database that has already been through 000 and 001, startup logs `Database schema is up to date.` and does nothing else. Running `npm run migrate` does the same thing.
 

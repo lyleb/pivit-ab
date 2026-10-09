@@ -5,6 +5,8 @@ const path = require('path');
 const db = require('./db');
 const { migrate } = require('./db/migrate');
 const sessionMiddleware = require('./session');
+const { sessionLifetime } = require('./session-lifetime');
+const { csrfMiddleware } = require('./csrf');
 
 const { hostScopingMode } = require('./host-scope');
 const { configuredAppOrigin, sendPublicConfig, canonicalHtmlMiddleware } = require('./app-origin');
@@ -22,6 +24,10 @@ const clientsRouter = require('./routes/clients');
 const clientRouter = require('./routes/client');
 const editorRouter = require('./routes/editor');
 const hostHitsRouter = require('./routes/host-hits');
+const invitesRouter = require('./routes/invites');
+const auditRouter = require('./routes/audit');
+const { setupRouter, sitesRouter } = require('./routes/setup');
+const webhooksRouter = require('./routes/webhooks');
 
 const app = express();
 // Railway (like most hosts) sits behind a reverse proxy. Without this, Express
@@ -46,6 +52,8 @@ app.use(hstsMiddleware());
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(sessionMiddleware);
+app.use(sessionLifetime);
+app.use(csrfMiddleware);
 // Count snippet and public API hits without delaying the response. /health
 // and /robots.txt are excluded inside the middleware. A counter failure is
 // logged and ignored.
@@ -74,6 +82,12 @@ app.use('/snippet', express.static(path.join(__dirname, '../snippet')));
 app.use(express.static(path.join(__dirname, '../public')));
 
 app.use('/api/auth', authRouter);
+app.use('/api/invites', invitesRouter);
+app.use('/api/audit', auditRouter);
+app.use('/api/setup', setupRouter);
+app.use('/api/sites', sitesRouter);
+app.use('/api/admin', auditRouter.adminRouter);
+app.use('/api/webhooks', webhooksRouter);
 app.use('/api/experiments', experimentsRouter);
 app.use('/api/event', eventsRouter);
 app.use('/api/results', resultsRouter);

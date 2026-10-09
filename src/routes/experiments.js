@@ -26,6 +26,7 @@ const {
   hostScopingMode,
 } = require('../host-scope');
 const { publicScope, ownedExperiment, placeOnSite } = require('../tenant');
+const { noteSnippetSeen } = require('../site-verify');
 const router = express.Router();
 
 function publicScopeSql(accountParam, siteParam) {
@@ -79,6 +80,7 @@ router.get('/', async (req, res) => {
   try {
     const scope = await publicScope(req.query.site);
     if (!scope.ok) return res.json({ experiments: [] });
+    await noteSnippetSeen(scope, req);
 
     const { rows: experiments } = await db.query(
       `SELECT id, name, url_match, allowed_hosts, goals FROM experiments
@@ -832,6 +834,17 @@ router.patch('/:id/status', async (req, res) => {
       const hosts = existing.allowed_hosts || [];
       if (hosts.length === 0) {
         return res.status(400).json({ error: 'Add at least one site domain in Settings before starting this experiment.' });
+      }
+      if (existing.site_id) {
+        const site = await db.query(
+          `SELECT verified_at FROM sites WHERE id = $1 AND account_id = $2`,
+          [existing.site_id, req.account.id]
+        );
+        if (site.rows[0] && !site.rows[0].verified_at) {
+          return res.status(400).json({
+            error: 'Add the snippet to your site before starting a test. We have not seen it load there yet.',
+          });
+        }
       }
       if (existing.status === 'draft') await ensurePlanOnStart(existing);
     }

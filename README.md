@@ -18,7 +18,7 @@ Basic A/B testing platform: snippet + API + results dashboard.
 1. Push this repo to GitHub
 2. Create a new Railway project → "Deploy from GitHub repo" → select this repo
 3. Add a Postgres database: in your Railway project, click "+ New" → "Database" → "Add PostgreSQL". Railway auto-connects it and injects `DATABASE_URL` into your app service.
-4. On your app service, set `NODE_ENV=production`, `ADMIN_API_KEY` (a generated secret — see step 3 in Local setup) and `SESSION_SECRET` (at least 32 characters, any character set — see `.env.example`) in the Variables tab. If `NODE_ENV=production` and `SESSION_SECRET` is missing or shorter than 32 characters, the process exits at startup and the site will not boot. Set it before deploying. Do not rotate an existing secret that is already long enough.
+4. On your app service, set `NODE_ENV=production`, `ADMIN_API_KEY` (a generated secret — see step 3 in Local setup) and `SESSION_SECRET` (at least 32 characters, any character set — see `.env.example`) in the Variables tab. If `NODE_ENV=production` and `SESSION_SECRET` is missing or shorter than 32 characters, the process exits at startup and the site will not boot. Set it before deploying. Do not rotate an existing secret that is already long enough. Sign-in email also needs `POSTMARK_SERVER_TOKEN`. The from address and reply-to have defaults. See [docs/signup.md](signup.md).
 5. Take a database backup before deploying a migration, and keep it off Railway. See [docs/backups.md](docs/backups.md). Deploy — missing database versions run on startup. If a version fails, that version rolls back and the process exits; redeploy the previous release. Do not rotate `SESSION_SECRET` or rename the `pivit.sid` cookie. Account #1 and the site key are described in [docs/tenancy.md](docs/tenancy.md).
 
 ## Search indexing
@@ -242,10 +242,11 @@ Creating a client or resetting their password no longer uses a browser `alert()`
 
 There's a real login screen now at `/login.html` (branded, matching the dashboard), backed by proper sessions instead of a key pasted into a field:
 
-- Your login password is your existing `ADMIN_API_KEY` value — no need to change it, its role just shifted from "header value" to "login password."
-- Sessions are signed cookies stored in Postgres (not memory), so logging in survives a Railway redeploy — you won't get logged out just because you shipped a change.
-- A new env var is required: `SESSION_SECRET` (see `.env.example`). It must be at least 32 characters. Any character set is accepted — it does not have to be hex or base64. When `NODE_ENV=production`, a missing or shorter secret aborts startup with a log line and the process does not boot. Outside production, a dev-only fallback is used and a warning is logged. Set the production value on the host before deploying, and do not rotate one that is already long enough.
-- 5 failed login attempts locks that IP out for 60 seconds — a basic brute-force throttle, not a full rate-limiter.
+- Customers sign in with an emailed link or a 6-digit code. There is no customer password. Sign-up is invite-only. See [docs/signup.md](signup.md).
+- Your emergency login password is still your existing `ADMIN_API_KEY` value. It stays available. Do not rotate it as part of turning on email sign-in.
+- Sessions are signed cookies stored in Postgres (not memory), so logging in survives a Railway redeploy — you won't get logged out just because you shipped a change. The cookie name is still `pivit.sid`.
+- A required env var: `SESSION_SECRET` (see `.env.example`). It must be at least 32 characters. Any character set is accepted — it does not have to be hex or base64. When `NODE_ENV=production`, a missing or shorter secret aborts startup with a log line and the process does not boot. Outside production, a dev-only fallback is used and a warning is logged. Set the production value on the host before deploying, and do not rotate one that is already long enough.
+- 5 failed password attempts locks that IP out for 60 seconds. The lockout is stored in Postgres, so a redeploy does not clear it.
 - Every admin route now requires an active owner session; the old `x-api-key` header no longer does anything.
 
 ## Client login

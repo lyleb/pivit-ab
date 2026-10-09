@@ -45,6 +45,11 @@ function appFor(session) {
     next();
   });
   app.use('/api/auth', require('../src/routes/auth'));
+  app.use('/api/invites', require('../src/routes/invites'));
+  app.use('/api/audit', require('../src/routes/audit'));
+  app.use('/api/setup', require('../src/routes/setup').setupRouter);
+  app.use('/api/sites', require('../src/routes/setup').sitesRouter);
+  app.use('/api/admin', require('../src/routes/audit').adminRouter);
   app.use('/api/experiments', require('../src/routes/experiments'));
   app.use('/api/event', require('../src/routes/events'));
   app.use('/api/results', require('../src/routes/results'));
@@ -366,6 +371,57 @@ async function main() {
     const me = await request(loginServer, 'GET', '/api/auth/me');
     assert.strictEqual(me.json.role, 'owner');
     assert.strictEqual(me.json.snippet_site_key, aKey);
+
+    await db.query(
+      `INSERT INTO audit_log (account_id, action, actor_label, detail)
+       VALUES ($1, 'signup', 'a@example.com', '{}'::jsonb)`,
+      [aId]
+    );
+    const auditB = await request(serverB, 'GET', '/api/audit');
+    assert.strictEqual(auditB.status, 200);
+    assert.ok(!auditB.json.entries.some((entry) => entry.account_id === aId));
+    assert.ok(!auditB.text.includes(aKey));
+    const invitesB = await request(serverB, 'GET', '/api/invites');
+    assert.strictEqual(invitesB.status, 404);
+    const viewB = await request(serverB, 'POST', '/api/auth/view-as', { account_id: aId });
+    assert.strictEqual(viewB.status, 404);
+    const setupB = await request(serverB, 'GET', '/api/setup');
+    assert.strictEqual(setupB.status, 200);
+    assert.notStrictEqual(setupB.json.site.public_key, aKey);
+    const siteCount = await db.query(`SELECT COUNT(*)::int AS n FROM sites WHERE account_id = $1`, [aId]);
+    const addOnA = await request(serverB, 'POST', '/api/sites', { website: 'evil.example' });
+    assert.notStrictEqual(addOnA.status, 201);
+    const siteCountAfter = await db.query(`SELECT COUNT(*)::int AS n FROM sites WHERE account_id = $1`, [aId]);
+    assert.strictEqual(siteCountAfter.rows[0].n, siteCount.rows[0].n);
+
+    const superUser = await db.query(`SELECT id FROM users WHERE is_superadmin IS TRUE LIMIT 1`);
+    const viewSession = {
+      role: 'owner',
+      userId: superUser.rows[0].id,
+      accountId: aId,
+      superadmin: true,
+      save(cb) { cb(); },
+    };
+    const viewServer = await listen(appFor(viewSession));
+    servers.push(viewServer);
+    const invitesA = await request(viewServer, 'GET', '/api/invites');
+    assert.strictEqual(invitesA.status, 200);
+    const started = await request(viewServer, 'POST', '/api/auth/view-as', { account_id: bId });
+    assert.strictEqual(started.status, 200);
+    assert.strictEqual(started.json.view_as.id, bId);
+    const seen = await request(viewServer, 'GET', `/api/experiments/${bExp.id}`);
+    assert.strictEqual(seen.status, 200);
+    assert.strictEqual(seen.json.name, 'Account B');
+    const blocked = await request(viewServer, 'PATCH', `/api/experiments/${bExp.id}/status`, { status: 'paused' });
+    assert.strictEqual(blocked.status, 403);
+    const statusAfterView = await db.query(`SELECT status FROM experiments WHERE id = $1`, [bExp.id]);
+    assert.strictEqual(statusAfterView.rows[0].status, 'running');
+    const viewed = await db.query(
+      `SELECT account_id, action FROM audit_log WHERE action = 'view_as' ORDER BY id DESC LIMIT 1`
+    );
+    assert.strictEqual(viewed.rows[0].account_id, bId);
+    const hiddenInvite = await request(viewServer, 'GET', '/api/invites');
+    assert.strictEqual(hiddenInvite.status, 403);
 
     console.log('isolation db tests passed');
   } finally {

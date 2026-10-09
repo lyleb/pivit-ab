@@ -29,6 +29,8 @@ module.exports = session({
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production', // matches the pg SSL pattern — HTTPS-only cookie in production, plain http locally
     sameSite: 'lax', // sent on the dashboard's own same-site requests, but NOT on cross-site requests from client sites running the snippet — so a site running the tracking snippet can never piggyback the owner's session cookie
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days — long enough to not be constantly re-logging in, short enough to not be forever
+    // Sign-in replaces this. Customers get 30 days (renewed while active) and
+    // a superadmin session, including the emergency password, gets 12 hours.
+    maxAge: 7 * 24 * 60 * 60 * 1000,
   },
 });

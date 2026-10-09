@@ -1,6 +1,7 @@
 // Load, suggest and store an experiment plan. Never writes to events.
 
 const db = require('./db');
+const { recordAudit } = require('./audit');
 const { detectSRM } = require('./srm');
 const { normaliseHost } = require('./host-scope');
 const {
@@ -332,6 +333,21 @@ async function recordReveal({ experimentId, actor, actorIp, query = db.query.bin
         JSON.stringify({ kind: 'peek', warning: 'Looked before the planned sample.' }),
       ]
     );
+    await recordAudit(client, {
+      accountId: accountId || experiment.account_id,
+      actorLabel: actor || 'owner',
+      action: 'reveal',
+      targetType: 'experiment',
+      targetId: experimentId,
+      detail: {
+        criteria: { kind: 'peek', warning: 'Looked before the planned sample.' },
+        visitor_count: 0,
+        event_count: 0,
+        variant_counts: [],
+        source_audit_id: Number(audit.rows[0].id),
+      },
+      ip: actorIp,
+    });
     await client.query('COMMIT');
     return {
       ok: true,

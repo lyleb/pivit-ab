@@ -140,7 +140,7 @@ async function main() {
 
     delete process.env.PIVIT_TENANCY_FAULT;
     const applied = await migrate();
-    assert.deepStrictEqual(applied, ['001']);
+    assert.deepStrictEqual(applied, ['001', '002']);
     const after = await identity(db);
     assert.deepStrictEqual(after.totals, before.totals);
     assert.deepStrictEqual(after.experiments, before.experiments);
