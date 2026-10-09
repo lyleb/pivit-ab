@@ -126,7 +126,7 @@ const experimentsSrc = fs.readFileSync(path.join(__dirname, '../src/routes/exper
 assert.ok(experimentsSrc.includes("AND status = 'running'"));
 assert.ok(!experimentsSrc.includes('statusClause'));
 assert.ok(experimentsSrc.includes('authorisePreview'));
-assert.ok(experimentsSrc.includes('applyHostScope(previewRows, req)'));
+assert.ok(experimentsSrc.includes('applyHostScope(matchedPreview, req)'));
 assert.ok(experimentsSrc.includes('checkHost') || experimentsSrc.includes('applyHostScope'));
 assert.ok(experimentsSrc.includes('cacheControlForExperimentsQuery(req.query)'));
 assert.ok(experimentsSrc.includes('editUrl(page_url'));

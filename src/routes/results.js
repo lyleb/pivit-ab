@@ -31,17 +31,52 @@ function wantsTestTraffic(req) {
 // "returning" on any later day they come back. This deliberately does NOT count
 // a second pageview in the same sitting (e.g. a refresh) as "returning" — only
 // an actual later visit does. Test traffic follows the same rule as the table.
-function firstSeenCte() {
+function firstSeenCte(mode) {
   return `
   WITH first_seen AS (
     SELECT visitor_id, MIN(created_at)::date AS first_day
     FROM events
     WHERE experiment_id = $1 AND event_type = 'view'
-      AND ${visibleEventSql('', 2)}
+      AND ${visibleEventSql('', 2, mode)}
     GROUP BY visitor_id
   )
 `;
 }
+
+const TEST_ONLY_LABEL = 'Test traffic only. Real visitors are not included. This is not the verdict, and opening it does not count as an early look.';
+
+function wantsTestOnly(req) {
+  return flagIsOn(req.query && req.query.test_only);
+}
+
+// GET /api/results/:experimentId/test-traffic
+// Owner only. Full figures for test traffic, even while real results are
+// blind. Never mixes in real visitors, and does not set peeked_at.
+router.get('/:experimentId/test-traffic', async (req, res) => {
+  const { experimentId } = req.params;
+  try {
+    if (!(await assertOwned(req, res, experimentId))) return;
+    const options = { testOnly: true };
+    const [{ results, primaryKey }, breakdown] = await Promise.all([
+      getVariantResults(experimentId, undefined, options),
+      getGoalBreakdown(experimentId, options),
+    ]);
+    res.json({
+      experiment_id: experimentId,
+      test_only: true,
+      include_test: false,
+      blinded: false,
+      peeked: false,
+      label: TEST_ONLY_LABEL,
+      primary_goal: primaryKey,
+      results,
+      goals: breakdown.goals,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
 
 // GET /api/results/:experimentId?visitor_type=new|returning
 // conversions is unique converting visitors (rate cannot exceed 100%).
@@ -141,6 +176,30 @@ router.get('/:experimentId/export', async (req, res) => {
   const { experimentId } = req.params;
   try {
     if (!(await assertOwned(req, res, experimentId))) return;
+    // Test traffic only, including conversions, even while real results are
+    // blind. Real visitor rows are not in this file, and peeked_at is not set.
+    if (wantsTestOnly(req)) {
+      const { rows } = await db.query(
+        `${firstSeenCte('test')}
+         SELECT e.created_at, e.event_type, v.name AS variant_name, e.goal_id, e.visitor_id,
+           CASE WHEN e.created_at::date = fs.first_day THEN 'new' ELSE 'returning' END AS visitor_type
+         FROM events e
+         JOIN variants v ON v.id = e.variant_id
+         LEFT JOIN first_seen fs ON fs.visitor_id = e.visitor_id
+         WHERE e.experiment_id = $1 AND ${visibleEventSql('e', 2, 'test')}
+         ORDER BY e.created_at ASC`,
+        [experimentId, false]
+      );
+      const header = ['created_at', 'event_type', 'variant_name', 'goal_id', 'visitor_id', 'visitor_type', 'unique_conversion', 'traffic'];
+      const lines = [header.join(',')];
+      annotateUniqueConversions(rows).forEach((row) => {
+        lines.push(header.map((col) => (col === 'traffic' ? 'test' : csvField(row[col]))).join(','));
+      });
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="experiment-${experimentId}-test-traffic.csv"`);
+      res.send(lines.join('\n'));
+      return;
+    }
     const includeTest = wantsTestTraffic(req);
     const gate = await outcomeGate(experimentId, includeTest, req.account.id);
     if (!gate.visible) {
