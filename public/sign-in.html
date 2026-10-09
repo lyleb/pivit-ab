@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<link rel="canonical" href="https://pivitlab.com/sign-in.html">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/svg+xml" href="/assets/pivitlab-icon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<title>pivitlab — Sign in</title>
+<link rel="stylesheet" href="/assets/pivit.css?v=5">
+</head>
+<body class="auth-page">
+<div class="card auth-card">
+  <div class="brand">
+    <span class="brand-logo" role="img" aria-label="pivitlab"></span>
+    <h1>Sign in to pivitlab</h1>
+    <p class="hint">This link works once. Press the button to continue. Opening the link does not sign you in.</p>
+  </div>
+  <form id="magic-form">
+    <button id="sign-in-btn" type="submit">Sign in</button>
+  </form>
+  <p id="magic-error" class="error-msg" style="text-align:center;margin-top:12px;"></p>
+  <p class="hint" style="text-align:center;margin-top:16px;"><a href="/login.html">Email me a new link</a></p>
+</div>
+<script>
+const params = new URLSearchParams(location.search);
+const token = params.get('token') || '';
+const errorEl = document.getElementById('magic-error');
+const btn = document.getElementById('sign-in-btn');
+if (!token) {
+  btn.disabled = true;
+  errorEl.textContent = 'This page needs the link from your email.';
+}
+
+document.getElementById('magic-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!token) return;
+  errorEl.textContent = '';
+  btn.disabled = true;
+  btn.textContent = 'Signing in…';
+  try {
+    const res = await fetch('/api/auth/magic', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      errorEl.textContent = data.error || 'That sign-in link is not valid, or it has expired.';
+      btn.disabled = false;
+      btn.textContent = 'Sign in';
+      return;
+    }
+    location.href = '/index.html';
+  } catch (err) {
+    errorEl.textContent = "Couldn't reach pivitlab. Check your connection and try again.";
+    btn.disabled = false;
+    btn.textContent = 'Sign in';
+  }
+});
+</script>
+</body>
+</html>

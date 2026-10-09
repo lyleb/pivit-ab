@@ -24,6 +24,10 @@ const CANONICAL_PAGES = {
   '/index.html': { file: 'index.html', pathname: '/' },
   '/login.html': { file: 'login.html', pathname: '/login.html' },
   '/client.html': { file: 'client.html', pathname: '/client.html' },
+  '/signup.html': { file: 'signup.html', pathname: '/signup.html' },
+  '/check-email.html': { file: 'check-email.html', pathname: '/check-email.html' },
+  '/sign-in.html': { file: 'sign-in.html', pathname: '/sign-in.html' },
+  '/legal.html': { file: 'legal.html', pathname: '/legal.html' },
 };
 
 function normaliseAppOrigin(raw) {

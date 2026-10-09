@@ -15,6 +15,7 @@
 // (curl, the box tester) may send the header instead.
 
 const db = require('./db');
+const { recordAudit } = require('./audit');
 
 const TEST_VISITOR_PREFIX = 'v_pt';
 const MIN_PREFIX_LENGTH = 4;
@@ -248,6 +249,26 @@ async function applyTestTraffic({ experimentId, criteria, direction, actor, acto
         JSON.stringify(counts.variants),
       ]
     );
+    let scopedAccount = accountId;
+    if (!scopedAccount) {
+      const owner = await client.query(`SELECT account_id FROM experiments WHERE id = $1`, [experimentId]);
+      scopedAccount = owner.rows[0] ? owner.rows[0].account_id : null;
+    }
+    await recordAudit(client, {
+      accountId: scopedAccount,
+      actorLabel: actor || 'owner',
+      action: direction === 'restore' ? 'test_traffic_restore' : 'test_traffic_remove',
+      targetType: 'experiment',
+      targetId: experimentId,
+      detail: {
+        criteria: criteriaJson,
+        visitor_count: counts.visitors,
+        event_count: counts.events,
+        variant_counts: counts.variants,
+        source_audit_id: Number(audit.rows[0].id),
+      },
+      ip: actorIp,
+    });
     await client.query('COMMIT');
     return {
       ok: true,

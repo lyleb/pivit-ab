@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const db = require('./index');
 const { applyTenancy } = require('./tenancy');
+const { applySignup } = require('./signup');
 
 const LOCK_KEY = 814021;
 
@@ -18,6 +19,7 @@ async function applyBaseline(client) {
 const VERSIONS = [
   { version: '000', name: 'baseline', run: applyBaseline },
   { version: '001', name: 'tenancy', run: applyTenancy },
+  { version: '002', name: 'signup', run: applySignup },
 ];
 
 async function ensureMigrationsTable(queryable) {

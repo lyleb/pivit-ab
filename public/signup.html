@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<link rel="canonical" href="https://pivitlab.com/signup.html">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/svg+xml" href="/assets/pivitlab-icon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<title>pivitlab — Create an account</title>
+<link rel="stylesheet" href="/assets/pivit.css?v=5">
+</head>
+<body class="auth-page">
+<div class="card auth-card">
+  <div class="brand">
+    <span class="brand-logo" role="img" aria-label="pivitlab"></span>
+    <h1>Create your account</h1>
+    <p class="hint">Work email and your website. No password.</p>
+  </div>
+  <form id="signup-form">
+    <label for="email">Work email</label>
+    <input id="email" name="email" type="email" autocomplete="email" required placeholder="you@company.com">
+    <label for="website">Your website</label>
+    <input id="website" name="website" type="text" required placeholder="example.co.uk" spellcheck="false" autocapitalize="off">
+    <div id="code-field">
+      <label for="invite-code">Invite code</label>
+      <input id="invite-code" name="invite_code" type="text" autocomplete="off" spellcheck="false" placeholder="pivit-…">
+    </div>
+    <button id="signup-btn" type="submit">Continue</button>
+  </form>
+  <p class="hint legal-note">By continuing you agree to the <a href="/legal.html">terms and privacy notice</a>.</p>
+  <p id="signup-error" class="error-msg" style="text-align:center;margin-top:12px;"></p>
+  <p class="hint" style="text-align:center;margin-top:16px;"><a href="/login.html">Already have an account? Sign in</a></p>
+</div>
+<script>
+const params = new URLSearchParams(location.search);
+const preset = (params.get('code') || '').trim();
+if (preset) {
+  document.getElementById('invite-code').value = preset;
+  document.getElementById('code-field').hidden = true;
+}
+
+document.getElementById('signup-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const btn = document.getElementById('signup-btn');
+  const errorEl = document.getElementById('signup-error');
+  const email = document.getElementById('email').value.trim();
+  const website = document.getElementById('website').value.trim();
+  const inviteCode = document.getElementById('invite-code').value.trim();
+  errorEl.textContent = '';
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  try {
+    const res = await fetch('/api/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, website, invite_code: inviteCode }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      errorEl.textContent = data.error || 'Please try again.';
+      btn.disabled = false;
+      btn.textContent = 'Continue';
+      return;
+    }
+    try {
+      sessionStorage.setItem('pivit-signup', JSON.stringify({ email, website, invite_code: inviteCode }));
+    } catch (err) { /* private mode */ }
+    const next = new URL('/check-email.html', location.origin);
+    next.searchParams.set('email', email);
+    next.searchParams.set('purpose', 'signup');
+    location.href = next.pathname + next.search;
+  } catch (err) {
+    errorEl.textContent = "Couldn't reach pivitlab. Check your connection and try again.";
+    btn.disabled = false;
+    btn.textContent = 'Continue';
+  }
+});
+</script>
+</body>
+</html>

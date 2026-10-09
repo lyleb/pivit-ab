@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>pivitlab</title>
-<link rel="stylesheet" href="/assets/pivit.css?v=4">
+<link rel="stylesheet" href="/assets/pivit.css?v=5">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="/url-match.js"></script>
 <script src="/admin-ui.js"></script>
@@ -230,12 +230,62 @@
       <button type="button" class="nav-item" id="nav-page-status" data-go="#status">Start &amp; pause</button>
     </nav>
     <div class="sidebar-foot">
+      <button type="button" class="nav-item" id="logout-all">Sign out everywhere</button>
       <button type="button" class="nav-item" onclick="logout()">Log out</button>
     </div>
   </aside>
 
   <div class="main-area">
     <div id="page-home" class="page active">
+      <div id="emergency-banner" class="banner" hidden>You're signed in with the emergency password. Use email sign-in when you can.</div>
+      <div id="view-as-bar" class="banner" hidden>
+        <span id="view-as-text">View as another account. Looking is recorded, and changes are blocked.</span>
+        <span style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <select id="view-as-select" style="width:auto;min-width:180px;margin:0;"></select>
+          <button type="button" class="btn-ghost" id="view-as-go">View as</button>
+          <button type="button" class="btn-ghost" id="view-as-stop" hidden>Stop viewing</button>
+        </span>
+      </div>
+      <div id="unverified-banner" class="banner" hidden>We have not seen the snippet on your site yet. You can build a test, and you can start it once the check ticks.</div>
+      <div class="card" id="first-run" hidden>
+        <h2>Set up your site</h2>
+        <p class="hint" style="margin-top:0;">Three steps. The last one ticks itself when a page on your site loads the snippet.</p>
+        <ol class="setup-list">
+          <li id="step-site">
+            <span class="setup-num">1</span>
+            <div style="flex:1;min-width:0;">
+              <strong>Your site</strong>
+              <p class="hint" id="step-site-host" style="margin:4px 0 0;">Add the site you want to test.</p>
+              <form id="add-site-form" hidden style="margin-top:10px;">
+                <label for="add-site-website">Website</label>
+                <input id="add-site-website" placeholder="example.co.uk" spellcheck="false" autocapitalize="off">
+                <button type="submit" id="add-site-btn">Add site</button>
+                <p id="add-site-error" class="error-msg"></p>
+              </form>
+            </div>
+          </li>
+          <li id="step-snippet">
+            <span class="setup-num">2</span>
+            <div style="flex:1;min-width:0;">
+              <strong>Add the snippet</strong>
+              <p class="hint">Paste this before the closing body tag. It includes your site key.</p>
+              <pre id="first-run-snippet"></pre>
+              <button type="button" class="btn-ghost" id="first-run-copy">Copy snippet</button>
+              <span id="first-run-copied" class="hint"></span>
+              <p class="hint">In Google Tag Manager, add a Custom HTML tag with the same snippet and fire it on all pages.</p>
+            </div>
+          </li>
+          <li id="step-check">
+            <span class="setup-num">3</span>
+            <div>
+              <strong>Check it's working</strong>
+              <p class="hint" id="step-check-text" style="margin:4px 0 0;">Waiting for a page on your site to load the snippet.</p>
+            </div>
+          </li>
+        </ol>
+        <p id="first-run-conflict" class="banner" hidden>Another account has also added this domain. A test runs only where that account's snippet is installed.</p>
+        <button type="button" id="first-run-create" disabled>Create your first test</button>
+      </div>
       <div class="page-head">
         <div>
           <h1>Experiments</h1>
@@ -247,7 +297,7 @@
           <button type="button" id="new-experiment-btn" onclick="startNewExperiment()">New experiment</button>
         </div>
       </div>
-      <div class="card">
+      <div class="card" id="home-list-card">
         <p id="exp-list-msg" class="hint">Loading…</p>
         <table id="exp-list-table" class="table-cards">
           <thead>
@@ -268,6 +318,21 @@
           <table id="host-hits-table" style="display:none">
             <thead><tr><th>Day</th><th>API host</th><th>Customer site</th><th class="num">Hits</th></tr></thead>
             <tbody id="host-hits-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card" id="invite-card" hidden>
+        <h2>Invite codes</h2>
+        <p class="hint" style="margin-top:0;">Invite-only. A code works once, lasts 14 days, and is shown only when you create it.</p>
+        <label for="invite-note">Note (optional)</label>
+        <input id="invite-note" maxlength="200" placeholder="Who this is for">
+        <button type="button" id="invite-create" style="margin-top:10px;">Create invite code</button>
+        <p id="invite-fresh" class="ok-msg" hidden></p>
+        <p id="invite-error" class="error-msg"></p>
+        <div class="table-scroll" style="margin-top:12px;">
+          <table>
+            <thead><tr><th>Code</th><th>Note</th><th>Expires</th><th>Status</th><th></th></tr></thead>
+            <tbody id="invite-body"></tbody>
           </table>
         </div>
       </div>
@@ -541,6 +606,9 @@ async function callApi(path, options = {}) {
   return { ok: true, data };
 }
 
+let sessionMe = null;
+let firstRunTimer = null;
+
 async function requireOwnerSession() {
   try {
     const res = await fetch('/api/auth/me');
@@ -549,12 +617,161 @@ async function requireOwnerSession() {
       window.location.href = '/login.html';
       return false;
     }
+    sessionMe = data;
     if (typeof data.snippet_site_key === 'string') snippetSiteKey = data.snippet_site_key;
+    applySessionChrome();
     return true;
   } catch (err) {
     window.location.href = '/login.html';
     return false;
   }
+}
+
+function applySessionChrome() {
+  const me = sessionMe || {};
+  const emergency = document.getElementById('emergency-banner');
+  if (emergency) emergency.hidden = !me.emergency;
+  const viewing = !!(me.view_as && me.view_as.id);
+  const bar = document.getElementById('view-as-bar');
+  const invite = document.getElementById('invite-card');
+  if (bar) bar.hidden = !me.superadmin;
+  if (invite) invite.hidden = !(me.superadmin && !viewing);
+  const select = document.getElementById('view-as-select');
+  const go = document.getElementById('view-as-go');
+  const stop = document.getElementById('view-as-stop');
+  const text = document.getElementById('view-as-text');
+  if (viewing) {
+    if (text) text.textContent = `Viewing as ${me.view_as.name}. You can look. Changes are blocked, and this view is recorded.`;
+    if (select) select.hidden = true;
+    if (go) go.hidden = true;
+    if (stop) stop.hidden = false;
+  } else if (me.superadmin) {
+    if (text) text.textContent = 'View as another account. Looking is recorded, and changes are blocked.';
+    if (select) select.hidden = false;
+    if (go) go.hidden = false;
+    if (stop) stop.hidden = true;
+    loadViewAsAccounts();
+    loadInvites();
+  }
+}
+
+async function loadViewAsAccounts() {
+  const select = document.getElementById('view-as-select');
+  if (!select) return;
+  const result = await callApi('/api/admin/accounts');
+  if (!result.ok) return;
+  const mine = sessionMe && sessionMe.account ? sessionMe.account.id : '';
+  const accounts = (result.data.accounts || []).filter((account) => account.id !== mine);
+  select.innerHTML = accounts.map((account) =>
+    `<option value="${UI.escapeHtml(account.id)}">${UI.escapeHtml(account.name)}</option>`
+  ).join('');
+}
+
+async function loadInvites() {
+  const body = document.getElementById('invite-body');
+  if (!body) return;
+  const result = await callApi('/api/invites');
+  if (!result.ok) return;
+  const rows = result.data.invites || [];
+  body.innerHTML = rows.map((invite) => {
+    const expired = new Date(invite.expires_at).getTime() < Date.now();
+    let status = 'Active';
+    if (invite.used_at) status = 'Used';
+    else if (invite.revoked_at) status = 'Revoked';
+    else if (expired) status = 'Expired';
+    const when = new Date(invite.expires_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    const revoke = status === 'Active'
+      ? `<button type="button" class="btn-ghost" data-revoke="${UI.escapeHtml(invite.id)}">Revoke</button>`
+      : '';
+    return `<tr>
+      <td class="mono">…${UI.escapeHtml(invite.hint)}</td>
+      <td>${UI.escapeHtml(invite.note || '—')}</td>
+      <td>${UI.escapeHtml(when)}</td>
+      <td>${status}</td>
+      <td>${revoke}</td>
+    </tr>`;
+  }).join('');
+}
+
+function paintFirstRun(setup) {
+  const site = setup && setup.site;
+  const siteStep = document.getElementById('step-site');
+  const snippetStep = document.getElementById('step-snippet');
+  const checkStep = document.getElementById('step-check');
+  const host = document.getElementById('step-site-host');
+  const form = document.getElementById('add-site-form');
+  const conflict = document.getElementById('first-run-conflict');
+  const create = document.getElementById('first-run-create');
+  const checkText = document.getElementById('step-check-text');
+  if (site) {
+    siteStep.classList.add('done');
+    form.hidden = true;
+    const domain = (site.domains && site.domains[0]) || site.name;
+    host.textContent = domain;
+    if (typeof site.public_key === 'string') snippetSiteKey = site.public_key;
+    document.getElementById('first-run-snippet').textContent = snippetTag();
+    snippetStep.classList.toggle('done', !!site.verified);
+    checkStep.classList.toggle('done', !!site.verified);
+    conflict.hidden = !site.conflict;
+    if (site.verified) {
+      checkText.textContent = `We can see pivitlab on ${domain}.`;
+      create.disabled = false;
+    } else {
+      checkText.textContent = 'Waiting for a page on your site to load the snippet.';
+      create.disabled = true;
+    }
+  } else {
+    siteStep.classList.remove('done');
+    form.hidden = false;
+    host.textContent = 'Add the site you want to test.';
+    document.getElementById('first-run-snippet').textContent = 'Add your site to get the snippet.';
+    snippetStep.classList.remove('done');
+    checkStep.classList.remove('done');
+    conflict.hidden = true;
+    create.disabled = true;
+  }
+}
+
+function stopFirstRunPoll() {
+  if (firstRunTimer) clearInterval(firstRunTimer);
+  firstRunTimer = null;
+}
+
+function startFirstRunPoll() {
+  if (firstRunTimer) return;
+  firstRunTimer = setInterval(async () => {
+    const result = await callApi('/api/setup');
+    if (!result.ok || !result.data.site || !result.data.site.verified) return;
+    paintFirstRun(result.data);
+    stopFirstRunPoll();
+  }, 4000);
+}
+
+async function refreshFirstRun(experimentCount) {
+  const card = document.getElementById('first-run');
+  const list = document.getElementById('home-list-card');
+  const hits = document.getElementById('host-hits-card');
+  const unverified = document.getElementById('unverified-banner');
+  const result = await callApi('/api/setup');
+  if (!result.ok) {
+    card.hidden = true;
+    return;
+  }
+  const show = experimentCount === 0 && result.data.needs_setup;
+  card.hidden = !show;
+  const head = document.querySelector('#page-home > .page-head');
+  if (head) head.hidden = show;
+  if (list) list.hidden = show;
+  if (hits) hits.hidden = show;
+  const site = result.data.site;
+  if (unverified) unverified.hidden = show || !site || site.verified;
+  if (!show) {
+    stopFirstRunPoll();
+    return;
+  }
+  paintFirstRun(result.data);
+  if (site && site.verified) stopFirstRunPoll();
+  else if (site) startFirstRunPoll();
 }
 
 async function logout() {
@@ -883,6 +1100,7 @@ async function loadExperimentList() {
   experimentsCache = experiments;
   experimentsLoaded = true;
   populateExperimentSelects(experiments);
+  await refreshFirstRun(experiments.length);
   if (experiments.length === 0) {
     msgEl.className = 'hint';
     msgEl.textContent = 'No experiments yet. Create one to get a draft and an install snippet.';
@@ -3426,6 +3644,92 @@ if (window.Chart) {
   Chart.defaults.color = '#c5c8d4';
   Chart.defaults.borderColor = 'rgba(255,255,255,0.08)';
 }
+
+document.getElementById('logout-all').addEventListener('click', async () => {
+  await fetch('/api/auth/logout-all', { method: 'POST' });
+  window.location.href = '/login.html';
+});
+
+document.getElementById('first-run-copy').addEventListener('click', () => {
+  copyText(snippetTag(), 'first-run-copied');
+});
+
+document.getElementById('first-run-create').addEventListener('click', () => {
+  const siteHost = document.getElementById('step-site-host').textContent;
+  if (siteHost && siteHost.includes('.')) {
+    const hosts = document.getElementById('wizard-hosts');
+    if (hosts && !hosts.value) hosts.value = siteHost;
+  }
+  go('#create');
+});
+
+document.getElementById('add-site-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const errorEl = document.getElementById('add-site-error');
+  const btn = document.getElementById('add-site-btn');
+  errorEl.textContent = '';
+  btn.disabled = true;
+  const result = await callApi('/api/sites', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ website: document.getElementById('add-site-website').value }),
+  });
+  btn.disabled = false;
+  if (!result.ok) {
+    errorEl.textContent = result.message;
+    return;
+  }
+  if (result.data.site && result.data.site.public_key) snippetSiteKey = result.data.site.public_key;
+  await refreshFirstRun(experimentsCache.length);
+});
+
+document.getElementById('invite-create').addEventListener('click', async () => {
+  const errorEl = document.getElementById('invite-error');
+  const fresh = document.getElementById('invite-fresh');
+  errorEl.textContent = '';
+  fresh.hidden = true;
+  const result = await callApi('/api/invites', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ note: document.getElementById('invite-note').value }),
+  });
+  if (!result.ok) {
+    errorEl.textContent = result.message;
+    return;
+  }
+  fresh.hidden = false;
+  fresh.textContent = `Invite code: ${result.data.code}`;
+  document.getElementById('invite-note').value = '';
+  await loadInvites();
+});
+
+document.getElementById('invite-body').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-revoke]');
+  if (!button) return;
+  const result = await callApi(`/api/invites/${button.getAttribute('data-revoke')}/revoke`, { method: 'POST' });
+  if (!result.ok) {
+    document.getElementById('invite-error').textContent = result.message;
+    return;
+  }
+  await loadInvites();
+});
+
+document.getElementById('view-as-go').addEventListener('click', async () => {
+  const accountId = document.getElementById('view-as-select').value;
+  if (!accountId) return;
+  const result = await callApi('/api/auth/view-as', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ account_id: accountId }),
+  });
+  if (!result.ok) return;
+  window.location.href = '/index.html';
+});
+
+document.getElementById('view-as-stop').addEventListener('click', async () => {
+  await callApi('/api/auth/view-as/stop', { method: 'POST' });
+  window.location.href = '/index.html';
+});
 
 (async () => {
   const [, ok] = await Promise.all([loadAppOrigin(), requireOwnerSession()]);
