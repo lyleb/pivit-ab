@@ -243,7 +243,7 @@ Creating a client or resetting their password no longer uses a browser `alert()`
 There's a real login screen now at `/login.html` (branded, matching the dashboard), backed by proper sessions instead of a key pasted into a field:
 
 - Customers sign in with an emailed link or a 6-digit code. There is no customer password. Sign-up is invite-only. See [docs/signup.md](signup.md).
-- Your emergency login password is still your existing `ADMIN_API_KEY` value. It stays available. Do not rotate it as part of turning on email sign-in.
+- Your owner password is still your existing `ADMIN_API_KEY` value. It stays available at the unlisted address `/owner` (not linked from the sign-in page). Do not rotate it as part of turning on email sign-in. Owners use email sign-in (the superadmin address is info@heclr.com) once that is set up.
 - Sessions are signed cookies stored in Postgres (not memory), so logging in survives a Railway redeploy — you won't get logged out just because you shipped a change. The cookie name is still `pivit.sid`.
 - A required env var: `SESSION_SECRET` (see `.env.example`). It must be at least 32 characters. Any character set is accepted — it does not have to be hex or base64. When `NODE_ENV=production`, a missing or shorter secret aborts startup with a log line and the process does not boot. Outside production, a dev-only fallback is used and a warning is logged. Set the production value on the host before deploying, and do not rotate one that is already long enough.
 - 5 failed password attempts locks that IP out for 60 seconds. The lockout is stored in Postgres, so a redeploy does not clear it.

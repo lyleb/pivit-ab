@@ -32,7 +32,7 @@ assert.strictEqual(headerOnly['Access-Control-Allow-Origin'], undefined);
 
 assert.deepStrictEqual(
   ROBOTS_TXT.split('\n').filter((line) => line !== ''),
-  ['User-agent: *', 'Disallow: /api/', 'Disallow: /snippet/']
+  ['User-agent: *', 'Disallow: /api/', 'Disallow: /snippet/', 'Disallow: /owner']
 );
 assert.ok(!ROBOTS_TXT.split('\n').includes('Disallow: /'));
 
@@ -75,6 +75,18 @@ for (const [file, href] of Object.entries(pagesOnDisk)) {
   assert.ok(html.includes(`<link rel="canonical" href="${href}">`), file);
   assert.strictEqual(html.match(/rel="canonical"/g).length, 1, file);
 }
+const publicDir = path.join(__dirname, '../public');
+for (const file of fs.readdirSync(publicDir)) {
+  if (!file.endsWith('.html')) continue;
+  const html = fs.readFileSync(path.join(publicDir, file), 'utf8');
+  assert.ok(!html.includes('href="/owner"'), file);
+  assert.ok(!html.includes('href="/owner.html"'), file);
+  assert.ok(!html.includes('Owner password'), file);
+  assert.ok(!html.includes('Owner login'), file);
+}
+assert.ok(!fs.existsSync(path.join(publicDir, 'owner.html')));
+assert.ok(fs.existsSync(path.join(__dirname, '../src/pages/owner.html')));
+
 assert.ok(!fs.existsSync(path.join(__dirname, '../public/sitemap.xml')));
 assert.ok(!fs.existsSync(path.join(__dirname, '../sitemap.xml')));
 

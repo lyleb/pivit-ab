@@ -42,9 +42,8 @@
     display: none; background: rgba(86,53,251,0.12); border: 1px solid rgba(86,53,251,0.45);
     border-radius: 8px; padding: 12px 14px; font-size: 0.85em; margin-top: 12px; line-height: 1.5;
   }
-  #client-form, #owner-form, #email-form { display: none; }
+  #client-form, #email-form { display: none; }
   .login-card a { color: var(--mint-dark); }
-  .emergency-banner { margin-bottom: 14px; }
   @media (max-width: 640px) {
     .login-card { width: 100%; padding: 28px 20px; }
   }
@@ -61,16 +60,7 @@
     <label for="email">Work email</label>
     <input id="email" type="email" autocomplete="email" placeholder="you@company.com" required>
     <button id="email-btn" type="submit">Email me a sign-in link</button>
-    <p class="hint" style="text-align:center;margin-top:14px;">Have an invite? <a href="/signup.html">Create an account</a></p>
-  </form>
-
-  <form id="owner-form">
-    <div class="banner emergency-banner">Emergency login. Use email sign-in when you can. This password stays until that has been working.</div>
-    <label for="password">Password</label>
-    <input id="password" type="password" placeholder="Enter your password" autofocus required>
-    <button id="owner-btn" type="submit">Log in</button>
-    <a class="forgot-link" onclick="toggleForgotNote('owner-forgot-note')">Forgot password?</a>
-    <div id="owner-forgot-note" class="forgot-note">The owner password is managed in your hosting settings. There's no in-app reset for it.</div>
+    <p class="hint" style="text-align:center;margin-top:14px;">Got an invite code from pivitlab? <a href="/signup.html">Create your account</a></p>
   </form>
 
   <form id="client-form">
@@ -86,27 +76,20 @@
   <p id="login-error" class="error-msg"></p>
   <button type="button" class="mode-switch" id="show-email">Email sign-in</button>
   <button type="button" class="mode-switch" id="show-client">Client login</button>
-  <button type="button" class="mode-switch" id="show-owner">Owner password</button>
 </div>
 
 <script>
 let mode = 'email';
 
 function applyMode(next, updateUrl) {
-  mode = next === 'client' || next === 'owner' ? next : 'email';
+  mode = next === 'client' ? 'client' : 'email';
   document.getElementById('email-form').style.display = mode === 'email' ? 'block' : 'none';
-  document.getElementById('owner-form').style.display = mode === 'owner' ? 'block' : 'none';
   document.getElementById('client-form').style.display = mode === 'client' ? 'block' : 'none';
-  const labels = { email: 'Sign in', owner: 'Emergency', client: 'Client' };
-  document.getElementById('mode-label').textContent = labels[mode];
+  document.getElementById('mode-label').textContent = mode === 'client' ? 'Client' : 'Sign in';
   document.getElementById('show-email').hidden = mode === 'email';
-  document.getElementById('show-owner').hidden = mode === 'owner';
   document.getElementById('show-client').hidden = mode === 'client';
   document.getElementById('login-logo').style.display = 'block';
   document.getElementById('login-error').textContent = '';
-  // Collapse both "forgot password" notes whenever the form switches, so a
-  // note left open on one side doesn't linger after switching to the other.
-  document.getElementById('owner-forgot-note').style.display = 'none';
   document.getElementById('client-forgot-note').style.display = 'none';
   if (updateUrl) {
     const url = new URL(location.href);
@@ -182,12 +165,6 @@ document.getElementById('email-form').addEventListener('submit', async (e) => {
   }
 });
 
-document.getElementById('owner-form').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const btn = document.getElementById('owner-btn');
-  submitLogin('/api/auth/login', { password: document.getElementById('password').value }, btn);
-});
-
 document.getElementById('client-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const btn = document.getElementById('client-btn');
@@ -199,9 +176,8 @@ document.getElementById('client-form').addEventListener('submit', (e) => {
 
 document.getElementById('show-email').addEventListener('click', () => applyMode('email', true));
 document.getElementById('show-client').addEventListener('click', () => applyMode('client', true));
-document.getElementById('show-owner').addEventListener('click', () => applyMode('owner', true));
 const requested = new URLSearchParams(location.search).get('role');
-applyMode(requested === 'client' || requested === 'owner' ? requested : 'email', false);
+applyMode(requested === 'client' ? 'client' : 'email', false);
 </script>
 </body>
 </html>

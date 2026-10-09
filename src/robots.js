@@ -18,6 +18,7 @@ const ROBOTS_TXT = [
   'User-agent: *',
   'Disallow: /api/',
   'Disallow: /snippet/',
+  'Disallow: /owner',
   '',
 ].join('\n');
 

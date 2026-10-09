@@ -82,6 +82,13 @@
   }
   .choice span { display: block; font-weight: 550; color: var(--text-muted); font-size: 0.82em; margin-top: 4px; }
   .choice[aria-pressed="true"] { border-color: var(--indigo); background: rgba(86,53,251,0.18); }
+  .support-bar { flex-wrap: wrap; }
+  .support-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .support-controls select {
+    width: 220px; max-width: 100%; margin: 0; flex: 0 0 auto;
+    color: #1a1d27; background: #fff;
+  }
+  .support-controls select option { color: #1a1d27; background: #fff; }
   .plan-sentence { font-size: 1.08em; font-weight: 750; margin: 8px 0 6px; letter-spacing: -0.01em; }
   .progress-track { height: 8px; background: #262a38; border-radius: 99px; overflow: hidden; margin: 6px 0 14px; }
   .progress-bar { height: 100%; background: #5635FB; width: 0; }
@@ -237,11 +244,14 @@
 
   <div class="main-area">
     <div id="page-home" class="page active">
-      <div id="emergency-banner" class="banner" hidden>You're signed in with the emergency password. Use email sign-in when you can.</div>
-      <div id="view-as-bar" class="banner" hidden>
-        <span id="view-as-text">View as another account. Looking is recorded, and changes are blocked.</span>
-        <span style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <select id="view-as-select" style="width:auto;min-width:180px;margin:0;"></select>
+      <div id="emergency-banner" class="banner" hidden>
+        <span id="emergency-banner-text">You signed in with the owner password. Once email sign-in is set up, use that instead.</span>
+        <button type="button" class="btn-ghost" id="emergency-dismiss">Dismiss</button>
+      </div>
+      <div id="view-as-bar" class="banner support-bar" hidden>
+        <span id="view-as-text">Support view: see another customer's account read-only. Every view is logged.</span>
+        <span class="support-controls">
+          <select id="view-as-select"></select>
           <button type="button" class="btn-ghost" id="view-as-go">View as</button>
           <button type="button" class="btn-ghost" id="view-as-stop" hidden>Stop viewing</button>
         </span>
@@ -401,6 +411,7 @@
         <div id="wizard-step-5" class="wizard-step" hidden>
           <div id="wizard-planner"></div>
           <dl class="summary" id="wizard-summary"></dl>
+          <p id="wizard-saved" class="ok-msg" hidden><strong>Plan saved.</strong> Next: review the experiment, then start it.</p>
         </div>
 
         <p id="wizard-msg" class="hint"></p>
@@ -443,17 +454,9 @@
       <section class="card" style="max-width:640px;">
         <label for="status-exp-id">Experiment</label>
         <select id="status-exp-id"><option value="">— select an experiment —</option></select>
-        <label for="status-value">Status</label>
-        <select id="status-value">
-          <option value="running">running</option>
-          <option value="paused">paused</option>
-          <option value="draft">draft</option>
-          <option value="archived">archived</option>
-        </select>
-        <div class="inline-actions" style="margin-top:16px;">
-          <button type="button" onclick="updateStatus()">Update</button>
-          <button type="button" class="btn-ghost" onclick="openStatusSettings()">Open in Settings</button>
-        </div>
+        <p id="status-current" class="status-big">Choose an experiment.</p>
+        <p class="hint" id="status-hint">The status shown here is the one the server last confirmed.</p>
+        <div id="status-actions" class="inline-actions" style="margin-top:16px;"></div>
         <p id="status-result" class="hint"></p>
       </section>
     </div>
@@ -553,6 +556,9 @@ let includeTestExperimentId = null;
 let testTrafficPending = null;
 let currentTab = 'overview';
 let routeToken = 0;
+let viewGen = 0;
+let listGen = 0;
+const statusConfirms = new Map();
 let pickerHref = '#';
 let rateChart = null;
 let trendChart = null;
@@ -576,6 +582,7 @@ const wizard = {
   goalRows: [],
   checks: { snippet: false, preview: false, event: false },
   planSuggestion: null,
+  planSaved: false,
   busy: false,
 };
 
@@ -586,7 +593,7 @@ function authHeaders() {
 async function callApi(path, options = {}) {
   let res;
   try {
-    res = await fetch(API + path, options);
+    res = await fetch(API + path, Object.assign({ cache: 'no-store' }, options));
   } catch (networkErr) {
     return { ok: false, message: `Network error — could not reach the server (${networkErr.message}). Check the URL and that the server is running.` };
   }
@@ -627,44 +634,66 @@ async function requireOwnerSession() {
   }
 }
 
+function ownerBannerDismissed() {
+  try { return sessionStorage.getItem('pivit-owner-password-banner') === '1'; } catch (err) { return false; }
+}
+
 function applySessionChrome() {
   const me = sessionMe || {};
   const emergency = document.getElementById('emergency-banner');
-  if (emergency) emergency.hidden = !me.emergency;
+  if (emergency) {
+    const text = document.getElementById('emergency-banner-text');
+    if (text) text.textContent = UI.OWNER_PASSWORD_BANNER;
+    emergency.hidden = !UI.showOwnerPasswordBanner(me.emergency === true, ownerBannerDismissed());
+  }
   const viewing = !!(me.view_as && me.view_as.id);
   const bar = document.getElementById('view-as-bar');
   const invite = document.getElementById('invite-card');
-  if (bar) bar.hidden = !me.superadmin;
   if (invite) invite.hidden = !(me.superadmin && !viewing);
   const select = document.getElementById('view-as-select');
   const go = document.getElementById('view-as-go');
   const stop = document.getElementById('view-as-stop');
   const text = document.getElementById('view-as-text');
   if (viewing) {
-    if (text) text.textContent = `Viewing as ${me.view_as.name}. You can look. Changes are blocked, and this view is recorded.`;
+    if (bar) bar.hidden = !UI.showSupportBar({ superadmin: true, viewing: true, otherAccounts: 0 });
+    if (text) text.textContent = UI.supportViewCopy(true, me.view_as.name);
     if (select) select.hidden = true;
     if (go) go.hidden = true;
     if (stop) stop.hidden = false;
   } else if (me.superadmin) {
-    if (text) text.textContent = 'View as another account. Looking is recorded, and changes are blocked.';
+    if (bar) bar.hidden = true;
+    if (text) text.textContent = UI.supportViewCopy(false);
     if (select) select.hidden = false;
     if (go) go.hidden = false;
     if (stop) stop.hidden = true;
     loadViewAsAccounts();
     loadInvites();
+  } else if (bar) {
+    bar.hidden = true;
   }
 }
 
 async function loadViewAsAccounts() {
   const select = document.getElementById('view-as-select');
-  if (!select) return;
+  const bar = document.getElementById('view-as-bar');
+  if (!select || !bar) return;
+  if (sessionMe && sessionMe.view_as && sessionMe.view_as.id) return;
   const result = await callApi('/api/admin/accounts');
-  if (!result.ok) return;
+  if (!result.ok) {
+    bar.hidden = true;
+    return;
+  }
   const mine = sessionMe && sessionMe.account ? sessionMe.account.id : '';
   const accounts = (result.data.accounts || []).filter((account) => account.id !== mine);
-  select.innerHTML = accounts.map((account) =>
+  if (!UI.showSupportBar({ superadmin: true, viewing: false, otherAccounts: accounts.length })) {
+    bar.hidden = true;
+    select.innerHTML = '';
+    return;
+  }
+  select.innerHTML = '<option value="">Choose an account</option>' + accounts.map((account) =>
     `<option value="${UI.escapeHtml(account.id)}">${UI.escapeHtml(account.name)}</option>`
   ).join('');
+  bar.hidden = false;
 }
 
 async function loadInvites() {
@@ -1086,26 +1115,42 @@ function populateExperimentSelects(experiments) {
   });
 }
 
+function noteConfirmedStatus(id, status) {
+  statusConfirms.set(id, { status, at: Date.now() });
+}
+
+function applyConfirmedStatuses(experiments, readStartedAt) {
+  experiments.forEach((exp) => {
+    exp.status = UI.displayedStatus(exp.status, statusConfirms.get(exp.id), readStartedAt);
+  });
+  return experiments;
+}
+
 async function loadExperimentList() {
   const msgEl = document.getElementById('exp-list-msg');
   const table = document.getElementById('exp-list-table');
+  const gen = ++listGen;
+  const readStartedAt = Date.now();
   const result = await callApi('/api/experiments/all', { headers: authHeaders() });
+  if (gen !== listGen) return;
   if (!result.ok) {
     msgEl.className = 'error-msg';
     msgEl.textContent = `Error: ${result.message}`;
     table.classList.remove('is-visible');
     return;
   }
-  const experiments = result.data.experiments || [];
+  const experiments = applyConfirmedStatuses(result.data.experiments || [], readStartedAt);
   experimentsCache = experiments;
   experimentsLoaded = true;
   populateExperimentSelects(experiments);
   await refreshFirstRun(experiments.length);
+  if (gen !== listGen) return;
   if (experiments.length === 0) {
     msgEl.className = 'hint';
     msgEl.textContent = 'No experiments yet. Create one to get a draft and an install snippet.';
     table.classList.remove('is-visible');
     document.getElementById('exp-list-body').innerHTML = '';
+    renderStatusPage();
     return;
   }
   msgEl.textContent = '';
@@ -1124,6 +1169,7 @@ async function loadExperimentList() {
   }).join('');
   table.classList.add('is-visible');
   fillSignals(experiments);
+  renderStatusPage();
 }
 
 function fillSignals(experiments) {
@@ -1200,13 +1246,16 @@ async function openExperiment(id, tab, { token, force } = {}) {
   }
   const root = document.getElementById('detail-root');
   if (!currentDetail || currentDetail.id !== id) root.innerHTML = '<p class="hint">Loading…</p>';
+  const gen = ++viewGen;
+  const readStartedAt = Date.now();
   const result = await callApi(`/api/experiments/${id}`, { headers: authHeaders() });
-  if (requestToken !== routeToken) return;
+  if (requestToken !== routeToken || gen !== viewGen) return;
   if (!result.ok) {
     root.innerHTML = `<p class="error-msg">Error: ${UI.escapeHtml(result.message)}</p>`;
     return;
   }
   currentDetail = result.data;
+  currentDetail.status = UI.displayedStatus(currentDetail.status, statusConfirms.get(id), readStartedAt);
   currentDetail.client_name = clientNameById(currentDetail.client_id);
   currentTab = tab || 'overview';
   renderDetail();
@@ -1233,8 +1282,18 @@ function renderDetail() {
   // the activity request so a live test doesn't flash "no traffic".
   const banner = exp.status === 'draft' ? UI.overviewBanner('draft', 0) : { show: false, text: '' };
   const next = exp.status === 'draft';
+  let planSavedNote = '';
+  try {
+    if (sessionStorage.getItem('pivit-plan-saved') === exp.id) {
+      planSavedNote = '<div class="banner" id="plan-saved-banner"><span><strong>Plan saved.</strong> Next: review the experiment, then start it.</span></div>';
+      sessionStorage.removeItem('pivit-plan-saved');
+    }
+  } catch (err) { /* private mode */ }
+  const statusChoices = ['draft', 'running', 'paused'].concat(exp.status === 'archived' ? ['archived'] : []);
+  const statusOptions = statusChoices.map((value) => `<option value="${value}">${value}</option>`).join('');
 
   document.getElementById('detail-root').innerHTML = `
+    ${planSavedNote}
     <div class="crumb"><button type="button" data-go-home>Experiments</button> / ${UI.escapeHtml(exp.name)}</div>
     <div class="detail-top" id="detail-header">
       <div>
@@ -1406,14 +1465,13 @@ function renderDetail() {
         <p class="hint">Only this client can see the experiment on their results page.</p>
         <label for="settings-status">Status</label>
         <select id="settings-status">
-          <option value="draft">draft</option>
-          <option value="running">running</option>
-          <option value="paused">paused</option>
-          <option value="archived">archived</option>
+          ${statusOptions}
         </select>
+        <p class="hint">Start and pause from here, or use the button on the experiment. Archive is separate, and nothing is archived unless you choose it.</p>
         <div class="inline-actions" style="margin-top:16px;">
           <button type="button" data-action="save-settings">Save</button>
           <button type="button" class="btn-ghost" data-action="export">Export CSV</button>
+          ${exp.status === 'archived' ? '' : '<button type="button" class="btn-danger" data-action="archive-experiment">Archive</button>'}
           ${exp.status === 'archived' ? '<button type="button" class="btn-danger" data-action="delete-experiment">Delete</button>' : ''}
         </div>
         <p id="settings-msg" class="hint"></p>
@@ -1706,16 +1764,51 @@ async function patchVariant(variant, fields) {
   return true;
 }
 
-async function setExperimentStatus(status, { confirmArchive = true } = {}) {
-  if (!currentDetail) return false;
-  if (status === 'paused' && !confirm('Pause this experiment? New visitors will stop being assigned.')) return false;
-  if (status === 'archived' && confirmArchive && !confirm('Archive this experiment? It leaves the live set. You can still read results.')) return false;
-  const result = await callApi(`/api/experiments/${currentDetail.id}/status`, {
-    method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ status }),
+async function commitStatus(id, status) {
+  if (!id) return { ok: false, message: 'Select an experiment above first.' };
+  if (status === 'paused' && !confirm('Pause this experiment? New visitors will stop being assigned.')) {
+    return { ok: false, cancelled: true };
+  }
+  if (status === 'archived' && !confirm('Archive this experiment? It leaves the live set. You can still read results.')) {
+    return { ok: false, cancelled: true };
+  }
+  const gen = ++viewGen;
+  const body = { status };
+  if (status === 'archived') body.archive = true;
+  const result = await callApi(`/api/experiments/${id}/status`, {
+    method: 'PATCH', headers: authHeaders(), body: JSON.stringify(body),
   });
+  if (gen !== viewGen) return { ok: false, cancelled: true };
+  if (!result.ok) return result;
+  const confirmed = result.data && result.data.status;
+  if (!confirmed) return { ok: false, message: 'The server did not confirm a status.' };
+  noteConfirmedStatus(id, confirmed);
+  const cached = experimentsCache.find((row) => row.id === id);
+  if (cached) cached.status = confirmed;
+  if (currentDetail && currentDetail.id === id) {
+    currentDetail.status = confirmed;
+    if (result.data.started_at) currentDetail.started_at = result.data.started_at;
+  }
+  const select = document.getElementById('status-exp-id');
+  if (select && cached) {
+    const option = Array.from(select.options).find((opt) => opt.value === id);
+    if (option) option.textContent = `${cached.name} — ${confirmed}`;
+  }
+  renderStatusPage();
+  if (currentDetail && currentDetail.id === id && document.getElementById('detail-header')) {
+    renderDetail();
+    showDetailTab(currentTab);
+  }
+  loadExperimentList();
+  return { ok: true, data: Object.assign({}, result.data, { status: confirmed }) };
+}
+
+async function setExperimentStatus(status) {
+  if (!currentDetail) return false;
+  const result = await commitStatus(currentDetail.id, status);
+  if (result.cancelled) return false;
   if (!result.ok) { detailError(result.message); return false; }
   detailError('');
-  await reloadDetail();
   return true;
 }
 
@@ -1751,7 +1844,9 @@ document.getElementById('page-detail').addEventListener('click', async (e) => {
     return;
   }
   if (action === 'set-status') {
-    await setExperimentStatus(btn.dataset.status);
+    btn.disabled = true;
+    const changed = await setExperimentStatus(btn.dataset.status);
+    if (!changed && btn.isConnected) btn.disabled = false;
     return;
   }
   if (action === 'focus-checklist') {
@@ -1883,6 +1978,12 @@ document.getElementById('page-detail').addEventListener('click', async (e) => {
     await deleteExperiment(currentDetail.id, btn);
     return;
   }
+  if (action === 'archive-experiment') {
+    btn.disabled = true;
+    const changed = await setExperimentStatus('archived');
+    if (!changed && btn.isConnected) btn.disabled = false;
+    return;
+  }
   if (action === 'test-traffic') {
     openTestTrafficDialog(btn.dataset.direction, btn.dataset.mode);
     return;
@@ -1926,9 +2027,6 @@ async function saveDetailSettings() {
   const hostsField = document.getElementById('settings-hosts');
   const clientId = document.getElementById('settings-client').value || null;
   const status = document.getElementById('settings-status').value;
-  if (currentDetail.status !== status && status === 'archived') {
-    if (!confirm('Archive this experiment? It leaves the live set. You can still read results.')) return;
-  }
   const hostsResult = await callApi(`/api/experiments/${currentDetail.id}/hosts`, {
     method: 'PATCH',
     headers: authHeaders(),
@@ -1943,11 +2041,21 @@ async function saveDetailSettings() {
     if (!clientResult.ok) { msg.className = 'error-msg'; msg.textContent = clientResult.message; return; }
     currentDetail.client_id = clientId;
   }
-  if (currentDetail.status !== status) {
-    const statusResult = await callApi(`/api/experiments/${currentDetail.id}/status`, {
-      method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ status }),
-    });
-    if (!statusResult.ok) { msg.className = 'error-msg'; msg.textContent = statusResult.message; return; }
+  if (status === 'archived') {
+    // Archive is its own button. Saving hosts must not send an archive.
+  } else if (currentDetail.status !== status) {
+    const statusResult = await commitStatus(currentDetail.id, status);
+    if (statusResult.cancelled) return;
+    const fresh = document.getElementById('settings-msg');
+    if (!statusResult.ok) {
+      if (fresh) { fresh.className = 'error-msg'; fresh.textContent = statusResult.message; }
+      return;
+    }
+    if (fresh) {
+      fresh.className = 'ok-msg';
+      fresh.textContent = `Saved. Status is now ${statusResult.data.status}.`;
+    }
+    return;
   }
   msg.className = 'ok-msg';
   msg.textContent = 'Saved.';
@@ -2025,7 +2133,18 @@ function setTrendMode(mode) {
   renderTrendChart();
 }
 
-const PLAN_RELATIVE = { small: 5, medium: 10, big: 20 };
+const PLAN_RELATIVE = UI.PLAN_PRESETS;
+
+function markWizardPlanUnsaved() {
+  if (!wizard.planSaved) return;
+  wizard.planSaved = false;
+  const note = document.getElementById('wizard-saved');
+  if (note) note.hidden = true;
+  const next = document.getElementById('wizard-next');
+  if (next && wizard.step === 5) next.textContent = 'Save plan';
+  const draftBtn = document.getElementById('wizard-save-draft');
+  if (draftBtn && wizard.step === 5) draftBtn.hidden = false;
+}
 
 function plannerRoot(prefix) {
   return document.querySelector(`[data-planner="${prefix}"]`);
@@ -2033,13 +2152,15 @@ function plannerRoot(prefix) {
 
 function readPlanner(prefix) {
   const choiceBtn = document.querySelector(`[data-planner="${prefix}"] [data-plan-choice][aria-pressed="true"]`);
-  const choice = choiceBtn ? choiceBtn.dataset.planChoice : 'medium';
+  const choice = choiceBtn ? choiceBtn.dataset.planChoice : 'custom';
   const baselinePct = Number(document.getElementById(`${prefix}-baseline`).value);
   const relativePct = Number(document.getElementById(`${prefix}-relative`).value);
   const weeklyRaw = document.getElementById(`${prefix}-weekly`).value;
   const weeks = Math.round(Number(document.getElementById(`${prefix}-weeks`).value));
   const known = PLAN_RELATIVE[choice];
-  const effectChoice = known != null && Math.abs(relativePct - known) < 0.05 ? choice : 'custom';
+  const effectChoice = choice === 'custom' || known == null || Math.abs(relativePct - known) >= 0.05
+    ? 'custom'
+    : choice;
   return {
     baseline_rate: baselinePct / 100,
     relative_effect: relativePct / 100,
@@ -2054,11 +2175,12 @@ function readPlanner(prefix) {
 }
 
 function applyChoice(prefix, choice) {
+  const selected = choice && PLAN_RELATIVE[choice] ? choice : (choice === 'custom' ? 'custom' : 'custom');
   document.querySelectorAll(`[data-planner="${prefix}"] [data-plan-choice]`).forEach((btn) => {
-    btn.setAttribute('aria-pressed', btn.dataset.planChoice === choice ? 'true' : 'false');
+    btn.setAttribute('aria-pressed', btn.dataset.planChoice === selected ? 'true' : 'false');
   });
   const relative = document.getElementById(`${prefix}-relative`);
-  if (relative && PLAN_RELATIVE[choice]) relative.value = PLAN_RELATIVE[choice];
+  if (relative && PLAN_RELATIVE[selected] != null) relative.value = PLAN_RELATIVE[selected];
 }
 
 function fillPlannerNotes(prefix, plan) {
@@ -2101,20 +2223,16 @@ function bindPlanner(prefix, expId) {
     const choice = event.target.closest('[data-plan-choice]');
     if (!choice) return;
     applyChoice(prefix, choice.dataset.planChoice);
+    if (prefix === 'wizard') markWizardPlanUnsaved();
     previewPlanner(prefix, expId);
   });
   ['baseline', 'relative', 'weekly', 'weeks'].forEach((field) => {
     const input = document.getElementById(`${prefix}-${field}`);
     if (!input) return;
     input.addEventListener('input', () => {
-      if (field === 'relative') {
-        const value = Number(input.value);
-        const match = Object.keys(PLAN_RELATIVE).find((key) => Math.abs(PLAN_RELATIVE[key] - value) < 0.05);
-        applyChoice(prefix, match || '');
-        if (!match) {
-          root.querySelectorAll('[data-plan-choice]').forEach((btn) => btn.setAttribute('aria-pressed', 'false'));
-        }
-      }
+      const relative = document.getElementById(`${prefix}-relative`);
+      applyChoice(prefix, UI.plannerSelectionAfterEdit(field, relative ? relative.value : ''));
+      if (prefix === 'wizard') markWizardPlanUnsaved();
       if (field === 'weeks') {
         const warn = document.getElementById(`${prefix}-week-warn`);
         if (warn) warn.textContent = Number(input.value) < 2 ? 'One week can miss a weekday pattern. Two weeks is the usual minimum.' : '';
@@ -2153,10 +2271,10 @@ function mountPlanner(prefix, expId, payload) {
   if (weekly && traffic != null) weekly.value = traffic;
   const minDays = seed.min_runtime_days || 14;
   if (weeks) weeks.value = Math.max(1, Math.round(minDays / 7));
-  applyChoice(prefix, seed.effect_choice && seed.effect_choice !== 'custom' ? seed.effect_choice : 'medium');
-  if (seed.effect_choice === 'custom') {
-    root.querySelectorAll('[data-plan-choice]').forEach((btn) => btn.setAttribute('aria-pressed', 'false'));
-  }
+  const seededChoice = seed.effect_choice === 'small' || seed.effect_choice === 'medium' || seed.effect_choice === 'big'
+    ? seed.effect_choice
+    : (seed.effect_choice === 'custom' ? 'custom' : 'medium');
+  applyChoice(prefix, seededChoice);
   const note = document.getElementById(`${prefix}-baseline-note`);
   if (note) note.textContent = (seed.baseline_label || suggestion.baseline_label || '') + (seed.traffic_label || suggestion.traffic_label ? ` ${seed.traffic_label || suggestion.traffic_label}` : '');
   fillPlannerNotes(prefix, seed.sentence ? seed : payload.preview);
@@ -2700,6 +2818,7 @@ function resetWizard() {
   wizard.goalRows = [];
   wizard.checks = { snippet: false, preview: false, event: false };
   wizard.planSuggestion = null;
+  wizard.planSaved = false;
   wizard.busy = false;
   try { sessionStorage.removeItem('pivit_wizard'); } catch (e) {}
   const list = document.getElementById('wizard-goals-list');
@@ -2779,9 +2898,11 @@ async function renderWizard() {
   const next = document.getElementById('wizard-next');
   back.hidden = wizard.step === 1;
   skip.hidden = wizard.step !== 3;
-  draftBtn.hidden = wizard.step !== 5;
+  draftBtn.hidden = wizard.step !== 5 || wizard.planSaved;
   next.hidden = false;
-  next.textContent = wizard.step === 5 ? 'Save & go to Start' : 'Continue';
+  next.textContent = wizard.step === 5 ? (wizard.planSaved ? 'Review' : 'Save plan') : 'Continue';
+  const saved = document.getElementById('wizard-saved');
+  if (saved) saved.hidden = !(wizard.step === 5 && wizard.planSaved);
 
   if (wizard.step === 2) {
     document.getElementById('wizard-page-url').value = wizard.pageUrl || (/^https?:\/\//i.test(wizard.url) ? wizard.url : '');
@@ -2988,34 +3109,51 @@ function renderWizardSummary() {
   `;
 }
 
-async function finishWizard(toSettings) {
+async function saveWizardPlan() {
   const id = wizard.expId;
-  if (id) {
-    let saved;
-    if (document.getElementById('wizard-baseline')) {
-      const source = planLeftAsSuggested('wizard', wizard.planSuggestion) ? 'auto' : 'owner';
-      saved = await saveCurrentPlan(id, 'wizard', source);
+  if (!id) { wizardMsg('Save the experiment details first.'); return false; }
+  let saved;
+  if (document.getElementById('wizard-baseline')) {
+    const source = planLeftAsSuggested('wizard', wizard.planSuggestion) ? 'auto' : 'owner';
+    saved = await saveCurrentPlan(id, 'wizard', source);
+  } else {
+    const fetched = await callApi(`/api/experiments/${id}/plan`, { headers: authHeaders() });
+    if (!fetched.ok) { wizardMsg(fetched.message); return false; }
+    if (fetched.data.plan) {
+      saved = { ok: true };
+    } else if (fetched.data.preview) {
+      saved = await callApi(`/api/experiments/${id}/plan`, {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify(fetched.data.preview),
+      });
     } else {
-      const fetched = await callApi(`/api/experiments/${id}/plan`, { headers: authHeaders() });
-      if (!fetched.ok) { wizardMsg(fetched.message); return false; }
-      if (fetched.data.plan) {
-        saved = { ok: true };
-      } else if (fetched.data.preview) {
-        saved = await callApi(`/api/experiments/${id}/plan`, {
-          method: 'PUT',
-          headers: authHeaders(),
-          body: JSON.stringify(fetched.data.preview),
-        });
-      } else {
-        wizardMsg('Could not build a plan.');
-        return false;
-      }
+      wizardMsg('Could not build a plan.');
+      return false;
     }
-    if (!saved.ok) { wizardMsg(saved.message); return false; }
   }
-  resetWizard();
-  go(toSettings ? `#experiment/${id}/settings` : `#experiment/${id}/overview`);
+  if (!saved.ok) { wizardMsg(saved.message); return false; }
+  wizard.planSaved = true;
+  wizardMsg('');
+  const note = document.getElementById('wizard-saved');
+  if (note) {
+    note.hidden = false;
+    note.scrollIntoView({ block: 'nearest' });
+  }
+  const next = document.getElementById('wizard-next');
+  if (next) next.textContent = 'Review';
+  const draftBtn = document.getElementById('wizard-save-draft');
+  if (draftBtn) draftBtn.hidden = true;
+  saveWizard();
   return true;
+}
+
+function openWizardReview() {
+  const id = wizard.expId;
+  if (!id) return;
+  try { sessionStorage.setItem('pivit-plan-saved', id); } catch (err) { /* private mode */ }
+  resetWizard();
+  go(`#experiment/${id}/overview`);
 }
 
 async function wizardAdvance() {
@@ -3042,7 +3180,12 @@ async function wizardAdvance() {
       });
       wizard.step = 5;
     } else if (wizard.step === 5) {
-      await finishWizard(true);
+      if (wizard.planSaved) {
+        openWizardReview();
+        return;
+      }
+      const savedPlan = await saveWizardPlan();
+      if (!savedPlan) return;
       return;
     }
     wizard.maxStep = Math.max(wizard.maxStep, wizard.step);
@@ -3074,7 +3217,7 @@ document.getElementById('wizard-save-draft').addEventListener('click', async () 
   wizard.busy = true;
   wizardMsg('');
   try {
-    await finishWizard(false);
+    await saveWizardPlan();
   } finally {
     wizard.busy = false;
   }
@@ -3093,6 +3236,7 @@ document.getElementById('wizard-back').addEventListener('click', async () => {
     wizard.pageUrl = document.getElementById('wizard-page-url').value.trim();
   }
   if (wizard.step > 1) wizard.step -= 1;
+  wizard.planSaved = false;
   saveWizard();
   wizardMsg('');
   await renderWizard();
@@ -3122,6 +3266,7 @@ document.getElementById('wizard-steps').addEventListener('click', async (e) => {
       wizard.pageUrl = document.getElementById('wizard-page-url').value.trim();
     }
   }
+  if (step !== 5) wizard.planSaved = false;
   wizard.step = step;
   wizard.maxStep = Math.max(wizard.maxStep, step);
   saveWizard();
@@ -3474,20 +3619,45 @@ document.getElementById('manage-variants-list').addEventListener('click', async 
   }
 });
 
-async function updateStatus() {
+function renderStatusPage() {
+  const current = document.getElementById('status-current');
+  const actions = document.getElementById('status-actions');
+  if (!current || !actions) return;
+  const expId = document.getElementById('status-exp-id').value.trim();
+  const exp = experimentsCache.find((row) => row.id === expId);
+  if (!exp) {
+    current.textContent = 'Choose an experiment.';
+    actions.innerHTML = '';
+    return;
+  }
+  const label = exp.status ? exp.status.charAt(0).toUpperCase() + exp.status.slice(1) : '';
+  current.textContent = label;
+  const action = UI.statusAction(exp.status);
+  const main = action
+    ? `<button type="button" id="status-main" data-next="${UI.escapeHtml(action.next)}">${UI.escapeHtml(action.label)}</button>`
+    : '';
+  const archive = exp.status === 'archived'
+    ? ''
+    : '<button type="button" class="btn-danger" id="status-archive">Archive</button>';
+  actions.innerHTML = `${main}${archive}<button type="button" class="btn-ghost" id="status-open">Open in Settings</button>`;
+}
+
+async function runStatusAction(status) {
   const expId = document.getElementById('status-exp-id').value.trim();
   const el = document.getElementById('status-result');
   if (!expId) { el.className = 'error-msg'; el.textContent = 'Select an experiment above first.'; return; }
-  const status = document.getElementById('status-value').value;
-  const result = await callApi(`/api/experiments/${expId}/status`, {
-    method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ status }),
-  });
-  el.className = result.ok ? 'ok-msg' : 'error-msg';
-  el.textContent = result.ok ? `Status updated to "${result.data.status}".` : `Error: ${result.message}`;
-  if (result.ok) {
-    if (currentDetail && currentDetail.id === expId) currentDetail = null;
-    loadExperimentList();
+  const buttons = document.querySelectorAll('#status-actions button');
+  buttons.forEach((button) => { button.disabled = true; });
+  const result = await commitStatus(expId, status);
+  if (result.cancelled) {
+    renderStatusPage();
+    return;
   }
+  el.className = result.ok ? 'ok-msg' : 'error-msg';
+  el.textContent = result.ok
+    ? `Status is now ${result.data.status}.`
+    : `Error: ${result.message}`;
+  renderStatusPage();
 }
 
 function openStatusSettings() {
@@ -3712,6 +3882,29 @@ document.getElementById('invite-body').addEventListener('click', async (event) =
     return;
   }
   await loadInvites();
+});
+
+document.getElementById('emergency-dismiss').addEventListener('click', () => {
+  try { sessionStorage.setItem('pivit-owner-password-banner', '1'); } catch (err) { /* private mode */ }
+  const banner = document.getElementById('emergency-banner');
+  if (banner) banner.hidden = true;
+});
+
+document.getElementById('page-status').addEventListener('change', (event) => {
+  if (event.target && event.target.id === 'status-exp-id') {
+    const el = document.getElementById('status-result');
+    if (el) el.textContent = '';
+    renderStatusPage();
+  }
+});
+
+document.getElementById('page-status').addEventListener('click', (event) => {
+  const main = event.target.closest('#status-main');
+  const archive = event.target.closest('#status-archive');
+  const open = event.target.closest('#status-open');
+  if (main) runStatusAction(main.dataset.next);
+  else if (archive) runStatusAction('archived');
+  else if (open) openStatusSettings();
 });
 
 document.getElementById('view-as-go').addEventListener('click', async () => {

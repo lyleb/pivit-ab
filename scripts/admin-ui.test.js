@@ -30,6 +30,8 @@ const planner = ui.plannerShell('wizard');
 assert.ok(planner.includes('Small change'));
 assert.ok(planner.includes('Medium'));
 assert.ok(planner.includes('Big'));
+assert.ok(planner.includes('Custom'));
+assert.ok(planner.includes('your own figures'));
 assert.ok(planner.includes('about 5% relative'));
 assert.ok(planner.includes('Advanced'));
 assert.ok(!planner.includes('MDE'));
@@ -54,6 +56,38 @@ assert.deepStrictEqual(ui.statusAction('draft'), { label: 'Start experiment', ne
 assert.deepStrictEqual(ui.statusAction('running'), { label: 'Pause', next: 'paused' });
 assert.deepStrictEqual(ui.statusAction('paused'), { label: 'Resume', next: 'running' });
 assert.strictEqual(ui.statusAction('archived'), null);
+assert.notStrictEqual(ui.statusAction('draft').next, 'archived');
+assert.notStrictEqual(ui.statusAction('running').next, 'archived');
+assert.notStrictEqual(ui.statusAction('paused').next, 'archived');
+assert.strictEqual(ui.displayedStatus('running', null, 10), 'running');
+assert.strictEqual(ui.displayedStatus('running', { status: 'paused', at: 200 }, 100), 'paused');
+assert.strictEqual(ui.displayedStatus('paused', { status: 'paused', at: 200 }, 100), 'paused');
+assert.strictEqual(ui.displayedStatus('running', { status: 'paused', at: 100 }, 200), 'running');
+assert.strictEqual(ui.plannerChoice(5), 'small');
+assert.strictEqual(ui.plannerChoice(10), 'medium');
+assert.strictEqual(ui.plannerChoice(20), 'big');
+assert.strictEqual(ui.plannerChoice(15), 'custom');
+assert.strictEqual(ui.plannerChoice(''), 'custom');
+assert.strictEqual(ui.plannerSelectionAfterEdit('relative', 15), 'custom');
+assert.strictEqual(ui.plannerSelectionAfterEdit('relative', 10), 'medium');
+assert.strictEqual(ui.plannerSelectionAfterEdit('baseline', 10), 'custom');
+assert.strictEqual(ui.plannerSelectionAfterEdit('weekly', 10), 'custom');
+assert.strictEqual(ui.plannerSelectionAfterEdit('weeks', 5), 'custom');
+assert.strictEqual(ui.showSupportBar({ superadmin: true, viewing: false, otherAccounts: 0 }), false);
+assert.strictEqual(ui.showSupportBar({ superadmin: true, viewing: false, otherAccounts: 1 }), true);
+assert.strictEqual(ui.showSupportBar({ superadmin: false, viewing: false, otherAccounts: 2 }), false);
+assert.strictEqual(ui.showSupportBar({ superadmin: true, viewing: true, otherAccounts: 0 }), true);
+assert.strictEqual(
+  ui.supportViewCopy(false),
+  'Support view: see another customer\'s account read-only. Every view is logged.'
+);
+assert.ok(ui.supportViewCopy(true, 'Acme').includes('Acme'));
+assert.ok(ui.supportViewCopy(true, 'Acme').includes('read-only'));
+assert.strictEqual(ui.showOwnerPasswordBanner(true, false), true);
+assert.strictEqual(ui.showOwnerPasswordBanner(true, true), false);
+assert.strictEqual(ui.showOwnerPasswordBanner(false, false), false);
+assert.ok(ui.OWNER_PASSWORD_BANNER.includes('owner password'));
+assert.ok(!ui.OWNER_PASSWORD_BANNER.includes('emergency'));
 
 assert.strictEqual(ui.shortVariantLabel('variant-b'), 'B');
 assert.strictEqual(ui.shortVariantLabel('Control'), 'Control');

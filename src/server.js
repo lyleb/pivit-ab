@@ -28,6 +28,7 @@ const invitesRouter = require('./routes/invites');
 const auditRouter = require('./routes/audit');
 const { setupRouter, sitesRouter } = require('./routes/setup');
 const webhooksRouter = require('./routes/webhooks');
+const { sendOwnerPage } = require('./owner-page');
 
 const app = express();
 // Railway (like most hosts) sits behind a reverse proxy. Without this, Express
@@ -72,6 +73,9 @@ app.use('/snippet/editor.js', (req, res, next) => {
 // See src/robots.js. There is no sitemap.xml — a sitemap belongs on the
 // future marketing site, not on this app.
 app.get('/robots.txt', sendRobotsTxt);
+// Unlisted owner-password page. Not a file under public/, so /owner.html is
+// not served. Not linked from the sign-in page.
+app.get('/owner', sendOwnerPage);
 
 // Fills in <link rel="canonical"> from APP_ORIGIN (else https://pivitlab.com)
 // before the static handler can send the file unchanged.
