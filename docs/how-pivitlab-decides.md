@@ -52,6 +52,33 @@ If the traffic split is broken (the health sample-ratio check), the verdict says
 
 A test with no stored plan keeps its numbers. The prompt to set a plan is a nudge. Nothing already stored in `events` is rewritten by saving a plan, revealing early, or reading a verdict.
 
+## What the client sees while the test is blind
+
+The client portal does not calculate a result when the page loads. A job stores one snapshot per test per London day, at 06:00 Europe/London. Opening the page reads that snapshot. A second run the same day does not write another row.
+
+The headline is one of a fixed list:
+
+- Collecting data, on track
+- Traffic lower than planned
+- Unlikely to finish in time
+- Check needed (split or tracking issue)
+- Result ready
+
+None of them says which version is ahead. Progress is shown to the nearest 5%. A projected date more than three weeks away is rounded to the week.
+
+Futility is “this probably will not reach an answer”, never which way. The traffic check comes first. The recent daily rate (last 14 days) is run forward to a cap: 1.5 times the planned duration, and never more than 16 weeks. If the projected end is past that cap, the snapshot is “unlikely” and the posteriors are not read.
+
+Otherwise the job draws about 2,000 futures from the current Beta posteriors, simulates the visitors still expected by the cap, and applies the same Win/Loss rule as the verdict (the credible interval on relative uplift excludes zero, with the Bonferroni bar when there is more than one challenger). The share of those futures that finish as a win or a loss is P(decisive). It is symmetrical: swapping the versions does not change the band.
+
+- 30% or more: no flag
+- 10% to 30%: an amber note on the owner dashboard only, “may end inconclusive”
+- under 10%, and the projected end is already past the planned date: the client headline can become “Unlikely to finish in time”
+- under 10%, but the visitors will still arrive on time: owner only. The client is not told the test is unlikely to finish
+
+The client sees “Unlikely to finish in time” only after that band has been stored on two days in a row. The owner can see the amber note on the first day. An identical A/A (no true difference, traffic on time) lands in the low band, near the usual false-call rate, and the client headline stays “Collecting data, on track”.
+
+A client can request a review. That writes an audit row and tells the owner. It does not reveal a result and it does not stop the test. The owner decides, and that decision is logged separately.
+
 ## Simulations
 
 Seed `20261008`. Each run draws the planned visitors from an exact binomial, then reads the verdict with 4,000 posterior draws. A false positive is any win or any loss when the variants are identical. Power is a win for the challenger that truly has the planned uplift.

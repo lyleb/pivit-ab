@@ -10,6 +10,7 @@ const { applyTenancy } = require('./tenancy');
 const { applySignup } = require('./signup');
 const { applyUrlMatchType } = require('./url-match-type');
 const { applyAccessRequests } = require('./access-requests');
+const { applyPortal } = require('./portal');
 
 const LOCK_KEY = 814021;
 
@@ -25,6 +26,8 @@ const VERSIONS = [
   { version: '003', name: 'url-match-type', run: applyUrlMatchType },
   // Access requests stay out of schema.sql. Version 000 is already recorded.
   { version: '004', name: 'access_requests', run: applyAccessRequests },
+  // Portal snapshots and review requests stay out of schema.sql too.
+  { version: '005', name: 'portal', run: applyPortal },
 ];
 
 async function ensureMigrationsTable(queryable) {

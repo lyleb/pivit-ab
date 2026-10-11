@@ -56,6 +56,7 @@ function appFor(session) {
   app.use('/api/goals', require('../src/routes/goals').router);
   app.use('/api/clients', require('../src/routes/clients'));
   app.use('/api/client', require('../src/routes/client'));
+  app.use('/api/review-requests', require('../src/routes/review-requests'));
   app.use('/api/editor', require('../src/routes/editor'));
   app.use('/api/host-hits', require('../src/routes/host-hits'));
   return app;
@@ -282,6 +283,7 @@ async function main() {
       ['POST', `/api/experiments/${bExp.id}/test-traffic/remove`, { mode: 'test', confirm: true }],
       ['POST', `/api/experiments/${bExp.id}/test-traffic/restore`, { mode: 'test', confirm: true }],
       ['GET', `/api/experiments/${bExp.id}/test-traffic/audit`],
+      ['GET', `/api/experiments/${bExp.id}/snapshot-note`],
       ['GET', `/api/experiments/${bExp.id}/plan`],
       ['PUT', `/api/experiments/${bExp.id}/plan`, {}],
       ['POST', `/api/experiments/${bExp.id}/reveal`, { confirm: true }],
@@ -336,6 +338,26 @@ async function main() {
 
     const portal = await request(serverClient, 'GET', '/api/client/experiments');
     assert.deepStrictEqual(portal.json.experiments.map((exp) => exp.id), [aExp.id]);
+    await expectMissing(serverClient, 'GET', `/api/client/experiments/${bExp.id}`);
+    await expectMissing(serverClient, 'POST', `/api/client/experiments/${bExp.id}/review-request`, {});
+
+    const bReview = await db.query(
+      `INSERT INTO review_requests (account_id, experiment_id, client_id)
+       VALUES ($1, $2, $3) RETURNING id`,
+      [bId, bExp.id, bClient.rows[0].id]
+    );
+    const reviewsA = await request(serverA, 'GET', '/api/review-requests');
+    assert.strictEqual(reviewsA.status, 200);
+    assert.deepStrictEqual(reviewsA.json.requests, []);
+    await expectMissing(serverA, 'POST', `/api/review-requests/${bReview.rows[0].id}/decide`, {});
+    const reviewsB = await request(serverB, 'GET', '/api/review-requests');
+    assert.strictEqual(reviewsB.status, 200);
+    assert.ok(reviewsB.json.requests.some((row) => row.id === bReview.rows[0].id));
+    const stillOpen = await db.query(
+      `SELECT decided_at FROM review_requests WHERE id = $1`,
+      [bReview.rows[0].id]
+    );
+    assert.strictEqual(stillOpen.rows[0].decided_at, null);
 
     const badToken = createEditToken(bExp.variantId, undefined, { accountId: aId, siteId: aSiteId });
     const editor = await request(publicServer, 'GET', `/api/editor/variants/${bExp.variantId}?token=${encodeURIComponent(badToken)}`);

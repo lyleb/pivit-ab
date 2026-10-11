@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-GB">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -9,8 +9,8 @@
 <link rel="icon" type="image/svg+xml" href="/assets/pivitlab-icon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<title>pivitlab — Results</title>
-<link rel="stylesheet" href="/assets/pivit.css?v=4">
+<title>pivitlab — Your tests</title>
+<link rel="stylesheet" href="/assets/pivit.css?v=6">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="/admin-ui.js"></script>
 <style>
@@ -18,45 +18,90 @@
     position: sticky; top: 0; z-index: 20;
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
     background: var(--sidebar); border-bottom: 1px solid var(--border);
-    padding: calc(12px + env(safe-area-inset-top)) 20px 12px;
+    padding: calc(14px + env(safe-area-inset-top)) 28px 14px;
   }
-  .portal-top .brand-logo { height: 36px; }
-  .portal-top-actions { display: flex; align-items: center; gap: 12px; }
-  .welcome { font-size: 0.85em; color: var(--text-muted); }
-  .portal-wrap { max-width: 1040px; margin: 0 auto; padding: 24px 20px 48px; }
-  .portal-grid {
-    display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 14px; align-items: start;
+  .portal-top .brand-logo { height: 28px; }
+  .portal-top-actions { display: flex; align-items: center; gap: 14px; color: var(--text-muted); font-size: 0.92em; }
+  .portal-top-actions button { background: none; border: none; color: var(--mint); padding: 0; font-weight: 650; }
+  .portal-top-actions button:hover { background: none; color: var(--mint-dark); }
+  .portal-wrap { max-width: 1180px; margin: 0 auto; padding: 28px 28px 64px; }
+  .portal-wrap h1 { font-size: 1.7em; margin: 0 0 4px; }
+  .group-title { margin: 28px 0 10px; font-size: 1.15em; }
+  .portal-head, .portal-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 2.1fr) minmax(140px, 1.25fr) minmax(170px, 1.55fr) minmax(180px, 1.7fr) auto;
+    gap: 18px; align-items: center;
   }
-  .portal-grid > .card { margin-top: 0; }
-  .url-group { margin-top: 16px; }
-  .url-group:first-child { margin-top: 4px; }
-  .url-group-label { display: block; margin: 0 0 6px; }
-  button.exp-row {
-    display: flex; justify-content: space-between; align-items: center; gap: 10px;
-    width: 100%; min-height: var(--tap); margin-top: 8px; padding: 10px 12px; text-align: left;
-    background: var(--card-2); color: var(--ink); border: 1px solid var(--border); border-radius: 8px;
-    font-weight: 650;
+  .portal-head {
+    padding: 0 22px 8px; font-size: 0.72em; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--text-muted); font-weight: 700;
   }
-  button.exp-row:hover { background: #222633; }
-  button.exp-row.selected { border-color: var(--indigo); background: rgba(86,53,251,0.16); }
-  button.exp-row .exp-name { overflow-wrap: anywhere; }
-  .results-meta { margin: -4px 0 14px; }
-  .trend-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
-  .portal-foot { margin: 22px 0 0; }
-  .plan-sentence { font-size: 1.05em; font-weight: 750; margin: 8px 0; }
-  .progress-track { height: 8px; background: #262a38; border-radius: 99px; overflow: hidden; margin: 6px 0 14px; }
-  .progress-bar { height: 100%; background: var(--indigo); }
+  .portal-row {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 16px 22px; margin-bottom: 10px;
+  }
+  .portal-row .t { font-weight: 700; }
+  .portal-row .s, .muted { color: var(--text-muted); font-size: 0.86em; }
+  .pill { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 0.78em; font-weight: 700; }
+  .pill.run { background: rgba(2,222,181,0.14); color: var(--mint); }
+  .pill.risk { background: rgba(230,194,122,0.16); color: var(--warn); }
+  .pill.done { background: rgba(86,53,251,0.22); color: #c4b6ff; }
+  .pill.draft { background: #2a2e3c; color: var(--text-muted); }
+  .bar { height: 8px; background: #262a38; border-radius: 99px; overflow: hidden; margin: 6px 0; }
+  .bar i { display: block; height: 100%; background: var(--mint); border-radius: 99px; }
+  .bar.warn i { background: var(--warn); }
+  .headline { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+  .state-icon {
+    display: inline-flex; width: 28px; height: 28px; border-radius: 50%;
+    align-items: center; justify-content: center; background: var(--card-2);
+    flex: 0 0 auto; font-size: 0.85em;
+  }
+  .state-icon.ok { color: var(--mint); }
+  .state-icon.warn { color: var(--warn); }
+  .back-link { background: none; border: none; color: var(--mint); padding: 0; font-weight: 650; margin-bottom: 14px; }
+  .back-link:hover { background: none; color: var(--mint-dark); }
+  .run-badge {
+    display: inline-block; margin-bottom: 10px; padding: 4px 10px; border-radius: 99px;
+    background: rgba(2,222,181,0.14); color: var(--mint); font-size: 0.78em; font-weight: 700;
+  }
+  .run-badge.risk { background: rgba(230,194,122,0.16); color: var(--warn); }
+  .run-badge.done { background: rgba(86,53,251,0.28); color: #d5ccff; }
+  .detail-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.9fr); gap: 16px; align-items: start; }
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; margin-bottom: 16px; }
+  .panel h2 { margin: 0 0 8px; }
+  .panel h3 { font-size: 1.35em; margin: 6px 0 8px; }
+  .win-panel { border-color: #1d6b52; }
+  .loss-panel { border-color: #8a3a3a; }
+  .flat-panel { border-color: #8a6a2f; }
+  .note {
+    font-size: 0.86em; color: var(--text-muted);
+    border-left: 3px solid var(--indigo); padding-left: 10px; margin: 12px 0 0;
+  }
+  .check-list { list-style: none; margin: 8px 0 0; padding: 0; }
+  .check-list li { margin: 6px 0; }
+  .check-list .mark { color: var(--mint); margin-right: 6px; }
+  .check-list .mark.bad { color: var(--warn); }
+  .preview-link { color: var(--mint); font-weight: 650; margin-left: 8px; }
+  .stack-label { color: var(--text-muted); font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 700; margin-top: 12px; }
+  .next-step { margin: 0 0 14px; }
+  .next-step strong { display: block; }
+  .results-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  .results-table th { text-align: left; color: var(--text-muted); font-size: 0.78em; font-weight: 700; padding: 4px 8px 8px 0; }
+  .results-table td { padding: 4px 8px 4px 0; }
+  .results-table .num, .results-table th.num { text-align: right; }
+  .peek-banner { border: 1px solid #8a6a2f; background: var(--warn-bg); color: var(--warn); border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; }
   .verdict-card { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin: 12px 0; background: var(--card-2); }
   .verdict-card.win { border-color: #1d6b52; }
   .verdict-card.loss { border-color: #8a3a3a; }
   .verdict-card.inconclusive, .verdict-card.data_problem { border-color: #8a6a2f; }
-  .verdict-card h3 { margin: 4px 0 8px; font-size: 1.35em; }
-  .peek-banner { border: 1px solid #8a6a2f; background: var(--warn-bg); color: var(--warn); border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; }
-  @media (max-width: 860px) {
-    .portal-grid { grid-template-columns: minmax(0, 1fr); }
-    .portal-top .welcome { display: none; }
-    .portal-top .brand-logo { height: 28px; }
-    .portal-wrap { padding: 16px 16px 40px; }
+  .progress-track { height: 8px; background: #262a38; border-radius: 99px; overflow: hidden; margin: 6px 0 14px; }
+  .progress-bar { height: 100%; background: var(--indigo); }
+  @media (max-width: 899px) {
+    .portal-top { padding: calc(12px + env(safe-area-inset-top)) 16px 12px; }
+    .portal-wrap { padding: 18px 16px 48px; }
+    .portal-head { display: none; }
+    .portal-row, .detail-grid { grid-template-columns: 1fr; gap: 12px; }
+    .portal-row .open-cell .btn-ghost, #review-btn { width: 100%; }
   }
 </style>
 </head>
@@ -64,23 +109,26 @@
 <header class="portal-top">
   <span class="brand-logo" role="img" aria-label="pivitlab"></span>
   <div class="portal-top-actions">
-    <span class="welcome" id="welcome-msg"></span>
-    <button type="button" class="btn-ghost" id="logout-btn">Log out</button>
+    <span id="welcome-msg"></span>
+    <button type="button" id="logout-btn">Sign out</button>
   </div>
 </header>
 
 <div class="portal-wrap">
-  <div class="portal-grid">
-    <section class="card" id="list-card">
-      <h2>Your experiments</h2>
-      <p id="exp-msg" class="hint">Loading…</p>
-      <div id="experiments-list"></div>
-    </section>
+  <div id="view-list">
+    <h1>Your tests</h1>
+    <p id="list-intro" class="muted">Status headlines refresh once a day.</p>
+    <p id="list-msg" class="muted">Loading…</p>
+    <div id="list-mount"></div>
+  </div>
 
-    <section class="card" id="results-section" hidden>
-      <h2 id="results-title">Results</h2>
-      <p id="results-meta" class="hint results-meta"></p>
-      <p id="results-msg" class="hint"></p>
+  <div id="view-detail" hidden>
+    <button type="button" class="back-link" id="back-btn">← All tests</button>
+    <div id="detail-mount"></div>
+    <section id="live-section" hidden>
+      <h2 id="live-title">Results</h2>
+      <p id="results-meta" class="muted"></p>
+      <p id="results-msg" class="muted"></p>
       <div id="plan-note"></div>
       <div id="results-live" hidden>
         <div id="bayesian-summary" class="result-summary" hidden></div>
@@ -97,43 +145,40 @@
             <tbody id="results-body"></tbody>
           </table>
         </div>
-        <p class="hint">A visitor who converts more than once still counts as one conversion.</p>
+        <p class="muted">A visitor who converts more than once still counts as one conversion.</p>
         <div id="goal-breakdown" hidden></div>
-        <p class="hint table-scroll-hint">Swipe the table sideways for more columns.</p>
         <div class="chart-wrap rate-wrap" id="rate-chart-wrap"><canvas id="rate-chart"></canvas></div>
         <div class="trend-row" id="trend-toggle">
-          <span class="hint">Trend:</span>
-          <button type="button" class="btn-ghost trend-toggle-btn active" id="trend-mode-cumulative">Cumulative</button>
-          <button type="button" class="btn-ghost trend-toggle-btn" id="trend-mode-daily">Daily</button>
+          <span class="muted">Trend:</span>
+          <button type="button" class="btn-ghost" id="trend-mode-cumulative">Cumulative</button>
+          <button type="button" class="btn-ghost" id="trend-mode-daily">Daily</button>
         </div>
         <div class="chart-wrap trend-wrap"><canvas id="trend-chart"></canvas></div>
       </div>
     </section>
   </div>
-  <p class="hint portal-foot">Questions about a result? Contact the person who set up your tests.</p>
 </div>
 
 <script>
 const UI = window.PivitUI;
-const STATUS_CLASS = { running: 'live', draft: 'draft', paused: 'paused', archived: 'archived' };
-const STATUS_LABEL = { running: 'Running', paused: 'Paused', archived: 'Finished', draft: 'Not started' };
 const LOAD_ERROR = 'Something went wrong loading your results. Please refresh, or contact the person who set up your tests.';
-const DRAFT_GATE = "This test hasn't started yet. Results appear once it's running.";
-const EMPTY_GATE = "This test hasn't collected visitors yet. Results appear once it's running.";
+const STATUS_CLASS = { running: 'live', draft: 'draft', paused: 'paused', archived: 'archived' };
 
 let rateChart;
 let trendChart;
 let currentTrendSeries = [];
 let trendMode = 'cumulative';
+let currentExperimentId = null;
 
-function statusLabel(status) {
-  return STATUS_LABEL[status] || status || '';
+function num(value) {
+  return Number(value || 0).toLocaleString('en-GB');
 }
 
-function formatSince(iso) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+function iconHtml(icon) {
+  if (icon === 'tick') return '<span class="state-icon ok" aria-hidden="true">✓</span>';
+  if (icon === 'up') return '<span class="state-icon warn" aria-hidden="true">▲</span>';
+  if (icon === 'alert') return '<span class="state-icon warn" aria-hidden="true">!</span>';
+  return '<span class="state-icon" aria-hidden="true">●</span>';
 }
 
 document.getElementById('logout-btn').addEventListener('click', async () => {
@@ -141,10 +186,27 @@ document.getElementById('logout-btn').addEventListener('click', async () => {
   window.location.href = '/login.html';
 });
 
-async function callApi(path) {
+document.getElementById('back-btn').addEventListener('click', () => {
+  currentExperimentId = null;
+  if (location.hash) history.pushState(null, '', location.pathname);
+  showList();
+});
+
+window.addEventListener('hashchange', () => {
+  const id = testIdFromHash();
+  if (id) openTest(id);
+  else showList();
+});
+
+function testIdFromHash() {
+  const match = location.hash.match(/^#test\/([0-9a-f-]{36})$/i);
+  return match ? match[1] : '';
+}
+
+async function callApi(path, options) {
   let res;
   try {
-    res = await fetch(path);
+    res = await fetch(path, options || {});
   } catch (err) {
     console.error('Client API error', path, err);
     return { ok: false, message: "Couldn't reach pivitlab. Check your connection and try again." };
@@ -163,155 +225,294 @@ async function callApi(path) {
   return { ok: true, data };
 }
 
+function showList() {
+  document.getElementById('view-list').hidden = false;
+  document.getElementById('view-detail').hidden = true;
+  document.title = 'pivitlab — Your tests';
+}
+
+function showDetail() {
+  document.getElementById('view-list').hidden = true;
+  document.getElementById('view-detail').hidden = false;
+  window.scrollTo(0, 0);
+}
+
+function renderList(payload) {
+  const experiments = (payload && payload.experiments) || [];
+  const msg = document.getElementById('list-msg');
+  const mount = document.getElementById('list-mount');
+  const intro = document.getElementById('list-intro');
+  const refreshed = payload && payload.refreshed_label;
+  intro.textContent = refreshed
+    ? `${experiments.length} ${experiments.length === 1 ? 'test' : 'tests'} · status headlines refresh once a day (last updated ${refreshed})`
+    : `${experiments.length} ${experiments.length === 1 ? 'test' : 'tests'} · status headlines refresh once a day`;
+  if (!experiments.length) {
+    msg.textContent = 'No tests have been shared with you yet.';
+    mount.innerHTML = '';
+    return;
+  }
+  msg.textContent = '';
+  const groups = [
+    ['running', 'Running'],
+    ['finished', 'Finished'],
+    ['draft', 'Draft'],
+  ];
+  mount.innerHTML = groups.map(([key, title]) => {
+    const rows = experiments.filter((item) => item.group === key);
+    if (!rows.length) return '';
+    const head = key === 'draft' ? '' : `<div class="portal-head"><span>Test</span><span>Status</span><span>Progress to planned sample</span><span>Headline</span><span></span></div>`;
+    const body = rows.map((item) => renderRow(item)).join('');
+    return `<h2 class="group-title">${title}</h2>${head}${body}`;
+  }).join('');
+  mount.querySelectorAll('[data-open]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = button.getAttribute('data-open');
+      history.pushState(null, '', `#test/${id}`);
+      openTest(id);
+    });
+  });
+}
+
+function renderRow(item) {
+  const progress = item.group === 'draft'
+    ? '<span class="s">Not started</span>'
+    : item.planned_visitors
+    ? `<span class="s">${num(item.visitors)} of ${num(item.planned_visitors)} visitors</span>
+       <div class="bar ${item.bar === 'warn' ? 'warn' : ''}"><i style="width:${Number(item.progress_pct_band) || 0}%"></i></div>
+       <div class="s">${UI.escapeHtml(item.ready_label || '')}</div>`
+    : (item.verdict_line
+      ? `<span class="s">${UI.escapeHtml(item.verdict_line)}</span><div class="s">${UI.escapeHtml(item.range_line || '')}</div>`
+      : '<span class="s">Updates once a day</span>');
+  const note = item.status_note ? `<div class="s">${UI.escapeHtml(item.status_note)}</div>` : '';
+  const headline = item.headline
+    ? `<div class="headline">${iconHtml(item.icon)}<span>${UI.escapeHtml(item.headline)}</span></div>`
+    : '<span class="s">Updates once a day</span>';
+  const action = item.group === 'finished' ? 'View result' : 'Open';
+  const actionClass = item.group === 'finished' ? 'btn' : 'btn-ghost';
+  return `<div class="portal-row">
+    <div><div class="t">${UI.escapeHtml(item.name)}</div><div class="s">${UI.escapeHtml(item.subtitle || '')}</div></div>
+    <div><span class="pill ${UI.escapeHtml(item.tone || 'run')}">${UI.escapeHtml(item.pill || '')}</span>${note}</div>
+    <div>${progress}</div>
+    <div>${headline}</div>
+    <div class="open-cell"><button type="button" class="${actionClass}" data-open="${UI.escapeHtml(item.id)}">${action}</button></div>
+  </div>`;
+}
+
+function healthList(checks) {
+  return `<ul class="check-list">${(checks || []).map((row) => {
+    const mark = row.ok ? '<span class="mark">✓</span>' : '<span class="mark bad">!</span>';
+    return `<li>${mark}${UI.escapeHtml(row.label || '')}</li>`;
+  }).join('')}</ul>`;
+}
+
+function reviewBox(review, context) {
+  if (review && review.requested_label) {
+    return `<p>Review requested on ${UI.escapeHtml(review.requested_label)}. It's with the person who runs your tests. You can't reveal a result yourself.</p>`;
+  }
+  const copy = context === 'concluded'
+    ? 'Want this checked? Request a review. The person who runs your tests decides, and the request is logged.'
+    : 'If you think this should stop, request a review. You will not see a result unless they decide to end it. That decision is logged.';
+  return `<p>${copy}</p><button type="button" id="review-btn">Request a review</button><p id="review-msg" class="muted"></p>`;
+}
+
+function renderBlind(detail) {
+  const exp = detail.experiment;
+  const snap = detail.snapshot;
+  const days = Number(detail.days_elapsed) || 0;
+  const min = detail.min_runtime_days ? Number(detail.min_runtime_days) : 0;
+  const badge = min ? `Running · day ${days} of at least ${min}` : `Running · day ${days}`;
+  const tone = snap && (snap.headline_code === 'unlikely' || snap.headline_code === 'check' || snap.headline_code === 'traffic_low') ? 'risk' : '';
+  const stopped = detail.mode === 'stopped'
+    ? '<p>This test was stopped before the planned sample, so there is no result.</p>'
+    : '';
+  const headlineBlock = snap ? `
+    <div class="panel">
+      <div class="muted">Today's headline${detail.refreshed_label ? ` (updated ${UI.escapeHtml(detail.refreshed_label)})` : ''}</div>
+      <div class="headline" style="margin-top:8px;font-size:1.25em;">${iconHtml(snap.icon)}<span>${UI.escapeHtml(snap.headline || '')}</span></div>
+      <div class="bar ${snap.headline_code === 'unlikely' || snap.headline_code === 'traffic_low' || snap.headline_code === 'check' ? 'warn' : ''}" style="margin-top:14px;"><i style="width:${Number(snap.progress_pct_band) || 0}%"></i></div>
+      <p class="muted">${num(snap.visitors)} of ${num(snap.planned_visitors)} visitors (${Number(snap.progress_pct_band) || 0}%) · about ${num(snap.daily_rate)} a day · ${UI.escapeHtml(snap.ready_label || '')}</p>
+      <p class="note">${UI.escapeHtml(snap.progress_note || '')}</p>
+    </div>
+    <div class="panel">
+      <h2>Our recommendation</h2>
+      <p>${UI.escapeHtml(snap.recommendation || '')}</p>
+    </div>
+    <div class="panel">
+      <h2>Health check</h2>
+      ${healthList(snap.health)}
+    </div>` : `
+    <div class="panel">
+      <h2>Today's headline</h2>
+      <p>The headline appears after the 06:00 update (Europe/London). This page does not calculate it when you open it.</p>
+      <p class="note">This is progress, not a result. Who's ahead isn't shown until the test finishes, because early leads often reverse.</p>
+    </div>`;
+  const versions = (exp.variants || []).map((variant) => {
+    const link = variant.preview_url
+      ? `<a class="preview-link" href="${UI.escapeHtml(variant.preview_url)}" target="_blank" rel="noopener">preview</a>`
+      : '';
+    return `<div>${UI.escapeHtml(variant.name)}${link}</div>`;
+  }).join('');
+  const hypothesis = exp.hypothesis
+    ? `<div class="stack-label">Hypothesis</div><p>${UI.escapeHtml(exp.hypothesis)}</p>`
+    : '';
+  const possible = snap && snap.possible_headlines
+    ? `<div class="panel">
+        <h2>Possible headlines</h2>
+        <p class="muted">${snap.possible_headlines.map((line) => UI.escapeHtml(line)).join(' · ')}</p>
+        <p class="note">A fixed list, agreed before launch. None of them says who is winning.</p>
+      </div>`
+    : '';
+  return `
+    <div class="run-badge ${tone}">${UI.escapeHtml(detail.mode === 'stopped' ? 'Finished early' : badge)}</div>
+    <h1>${UI.escapeHtml(exp.name)}</h1>
+    <p class="muted">Results stay hidden until the planned sample is reached. That's what keeps the answer honest.</p>
+    ${stopped}
+    <div class="detail-grid">
+      <div>
+        ${headlineBlock}
+        <div class="panel">${reviewBox(detail.review, 'blind')}</div>
+      </div>
+      <div>
+        <div class="panel">
+          <h2>What's being tested</h2>
+          ${hypothesis}
+          <div class="stack-label">Page</div>
+          <p>${UI.escapeHtml(exp.page_line || exp.url_match || '')}</p>
+          <div class="stack-label">Goal</div>
+          <p>${UI.escapeHtml(exp.goal || 'Not set')}</p>
+          <div class="stack-label">Versions</div>
+          ${versions || '<p class="muted">No versions yet.</p>'}
+        </div>
+        ${possible}
+      </div>
+    </div>`;
+}
+
+function renderConcluded(detail) {
+  const exp = detail.experiment;
+  const snap = detail.snapshot;
+  const result = snap && snap.concluded;
+  if (!result) {
+    return `<h1>${UI.escapeHtml(exp.name)}</h1>
+      <div class="panel"><p>The daily update has not stored a result yet. This page does not calculate one when you open it.</p></div>`;
+  }
+  const klass = result.label === 'Win' ? 'win-panel' : (result.label === 'Loss' ? 'loss-panel' : 'flat-panel');
+  const rows = (result.rows || []).map((row) => `<tr>
+      <td>${UI.escapeHtml(row.version)}</td>
+      <td class="num">${num(row.visitors)}</td>
+      <td class="num">${num(row.conversions)}</td>
+      <td class="num">${UI.escapeHtml(row.rate)}</td>
+    </tr>`).join('');
+  const goal = result.goal_label || 'Conversions';
+  const range = result.range_label
+    ? `<p class="muted">95% range: ${UI.escapeHtml(result.range_label)}${result.probability_label ? ` · ${UI.escapeHtml(result.probability_label)}` : ''}</p>`
+    : '';
+  const steps = (result.whats_next || []).map((step, index) => `<div class="next-step"><strong>${index + 1}. ${UI.escapeHtml(step.title)}</strong><span class="muted">${UI.escapeHtml(step.body)}</span></div>`).join('');
+  const meta = `Finished ${UI.escapeHtml(result.finished_label || '')} · ${num(result.visitors)} visitors · ${num(result.days)} days`;
+  return `
+    <div class="run-badge done">${UI.escapeHtml(meta)}</div>
+    <h1>${UI.escapeHtml(exp.name)}</h1>
+    <div class="detail-grid">
+      <div>
+        <div class="panel ${klass}">
+          <div class="muted">Verdict</div>
+          <h3>${UI.escapeHtml(result.label === 'Win' || result.label === 'Loss' ? `${result.label}: ${result.variant_name}` : result.label)}</h3>
+          <p>${UI.escapeHtml(result.summary || '')}</p>
+          ${range}
+          <table class="results-table">
+            <thead><tr><th>Version</th><th class="num">Visitors</th><th class="num">${UI.escapeHtml(goal)}</th><th class="num">Rate</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <div class="panel">
+          <h2>Review</h2>
+          ${reviewBox(detail.review, 'concluded')}
+        </div>
+      </div>
+      <div>
+        <div class="panel">
+          <h2>What's next</h2>
+          ${steps}
+        </div>
+      </div>
+    </div>`;
+}
+
+function bindReview(experimentId) {
+  const button = document.getElementById('review-btn');
+  if (!button) return;
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    const msg = document.getElementById('review-msg');
+    if (msg) msg.textContent = 'Sending…';
+    const result = await callApi(`/api/client/experiments/${experimentId}/review-request`, { method: 'POST' });
+    if (!result.ok) {
+      button.disabled = false;
+      if (msg) msg.textContent = result.message;
+      return;
+    }
+    const when = result.data.requested_label || '';
+    button.replaceWith(Object.assign(document.createElement('p'), {
+      textContent: when
+        ? `Review requested on ${when}. It's with the person who runs your tests.`
+        : "Review requested. It's with the person who runs your tests.",
+    }));
+    if (msg) msg.textContent = '';
+  });
+}
+
+async function openTest(id) {
+  currentExperimentId = id;
+  showDetail();
+  hideLiveResults();
+  const mount = document.getElementById('detail-mount');
+  mount.innerHTML = '<p class="muted">Loading…</p>';
+  const result = await callApi(`/api/client/experiments/${id}`);
+  if (currentExperimentId !== id) return;
+  if (!result.ok) {
+    mount.innerHTML = `<p class="muted">${UI.escapeHtml(result.message)}</p>`;
+    return;
+  }
+  const detail = result.data;
+  document.title = `pivitlab — ${detail.experiment.name}`;
+  if (detail.mode === 'blind' || detail.mode === 'stopped') {
+    mount.innerHTML = renderBlind(detail);
+    bindReview(id);
+    return;
+  }
+  if (detail.mode === 'concluded') {
+    mount.innerHTML = renderConcluded(detail);
+    bindReview(id);
+    return;
+  }
+  if (detail.mode === 'draft') {
+    mount.innerHTML = `<h1>${UI.escapeHtml(detail.experiment.name)}</h1><p>This test hasn't started yet. Results appear once it's running.</p>`;
+    return;
+  }
+  mount.innerHTML = `<h1>${UI.escapeHtml(detail.experiment.name)}</h1>`;
+  document.getElementById('live-section').hidden = false;
+  loadLiveResults({ id, name: detail.experiment.name, status: detail.experiment.status, created_at: detail.experiment.created_at });
+}
+
 function hideLiveResults() {
+  document.getElementById('live-section').hidden = true;
   document.getElementById('results-live').hidden = true;
-  const note = document.getElementById('plan-note');
-  if (note) note.innerHTML = '';
+  document.getElementById('plan-note').innerHTML = '';
   document.getElementById('bayesian-summary').hidden = true;
+  document.getElementById('results-meta').textContent = '';
+  document.getElementById('results-msg').textContent = '';
   const goals = document.getElementById('goal-breakdown');
   if (goals) { goals.hidden = true; goals.innerHTML = ''; }
-  document.getElementById('results-meta').textContent = '';
   if (rateChart) { rateChart.destroy(); rateChart = null; }
   if (trendChart) { trendChart.destroy(); trendChart = null; }
   currentTrendSeries = [];
-  const trendCanvas = document.getElementById('trend-chart');
-  if (trendCanvas) {
-    trendCanvas.style.display = 'none';
-    trendCanvas.parentElement.classList.remove('has-data');
-  }
 }
 
-async function init() {
-  const me = await callApi('/api/auth/me');
-  if (!me.ok) return;
-  if (me.data.role !== 'client') { window.location.href = '/login.html'; return; }
-  document.getElementById('welcome-msg').textContent = `Signed in as ${me.data.client.name}`;
-
-  const result = await callApi('/api/client/experiments');
-  const msgEl = document.getElementById('exp-msg');
-  if (!result.ok) { msgEl.textContent = result.message; return; }
-
-  const experiments = result.data.experiments || [];
-  if (experiments.length === 0) { msgEl.textContent = 'No experiments have been shared with you yet.'; return; }
-  msgEl.textContent = '';
-
-  const groups = {};
-  experiments.forEach((exp) => {
-    const key = exp.url_match || '';
-    (groups[key] = groups[key] || []).push(exp);
-  });
-
-  const listEl = document.getElementById('experiments-list');
-  listEl.innerHTML = '';
-  Object.entries(groups).forEach(([url, exps]) => {
-    const group = document.createElement('div');
-    group.className = 'url-group';
-    const label = url ? UI.shortUrl(url) : 'Other tests';
-    group.innerHTML = `<div class="kicker url-group-label">${UI.escapeHtml(label)}</div>`;
-    exps.forEach((exp) => {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'exp-row';
-      row.id = `exp-row-${exp.id}`;
-      row.innerHTML = `<span class="exp-name">${UI.escapeHtml(exp.name)}</span> <span class="badge ${STATUS_CLASS[exp.status] || 'paused'}">${UI.escapeHtml(statusLabel(exp.status))}</span>`;
-      row.addEventListener('click', () => loadResults(exp));
-      group.appendChild(row);
-    });
-    listEl.appendChild(group);
-  });
+function formatSince(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
-
-function boundedRate(visitors, conversions) {
-  const v = Number(visitors) || 0;
-  const c = Number(conversions) || 0;
-  if (v <= 0 || c <= 0) return 0;
-  return +(Math.min(c, v) / v * 100).toFixed(2);
-}
-
-function computeTrendDatasets(series, mode) {
-  const days = [...new Set(series.map((r) => r.day))].sort();
-  const variantNames = [...new Set(series.map((r) => r.variant_name))];
-  const palette = ['#5635FB', '#02DEB5', '#e07a5f', '#c4b6ff', '#a3690f'];
-
-  const datasets = variantNames.map((name, i) => {
-    let cumVisitors = 0, cumConversions = 0;
-    const dataByDay = days.map((day) => {
-      const row = series.find((r) => r.day === day && r.variant_name === name) || {};
-      if (mode === 'cumulative' && row.cumulative_visitors != null) {
-        return boundedRate(row.cumulative_visitors, row.cumulative_conversions);
-      }
-      const v = Number(row.visitors) || 0;
-      const c = Number(row.conversions) || 0;
-      if (mode === 'cumulative') {
-        cumVisitors += v;
-        cumConversions += c;
-        return boundedRate(cumVisitors, cumConversions);
-      }
-      return boundedRate(v, c);
-    });
-    return { label: name, data: dataByDay, borderColor: palette[i % palette.length], backgroundColor: palette[i % palette.length], tension: 0.2, fill: false };
-  });
-
-  return {
-    labels: days.map((d) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })),
-    datasets,
-  };
-}
-
-function renderTrendChart() {
-  const trendCanvas = document.getElementById('trend-chart');
-  document.getElementById('trend-mode-cumulative').classList.toggle('active', trendMode === 'cumulative');
-  document.getElementById('trend-mode-daily').classList.toggle('active', trendMode === 'daily');
-
-  if (trendChart) trendChart.destroy();
-  if (currentTrendSeries.length === 0) {
-    trendCanvas.style.display = 'none';
-    trendCanvas.parentElement.classList.remove('has-data');
-    return;
-  }
-
-  const { labels, datasets } = computeTrendDatasets(currentTrendSeries, trendMode);
-  trendCanvas.style.display = 'block';
-  trendCanvas.parentElement.classList.add('has-data');
-  trendChart = new Chart(trendCanvas, {
-    type: 'line',
-    data: { labels, datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        title: { display: true, text: (trendMode === 'cumulative' ? 'Cumulative' : 'Daily') + ' conversion rate over time', color: '#e8e9f0' },
-        legend: { labels: { color: '#e8e9f0' } },
-      },
-      scales: {
-        x: { title: { display: true, text: 'Time (days)', color: '#e8e9f0' }, ticks: { color: '#9398ab' }, grid: { color: 'rgba(255,255,255,0.06)' } },
-        y: {
-          beginAtZero: true,
-          title: { display: true, text: 'Conversion rate (%)', color: '#e8e9f0' },
-          ticks: { callback: (v) => v + '%', color: '#9398ab' },
-          grid: { color: 'rgba(255,255,255,0.06)' },
-        },
-      },
-    },
-  });
-}
-
-function renderGoalBreakdown(goals, primaryGoal) {
-  const mount = document.getElementById('goal-breakdown');
-  if (!mount) return;
-  if (!goals || goals.length < 2) { mount.hidden = true; mount.innerHTML = ''; return; }
-  const blocks = goals.map((goal) => {
-    const rows = (goal.variants || []).map((item) => `<tr><td>${UI.escapeHtml(item.variant_name)}</td><td class="num">${item.conversions}</td><td class="num">${item.conversion_rate}%</td></tr>`).join('');
-    const primary = goal.primary || goal.key === primaryGoal ? ' · primary' : '';
-    return `<h3 style="margin:16px 0 8px;">${UI.escapeHtml(goal.label || goal.key)}${primary ? `<span class="hint">${UI.escapeHtml(primary)}</span>` : ''}</h3>
-      <div class="table-scroll"><table><thead><tr><th>Variant</th><th class="num">Conversions</th><th class="num">Rate</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-  }).join('');
-  mount.hidden = false;
-  mount.innerHTML = `<p class="hint">Each goal counts a visitor once.${primaryGoal ? ' The main table uses the primary goal.' : ' The main table counts a visitor once if they hit any goal.'}</p>${blocks}`;
-}
-
-document.getElementById('trend-mode-cumulative').addEventListener('click', () => { trendMode = 'cumulative'; renderTrendChart(); });
-document.getElementById('trend-mode-daily').addEventListener('click', () => { trendMode = 'daily'; renderTrendChart(); });
 
 function progressWidth(value, target) {
   if (!(target > 0)) return 0;
@@ -322,113 +523,72 @@ function renderClientProgress(reading) {
   const variants = (reading && reading.variants) || [];
   const rows = variants.map((row) => {
     const width = progressWidth(row.visitors, row.target);
-    const targetText = row.target ? ` of ${Number(row.target).toLocaleString('en-GB')}` : '';
+    const targetText = row.target ? ` of ${num(row.target)}` : '';
     return `<div>
       <strong>${UI.escapeHtml(row.variant_name)}</strong>
-      <span class="hint"> · ${Number(row.visitors || 0).toLocaleString('en-GB')}${targetText} visitors · ${row.traffic_split == null ? '' : row.traffic_split + '% of traffic'}</span>
+      <span class="muted"> · ${num(row.visitors)}${targetText} visitors</span>
       <div class="progress-track"><div class="progress-bar" style="width:${width}%"></div></div>
     </div>`;
   }).join('');
-  const days = reading ? Number(reading.days_elapsed) || 0 : 0;
-  const min = reading && reading.min_runtime_days ? Number(reading.min_runtime_days) : 0;
-  const dayLine = min
-    ? `<div><strong>${days} of ${min} days</strong><div class="progress-track"><div class="progress-bar" style="width:${progressWidth(days, min)}%"></div></div></div>`
-    : '';
-  return rows + dayLine;
+  return rows;
 }
 
 function renderClientVerdict(verdict) {
   if (!verdict) return '';
   if (verdict.verdict === 'data_problem' || verdict.label === 'Data problem') {
-    return `<section class="verdict-card data_problem"><div class="kicker">Verdict</div><h3>Data problem</h3><p>${UI.escapeHtml(verdict.summary || '')}</p></section>`;
+    return `<section class="verdict-card data_problem"><div class="muted">Verdict</div><h3>Data problem</h3><p>${UI.escapeHtml(verdict.summary || '')}</p></section>`;
   }
   const cards = (verdict.challengers || []).map((row) => `<section class="verdict-card ${UI.escapeHtml(row.verdict)}">
-      <div class="kicker">${UI.escapeHtml(row.variant_name)} against ${UI.escapeHtml(row.control_name || 'Control')}</div>
+      <div class="muted">${UI.escapeHtml(row.variant_name)} against ${UI.escapeHtml(row.control_name || 'Control')}</div>
       <h3>${UI.escapeHtml(row.label)}</h3>
       <p>Uplift ${UI.escapeHtml(row.uplift_label)} · 95% range ${UI.escapeHtml(row.ci_low_label)} to ${UI.escapeHtml(row.ci_high_label)}</p>
       <p>${UI.escapeHtml(row.rule_out || '')}</p>
     </section>`).join('');
   const secondary = (verdict.probability_best || []).map((row) => `${UI.escapeHtml(row.variant_name)} ${row.probability_best}%`).join(' · ');
   const details = secondary
-    ? `<details><summary>Probability best (secondary)</summary><p class="hint">This is not the decision. The decision is the verdict above, read once the plan was reached. ${secondary}.</p></details>`
+    ? `<details><summary>Probability best (secondary)</summary><p class="muted">This is not the decision. The decision is the verdict above. ${secondary}.</p></details>`
     : '';
   return cards + details;
 }
 
-async function loadResults(exp) {
-  document.querySelectorAll('.exp-row').forEach((el) => el.classList.remove('selected'));
-  const row = document.getElementById(`exp-row-${exp.id}`);
-  if (row) row.classList.add('selected');
-
-  const section = document.getElementById('results-section');
-  section.hidden = false;
-  document.getElementById('results-title').textContent = exp.name;
+async function loadLiveResults(exp) {
   const msgEl = document.getElementById('results-msg');
-  hideLiveResults();
-  section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
-  if (exp.status === 'draft') {
-    msgEl.textContent = DRAFT_GATE;
-    return;
-  }
-
+  document.getElementById('live-title').textContent = exp.name;
   msgEl.textContent = 'Loading…';
   const result = await callApi(`/api/client/results/${exp.id}`);
+  if (currentExperimentId !== exp.id) return;
   if (!result.ok) {
     msgEl.textContent = result.message;
     return;
   }
-
   const results = result.data.results || [];
   const reading = result.data.reading || {};
   const visitors = reading.total_visitors != null
     ? Number(reading.total_visitors)
     : results.reduce((sum, item) => sum + Number(item.visitors || 0), 0);
   const note = document.getElementById('plan-note');
-  const blinded = result.data.blinded || reading.mode === 'blind';
-
-  if (blinded) {
+  if (result.data.blinded || reading.mode === 'blind') {
     msgEl.textContent = '';
-    const count = visitors.toLocaleString('en-GB');
-    const days = Number(reading.days_elapsed) || 0;
-    const min = reading.min_runtime_days ? Number(reading.min_runtime_days) : null;
-    const dayText = min ? ` · ${days} of ${min} days` : '';
-    document.getElementById('results-meta').textContent = `${count} visitors${dayText}`;
-    const sentence = reading.plan && reading.plan.sentence ? reading.plan.sentence : '';
-    note.innerHTML = `<p class="plan-sentence">${UI.escapeHtml(sentence)}</p>
-      <p>Results stay hidden until the plan is reached.</p>
-      ${renderClientProgress(reading)}`;
+    note.innerHTML = '<p>Results stay hidden until the plan is reached.</p>';
     return;
   }
-
-  if (UI.resultsGated(exp.status, visitors)) {
-    msgEl.textContent = exp.status === 'draft' ? DRAFT_GATE : EMPTY_GATE;
-    return;
-  }
-
   msgEl.textContent = '';
   const since = formatSince(exp.created_at);
-  const count = visitors.toLocaleString('en-GB');
-  const meta = document.getElementById('results-meta');
-  if (exp.status === 'running' && since) meta.textContent = `Running since ${since} · ${count} visitors`;
-  else if (since) meta.textContent = `${statusLabel(exp.status)} · since ${since} · ${count} visitors`;
-  else meta.textContent = `${count} visitors`;
-
+  document.getElementById('results-meta').textContent = since
+    ? `${exp.status === 'running' ? 'Running since' : ''} ${since} · ${num(visitors)} visitors`.trim()
+    : `${num(visitors)} visitors`;
   if (reading.mode === 'data_problem' || reading.mode === 'verdict') {
     const peeked = reading.peeked ? '<div class="peek-banner"><strong>Peeked.</strong> Someone looked before the plan was reached. The verdict still uses the planned sample.</div>' : '';
     note.innerHTML = peeked + renderClientVerdict(result.data.verdict);
   } else if (reading.mode === 'peeked') {
-    note.innerHTML = '<div class="peek-banner"><strong>Peeked.</strong> Someone looked before the plan was reached. This is not the verdict.</div>';
+    note.innerHTML = '<div class="peek-banner"><strong>Peeked.</strong> Someone looked before the plan was reached. This is not the verdict.</div>' + renderClientProgress(reading);
   } else if (reading.mode === 'unplanned') {
     note.innerHTML = '<p>This test has no plan yet, so these figures are a live look, not a verdict.</p>';
   } else {
     note.innerHTML = '';
   }
-
   document.getElementById('results-live').hidden = false;
-  renderGoalBreakdown(result.data.goals, result.data.primary_goal);
-  const tbody = document.getElementById('results-body');
-  tbody.innerHTML = results.map((item) => `<tr>
+  document.getElementById('results-body').innerHTML = results.map((item) => `<tr>
     <td>${UI.escapeHtml(item.variant_name)}</td>
     <td class="num">${item.visitors}</td>
     <td class="num">${item.new_visitors}</td>
@@ -436,12 +596,10 @@ async function loadResults(exp) {
     <td class="num">${item.conversions}</td>
     <td class="num">${item.conversion_rate}%</td>
   </tr>`).join('');
-
   const rateWrap = document.getElementById('rate-chart-wrap');
-  const rateCanvas = document.getElementById('rate-chart');
   rateWrap.hidden = !results.length;
   if (results.length && window.Chart) {
-    rateChart = new Chart(rateCanvas, {
+    rateChart = new Chart(document.getElementById('rate-chart'), {
       type: 'bar',
       data: {
         labels: results.map((item) => item.variant_name),
@@ -450,7 +608,7 @@ async function loadResults(exp) {
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { title: { display: true, text: 'Conversion rate by variant', color: '#e8e9f0' }, legend: { labels: { color: '#e8e9f0' } } },
+        plugins: { legend: { labels: { color: '#e8e9f0' } } },
         scales: {
           x: { ticks: { color: '#9398ab' }, grid: { color: 'rgba(255,255,255,0.06)' } },
           y: { beginAtZero: true, ticks: { color: '#9398ab' }, grid: { color: 'rgba(255,255,255,0.06)' } },
@@ -458,11 +616,9 @@ async function loadResults(exp) {
       },
     });
   }
-
   const trendResult = await callApi(`/api/client/results/${exp.id}/timeseries`);
   currentTrendSeries = (trendResult.ok && trendResult.data.series) ? trendResult.data.series : [];
   renderTrendChart();
-
   const summaryEl = document.getElementById('bayesian-summary');
   if (reading.mode === 'verdict' || reading.mode === 'data_problem' || reading.mode === 'peeked' || reading.mode === 'unplanned') {
     summaryEl.hidden = true;
@@ -472,11 +628,74 @@ async function loadResults(exp) {
   if (!bayesianResult.ok || !bayesianResult.data.secondary || !bayesianResult.data.stats || bayesianResult.data.stats.length < 2) {
     summaryEl.hidden = true;
   } else {
-    const stats = bayesianResult.data.stats;
-    const line = stats.map((item) => `${item.variant_name} ${item.probability_best}%`).join(', ');
+    const line = bayesianResult.data.stats.map((item) => `${item.variant_name} ${item.probability_best}%`).join(', ');
     summaryEl.hidden = false;
     summaryEl.textContent = `Probability best, as a secondary detail only: ${line}. The decision is the verdict above.`;
   }
+}
+
+function boundedRate(visitors, conversions) {
+  const v = Number(visitors) || 0;
+  const c = Number(conversions) || 0;
+  if (v <= 0 || c <= 0) return 0;
+  return +(Math.min(c, v) / v * 100).toFixed(2);
+}
+
+function renderTrendChart() {
+  const trendCanvas = document.getElementById('trend-chart');
+  document.getElementById('trend-mode-cumulative').classList.toggle('active', trendMode === 'cumulative');
+  document.getElementById('trend-mode-daily').classList.toggle('active', trendMode === 'daily');
+  if (trendChart) trendChart.destroy();
+  if (!currentTrendSeries.length) {
+    trendCanvas.style.display = 'none';
+    return;
+  }
+  const days = [...new Set(currentTrendSeries.map((row) => row.day))].sort();
+  const names = [...new Set(currentTrendSeries.map((row) => row.variant_name))];
+  const palette = ['#5635FB', '#02DEB5', '#e07a5f', '#c4b6ff'];
+  const datasets = names.map((name, index) => ({
+    label: name,
+    data: days.map((day) => {
+      const row = currentTrendSeries.find((item) => item.day === day && item.variant_name === name) || {};
+      if (trendMode === 'cumulative' && row.cumulative_visitors != null) {
+        return boundedRate(row.cumulative_visitors, row.cumulative_conversions);
+      }
+      return boundedRate(row.visitors, row.conversions);
+    }),
+    borderColor: palette[index % palette.length],
+    backgroundColor: palette[index % palette.length],
+    tension: 0.2,
+    fill: false,
+  }));
+  trendCanvas.style.display = 'block';
+  trendChart = new Chart(trendCanvas, {
+    type: 'line',
+    data: {
+      labels: days.map((day) => new Date(day).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })),
+      datasets,
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#e8e9f0' } } } },
+  });
+}
+
+document.getElementById('trend-mode-cumulative').addEventListener('click', () => { trendMode = 'cumulative'; renderTrendChart(); });
+document.getElementById('trend-mode-daily').addEventListener('click', () => { trendMode = 'daily'; renderTrendChart(); });
+
+async function init() {
+  const me = await callApi('/api/auth/me');
+  if (!me.ok) return;
+  if (me.data.role !== 'client') { window.location.href = '/login.html'; return; }
+  const name = me.data.client && me.data.client.name ? me.data.client.name : '';
+  document.getElementById('welcome-msg').textContent = name;
+
+  const result = await callApi('/api/client/experiments');
+  if (!result.ok) {
+    document.getElementById('list-msg').textContent = result.message;
+    return;
+  }
+  renderList(result.data);
+  const id = testIdFromHash();
+  if (id) openTest(id);
 }
 
 if (window.Chart) {

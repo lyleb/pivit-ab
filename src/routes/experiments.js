@@ -349,6 +349,35 @@ router.get('/all', async (req, res) => {
   }
 });
 
+// GET /api/experiments/:id/snapshot-note — owner-only line from the daily
+// snapshot. Amber futility (10–30%) is not shown to the client. This does
+// not recompute the snapshot.
+router.get('/:id/snapshot-note', async (req, res) => {
+  try {
+    const owned = await ownedExperiment(req.account.id, req.params.id);
+    if (!owned) return res.status(404).json({ error: 'no experiment found with that id' });
+    const { rows } = await db.query(
+      `SELECT headline_code, futility_band, detail
+       FROM status_snapshots
+       WHERE experiment_id = $1 AND account_id = $2
+       ORDER BY snapshot_date DESC
+       LIMIT 1`,
+      [req.params.id, req.account.id]
+    );
+    const row = rows[0];
+    const note = row && row.detail && row.detail.private ? row.detail.private.owner_note : null;
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      owner_note: note || null,
+      headline_code: row ? row.headline_code : null,
+      futility_band: row ? row.futility_band : null,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
 // GET /api/experiments/:id — full experiment + ALL its variants (including paused
 // ones and their enabled state), for the dashboard's manage/preview view.
 router.get('/:id', async (req, res) => {
