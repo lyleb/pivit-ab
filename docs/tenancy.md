@@ -13,9 +13,11 @@ Account #1 is named **Heclr**. The superadmin user is **info@heclr.com**, with `
 | 000 | `src/db/schema.sql`, the baseline that already matches the live database. Safe to re-run. It does not delete `events` or `host_hits`. |
 | 001 | `src/db/tenancy.js`. Creates accounts, users, memberships and sites, attaches existing rows to Heclr, then checks totals. |
 | 002 | `src/db/signup.js`. Invite codes, sign-in tokens, rate limits and the audit log. See [signup.md](signup.md). |
-| 005 | `src/db/portal.js`. Optional `experiments.hypothesis`, daily `status_snapshots`, and `review_requests`. 003 is the `url_match_type` hotfix and 004 is reserved for the landing page, so this is 005. |
+| 003 | `src/db/url-match-type.js`. Adds `experiments.url_match_type`, default `contains`. Does not rewrite existing rows. |
+| 004 | `src/db/access-requests.js`. The public landing-page access-request table. Not added to `schema.sql`. |
+| 005 | `src/db/portal.js`. Optional `experiments.hypothesis`, daily `status_snapshots`, and `review_requests`. Not added to `schema.sql`. |
 
-On a database that has already been through 000 and 001, startup logs `Database schema is up to date.` and does nothing else. Running `npm run migrate` does the same thing.
+Once every version above is recorded, startup logs `Database schema is up to date.` and does nothing else. A statement added only to `schema.sql` after 000 is recorded does not run; it needs a new version. Running `npm run migrate` does the same thing.
 
 001 counts, before it changes ownership and again before it commits:
 

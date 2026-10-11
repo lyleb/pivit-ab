@@ -207,6 +207,8 @@ CREATE INDEX IF NOT EXISTS idx_test_traffic_audit_experiment
 -- a live homepage test such as Home - Winter Sale keeps running on every
 -- page until an owner chooses Exact in Settings. New tests whose page URL
 -- is a site root or homepage are stored as exact by the create route.
+-- Version 000 is already recorded on the live database, so this line does
+-- not run there. Migration 003 applies the same ALTER.
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS url_match_type TEXT NOT NULL DEFAULT 'contains';
 
 -- Fixed-horizon plan. Null means the owner has not adopted one. Existing

@@ -501,16 +501,17 @@ async function consumeCode(email, code, req) {
   }
 }
 
-async function createInvite({ userId, note }) {
+async function createInvite({ userId, note, queryable }) {
   const code = newInviteCode();
   const hint = code.slice(-4);
   const cleanNote = String(note || '').trim().slice(0, 200);
-  const { rows } = await db.query(
+  const dbh = queryable && queryable.query ? queryable : db;
+  const { rows } = await dbh.query(
     `INSERT INTO invite_codes (code_hash, hint, note, created_by, expires_at)
      VALUES ($1, $2, $3, $4, $5) RETURNING id, hint, note, expires_at, created_at`,
     [sha256(code), hint, cleanNote, userId, new Date(Date.now() + INVITE_TTL_MS).toISOString()]
   );
-  await recordAudit(db, {
+  await recordAudit(dbh, {
     userId,
     actorLabel: 'superadmin',
     action: 'invite_created',
@@ -557,6 +558,7 @@ module.exports = {
   TOKEN_TTL_MS,
   normaliseEmail,
   customerHost,
+  requestIp,
   normaliseInviteCode,
   requestSignIn,
   requestSignup,

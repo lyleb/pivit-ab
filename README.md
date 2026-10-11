@@ -11,7 +11,7 @@ Basic A/B testing platform: snippet + API + results dashboard.
    node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
    ```
 4. `npm run dev` — starts the server on `http://localhost:3000`. Startup applies any missing database versions (see [docs/tenancy.md](docs/tenancy.md)). A failed migration rolls back and the process exits.
-5. Open `http://localhost:3000` for the admin dashboard, paste your `ADMIN_API_KEY` into the "Admin API Key" field at the top before using anything else on the page
+5. Open `http://localhost:3000` for the public landing page. The admin dashboard is at `http://localhost:3000/index.html` (it asks you to sign in). Logged-in owners and customers who open `/` are sent to the dashboard. Client sessions are sent to `/client.html`.
 
 ## Deploying (recommended: Railway)
 
@@ -23,9 +23,11 @@ Basic A/B testing platform: snippet + API + results dashboard.
 
 ## Search indexing
 
-This repository is the app only (the admin dashboard, the client portal, the snippet and the API). Nothing here should appear in search results. Every response sends `X-Robots-Tag: noindex, nofollow`, and the HTML pages repeat that in a robots meta tag. Canonical links point at the pivitlab.com page, or at `APP_ORIGIN` when that is set. `robots.txt` disallows `/api/` and `/snippet/` only, so the HTML stays crawlable and Google can read the noindex.
+The public landing page at `/` is the only page that should be indexed, together with `/sitemap.xml`. It sends no `X-Robots-Tag`, and its robots meta is `index, follow`. The canonical link is `https://pivitlab.com/` (or `APP_ORIGIN` when that is set). The title, description and Open Graph tags are on that page. The share image is `/assets/og-pivitlab.png`.
 
-There is no `sitemap.xml` in this app, because there are no pages to index. A sitemap belongs on the future marketing site.
+Every other response, including `/index.html` (the dashboard), `/login.html`, `/privacy.html`, `/legal.html`, the client portal, `/owner`, `/api`, `/snippet` and `/health`, sends `X-Robots-Tag: noindex, nofollow`. The app HTML pages repeat that in a robots meta tag. `robots.txt` disallows `/api/`, `/snippet/` and `/owner`, so the HTML stays crawlable and Google can read the noindex. It also has one sitemap line: `Sitemap: https://pivitlab.com/sitemap.xml`. The sitemap lists only `https://pivitlab.com/`.
+
+The landing page form does not collect anything until `ACCESS_REQUESTS_ENABLED` is set (see `.env.example` and [docs/signup.md](docs/signup.md)). Until then it asks people to email info@pivitlab.com. `/privacy.html` is a placeholder for Lyle's wording.
 
 ## How it works
 

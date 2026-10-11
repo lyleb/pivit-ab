@@ -1,7 +1,7 @@
-// A database that already recorded 000, 001 and 002 must still receive the
+// A database that already recorded 000 through 004 must still receive the
 // portal objects. They live in migration 005, not in schema.sql. Version 000
 // is already recorded on the live database, so editing schema.sql would not
-// create them. 003 and 004 are left for the hotfix and the landing page.
+// create them.
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -69,7 +69,7 @@ async function main() {
       )
     `);
     await db.query(
-      `INSERT INTO schema_migrations (version) VALUES ('000'), ('001'), ('002')`
+      `INSERT INTO schema_migrations (version) VALUES ('000'), ('001'), ('002'), ('003'), ('004')`
     );
 
     const applied = await migrate();
