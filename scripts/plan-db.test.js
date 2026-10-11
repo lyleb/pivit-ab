@@ -6,6 +6,7 @@ const assert = require('assert');
 const http = require('http');
 const express = require('express');
 const pg = require('./test-postgres');
+const { csvFilename } = require('../src/csv');
 
 function request(server, method, urlPath, body, headers) {
   return new Promise((resolve, reject) => {
@@ -302,7 +303,13 @@ async function main() {
     assert.strictEqual(openControl.conversions, 1);
     assert.ok(openControl.conversion_rate != null);
     const openCsv = await request(ownerServer, 'GET', `/api/results/${unplanned.id}/export`);
-    assert.ok(openCsv.text.startsWith('created_at,event_type'));
+    assert.strictEqual(openCsv.headers['content-type'], 'text/csv; charset=utf-8');
+    assert.strictEqual(openCsv.headers['x-content-type-options'], 'nosniff');
+    const openName = csvFilename('Unplanned', 'results');
+    assert.ok(openCsv.headers['content-disposition'].includes(`filename="${openName.ascii}"`));
+    assert.ok(openCsv.headers['content-disposition'].includes(`filename*=UTF-8''${encodeURIComponent(openName.utf8)}`));
+    assert.strictEqual(openCsv.text.charCodeAt(0), 0xFEFF);
+    assert.ok(openCsv.text.slice(1).startsWith('created_at,event_type'));
     assert.ok(openCsv.text.includes('open-1'));
 
     const hidden = await request(ownerServer, 'GET', `/api/results/${blind.id}`);
@@ -321,8 +328,12 @@ async function main() {
     assert.ok(hiddenRecent.json.events.length > 0);
     assert.ok(hiddenRecent.json.events.every((row) => row.event_type === 'view'));
     const progressCsv = await request(ownerServer, 'GET', `/api/results/${blind.id}/export`);
-    assert.ok(progressCsv.headers['content-disposition'].includes('progress.csv'));
-    assert.ok(progressCsv.text.startsWith('variant_name,visitors,target_visitors'));
+    const progressName = csvFilename('Blind', 'progress');
+    assert.ok(progressCsv.headers['content-disposition'].includes(`filename="${progressName.ascii}"`));
+    assert.strictEqual(progressCsv.headers['content-type'], 'text/csv; charset=utf-8');
+    assert.strictEqual(progressCsv.headers['x-content-type-options'], 'nosniff');
+    assert.strictEqual(progressCsv.text.charCodeAt(0), 0xFEFF);
+    assert.ok(progressCsv.text.slice(1).startsWith('variant_name,visitors,target_visitors'));
     assert.ok(!progressCsv.text.includes('blind-secret'));
     assert.ok(!progressCsv.text.includes('convert'));
     const earlyVerdict = await request(ownerServer, 'GET', `/api/results/${blind.id}/verdict`);

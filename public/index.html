@@ -1197,24 +1197,19 @@ document.getElementById('exp-list-body').addEventListener('click', (e) => {
   go(`#experiment/${btn.dataset.open}/overview`);
 });
 
-async function exportTestTrafficCsv(expId) {
-  const res = await fetch(`/api/results/${expId}/export?test_only=1`, { headers: authHeaders() });
-  if (res.status === 401) { window.location.href = '/login.html'; return; }
-  if (!res.ok) {
-    let message = `HTTP ${res.status}`;
-    try { const data = await res.json(); message = data.detail ? `${data.error} — ${data.detail}` : data.error; } catch (e) {}
-    alert(`Export failed: ${message}`);
-    return;
-  }
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `experiment-${expId}-test-traffic.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+// Real same-origin GET. The server sets Content-Disposition, so the browser
+// saves the file. A blob: or data: URL drops those headers and is what the
+// download scanner flagged.
+function startCsvDownload(path) {
+  const link = document.createElement('a');
+  link.href = path;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function exportTestTrafficCsv(expId) {
+  startCsvDownload(`/api/results/${expId}/export?test_only=1`);
 }
 
 function renderTestTrafficResults(data) {
@@ -1257,24 +1252,8 @@ async function loadTestTrafficResults(expId) {
   mount.innerHTML = renderTestTrafficResults(result.data);
 }
 
-async function exportResultsCsv(expId) {
-  const res = await fetch(withTestQuery(`/api/results/${expId}/export`), { headers: authHeaders() });
-  if (res.status === 401) { window.location.href = '/login.html'; return; }
-  if (!res.ok) {
-    let message = `HTTP ${res.status}`;
-    try { const data = await res.json(); message = data.detail ? `${data.error} — ${data.detail}` : data.error; } catch (e) {}
-    alert(`Export failed: ${message}`);
-    return;
-  }
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `experiment-${expId}-export.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+function exportResultsCsv(expId) {
+  startCsvDownload(withTestQuery(`/api/results/${expId}/export`));
 }
 
 async function deleteExperiment(expId, btn) {
