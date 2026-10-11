@@ -268,10 +268,20 @@ function includeTestFrom(options) {
 }
 
 // Soft-removed rows stay out. is_test stays out unless the owner opted in.
-// paramIndex is the boolean parameter.
-function visibleEventSql(alias, paramIndex) {
+// paramIndex is the boolean parameter. mode "test" is test traffic only:
+// real visitors are excluded, and the boolean parameter is not used.
+function visibleEventSql(alias, paramIndex, mode) {
   const prefix = alias ? `${alias}.` : '';
+  // The boolean parameter stays in the statement so the call sites keep the
+  // same placeholders. It does not let a real visitor through.
+  if (mode === 'test') {
+    return `${prefix}excluded_at IS NULL AND ${prefix}is_test = true AND ($${paramIndex}::boolean OR NOT $${paramIndex}::boolean)`;
+  }
   return `${prefix}excluded_at IS NULL AND ($${paramIndex}::boolean OR ${prefix}is_test = false)`;
+}
+
+function trafficMode(options) {
+  return options && options.testOnly ? 'test' : undefined;
 }
 
 function mapResultRow(row) {
@@ -296,14 +306,15 @@ function mapResultRow(row) {
 async function getVariantResults(experimentId, visitorType, options) {
   const primaryKey = await getPrimaryGoalKey(experimentId);
   const includeTest = includeTestFrom(options);
+  const mode = trafficMode(options);
   const filter = visitorTypeClause(visitorType);
-  const visible = visibleEventSql('e', 3);
+  const visible = visibleEventSql('e', 3, mode);
   const { rows } = await db.query(
     `WITH first_seen AS (
        SELECT visitor_id, MIN(created_at)::date AS first_day
        FROM events
        WHERE experiment_id = $1 AND event_type = 'view'
-         AND ${visibleEventSql('', 3)}
+         AND ${visibleEventSql('', 3, mode)}
        GROUP BY visitor_id
      ),
      flags AS (
@@ -359,7 +370,8 @@ async function getPrimaryVariantData(experimentId, options) {
 async function getGoalBreakdown(experimentId, options) {
   const goals = await getGoalDefs(experimentId);
   const includeTest = includeTestFrom(options);
-  const visible = visibleEventSql('e', 2);
+  const mode = trafficMode(options);
+  const visible = visibleEventSql('e', 2, mode);
 
   const { rows: visitorRows } = await db.query(
     `SELECT v.id AS variant_id, v.name AS variant_name,
@@ -377,7 +389,7 @@ async function getGoalBreakdown(experimentId, options) {
        SELECT variant_id, visitor_id
        FROM events
        WHERE experiment_id = $1 AND event_type = 'view'
-         AND ${visibleEventSql('', 2)}
+         AND ${visibleEventSql('', 2, mode)}
        GROUP BY variant_id, visitor_id
      )
      SELECT e.variant_id, e.goal_id,
@@ -415,7 +427,8 @@ async function getGoalBreakdown(experimentId, options) {
 async function getTimeseries(experimentId, options) {
   const primaryKey = await getPrimaryGoalKey(experimentId);
   const includeTest = includeTestFrom(options);
-  const visible = visibleEventSql('e', 3);
+  const mode = trafficMode(options);
+  const visible = visibleEventSql('e', 3, mode);
   const { rows: daily } = await db.query(
     `WITH ev AS (
        SELECT
@@ -497,4 +510,5 @@ module.exports = {
   PRIMARY_CONVERT,
   visitorTypeClause,
   visibleEventSql,
+  trafficMode,
 };

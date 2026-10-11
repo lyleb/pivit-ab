@@ -26,6 +26,7 @@ const {
   hostScopingMode,
 } = require('../host-scope');
 const { publicScope, ownedExperiment, placeOnSite } = require('../tenant');
+const { matchPageUrl, resolvePageMatch } = require('../../public/url-match');
 const { noteSnippetSeen } = require('../site-verify');
 const { normaliseStatusChange } = require('../experiment-status');
 const router = express.Router();
@@ -34,9 +35,28 @@ function publicScopeSql(accountParam, siteParam) {
   return `($${siteParam}::uuid IS NULL AND account_id = $${accountParam}) OR ($${siteParam}::uuid IS NOT NULL AND site_id = $${siteParam})`;
 }
 
-// url_match stays in SQL. Domain rules depend on HOST_SCOPING and on whether
-// the experiment has a list yet, so they are applied in JS. allowed_hosts is
-// never copied onto the public payload.
+// A stored "contains" match stays the historical SQL ILIKE, including its
+// case folding. Exact, starts-with and regex are filtered in JS so a homepage
+// stored as exact does not run on /shop. Existing rows default to contains,
+// so a test saved before this column keeps its old pages. Domain rules depend
+// on HOST_SCOPING and are applied after the URL check. allowed_hosts is never
+// copied onto the public payload.
+function sqlPageMatch(urlParam, prefix) {
+  const col = prefix ? `${prefix}.` : '';
+  return `(
+    (COALESCE(${col}url_match_type, 'contains') NOT IN ('exact', 'starts_with', 'regex')
+      AND $${urlParam} ILIKE '%' || ${col}url_match || '%')
+    OR ${col}url_match_type IN ('exact', 'starts_with', 'regex')
+  )`;
+}
+
+function keepPageMatches(rows, url) {
+  return rows.filter((row) => {
+    const type = row.url_match_type;
+    if (type !== 'exact' && type !== 'starts_with' && type !== 'regex') return true;
+    return matchPageUrl(row.url_match, url, type);
+  });
+}
 const unscopedLogged = new Set();
 
 function applyHostScope(rows, req) {
@@ -84,22 +104,22 @@ router.get('/', async (req, res) => {
     await noteSnippetSeen(scope, req);
 
     const { rows: experiments } = await db.query(
-      `SELECT id, name, url_match, allowed_hosts, goals FROM experiments
-       WHERE $1 ILIKE '%' || url_match || '%' AND status = 'running'
+      `SELECT id, name, url_match, url_match_type, allowed_hosts, goals FROM experiments
+       WHERE ${sqlPageMatch(1)} AND status = 'running'
          AND (${publicScopeSql(2, 3)})`,
       [url, scope.accountId, scope.siteId]
     );
 
-    const visible = applyHostScope(experiments, req);
+    const visible = applyHostScope(keepPageMatches(experiments, url), req);
 
     let previewExperiment = null;
     if (previewAuth.ok) {
       const { rows: previewRows } = await db.query(
-        `SELECT e.id, e.name, e.url_match, e.allowed_hosts, e.status, e.goals, e.account_id, e.site_id
+        `SELECT e.id, e.name, e.url_match, e.url_match_type, e.allowed_hosts, e.status, e.goals, e.account_id, e.site_id
          FROM variants v
          JOIN experiments e ON e.id = v.experiment_id
          WHERE v.id = $1
-           AND $2 ILIKE '%' || e.url_match || '%'
+           AND ${sqlPageMatch(2, 'e')}
            AND (( $4::uuid IS NULL AND e.account_id = $3) OR ($4::uuid IS NOT NULL AND e.site_id = $4))`,
         [previewAuth.variantId, url, scope.accountId, scope.siteId]
       );
@@ -108,9 +128,10 @@ router.get('/', async (req, res) => {
           if (previewRows[i].account_id !== previewAuth.accountId) previewRows.splice(i, 1);
         }
       }
-      if (previewRows[0]) {
-        const already = visible.find((exp) => exp.id === previewRows[0].id);
-        previewExperiment = already || applyHostScope(previewRows, req)[0] || null;
+      const matchedPreview = keepPageMatches(previewRows, url);
+      if (matchedPreview[0]) {
+        const already = visible.find((exp) => exp.id === matchedPreview[0].id);
+        previewExperiment = already || applyHostScope(matchedPreview, req)[0] || null;
       }
     }
 
@@ -426,6 +447,8 @@ router.get('/:id/health', async (req, res) => {
 router.post('/', async (req, res) => {
   const { name, url_match, client_id, allowed_hosts } = req.body;
   if (!name || !url_match) return res.status(400).json({ error: 'name and url_match are required' });
+  const pageMatch = resolvePageMatch(url_match, req.body.url_match_type);
+  if (!pageMatch.ok) return res.status(400).json({ error: pageMatch.error });
 
   let hosts = [];
   if (allowed_hosts !== undefined) {
@@ -450,9 +473,9 @@ router.post('/', async (req, res) => {
     const placed = await placeOnSite(client.query.bind(client), accountId, null, hosts);
 
     const { rows: expRows } = await client.query(
-      `INSERT INTO experiments (name, url_match, client_id, allowed_hosts, goals, goals_scope, goals_migrated, account_id, site_id, needs_site)
-       VALUES ($1, $2, $3, $4::text[], '[]'::jsonb, 'shared', true, $5, $6, $7) RETURNING *`,
-      [name, url_match, client_id || null, hosts, accountId, placed.siteId, placed.needsSite]
+      `INSERT INTO experiments (name, url_match, url_match_type, client_id, allowed_hosts, goals, goals_scope, goals_migrated, account_id, site_id, needs_site)
+       VALUES ($1, $2, $3, $4, $5::text[], '[]'::jsonb, 'shared', true, $6, $7, $8) RETURNING *`,
+      [name, url_match, pageMatch.type, client_id || null, hosts, accountId, placed.siteId, placed.needsSite]
     );
     const experiment = expRows[0];
 
@@ -693,7 +716,8 @@ router.post('/:id/variants/:variantId/preview-link', async (req, res) => {
 // Generates a scoped, time-limited link that opens the visual editor directly
 // on the live page — see src/edit-token.js for why this can't just be the
 // owner's normal session. page_url is the actual page to open (the same input
-// already used for Preview), since url_match is only ever a substring.
+// already used for Preview). url_match may be a substring, an exact page, or
+// a pattern, so it is not used as the address to open.
 router.post('/:id/variants/:variantId/edit-link', async (req, res) => {
   try {
     const { page_url } = req.body;
@@ -776,6 +800,33 @@ router.delete('/:id', async (req, res) => {
     }
     await db.query(`DELETE FROM experiments WHERE id = $1 AND account_id = $2`, [id, req.account.id]);
     res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
+// PATCH /api/experiments/:id/url-match  { url_match_type }
+// Owner-only. Does not change url_match text, and does not guess a new type
+// when the field is omitted, so saving other settings cannot turn a stored
+// contains homepage into exact.
+router.patch('/:id/url-match', async (req, res) => {
+  try {
+    const experiment = await ownedExperiment(req.account.id, req.params.id);
+    if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (!req.body || req.body.url_match_type == null || req.body.url_match_type === '') {
+      return res.status(400).json({ error: 'url_match_type is required' });
+    }
+    const pageMatch = resolvePageMatch(experiment.url_match, req.body.url_match_type);
+    if (!pageMatch.ok) return res.status(400).json({ error: pageMatch.error });
+    const { rows } = await db.query(
+      `UPDATE experiments SET url_match_type = $1
+       WHERE id = $2 AND account_id = $3
+       RETURNING id, url_match, url_match_type`,
+      [pageMatch.type, req.params.id, req.account.id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
+    res.json(rows[0]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });

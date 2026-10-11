@@ -55,6 +55,7 @@
   const clickSeen = Object.create(null);
   api.matchUrlGoal = matchUrlGoal;
   api.isSafeRegex = isSafeRegex;
+  api.shouldCountUrlGoal = shouldCountUrlGoal;
   api.claimClick = claimClick;
   api.clickStorageKey = clickStorageKey;
   api.qaFlagFromSearch = qaFlagFromSearch;
@@ -250,12 +251,24 @@
     });
   }
 
+  // A URL goal must not convert on the page view that first enrolled the
+  // visitor. Landing on the goal page and being bucketed in the same load
+  // would otherwise count as an instant conversion. A later page view still
+  // counts. Click goals on the enrolment page are unchanged.
+  function shouldCountUrlGoal(experimentId, enrolledThisView) {
+    if (!experimentId) return false;
+    if (!enrolledThisView) return true;
+    if (typeof enrolledThisView.has === 'function' && enrolledThisView.has(experimentId)) return false;
+    if (enrolledThisView[experimentId]) return false;
+    return true;
+  }
+
   // "Visited a URL" goals can't be wired up as a click listener on the page the
   // experiment runs on, because the goal page (e.g. /thank-you) is often a
   // completely different page. Instead, on every page load, check every experiment
   // this visitor has ever been assigned to (found via localStorage) against the
   // current URL, and fire a conversion once per goal if it matches.
-  async function checkUrlGoals(visitorId) {
+  async function checkUrlGoals(visitorId, enrolledThisView) {
     const assignments = {};
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
@@ -271,6 +284,7 @@
       const data = await res.json();
 
       (data.experiments || []).forEach((experiment) => {
+        if (!shouldCountUrlGoal(experiment.id, enrolledThisView)) return;
         const variantId = assignments[experiment.id];
         const variant = (experiment.variants || []).find((v) => v.id === variantId);
         if (!variant) return;
@@ -380,9 +394,13 @@
       }
 
       const visitorId = getVisitorId();
+      const enrolledThisView = Object.create(null);
       (data.experiments || []).forEach((experiment) => {
         if (!experiment.variants || experiment.variants.length === 0) return;
+        let already = null;
+        try { already = localStorage.getItem(ASSIGNMENT_PREFIX + experiment.id); } catch (e) { already = null; }
         const variant = pickVariant(experiment, visitorId);
+        if (!already) enrolledThisView[experiment.id] = 1;
         applyVariantChanges(variant);
         sendEvent(experiment.id, variant.id, visitorId, 'view');
         wireConversionTracking(experiment.id, variant.id, visitorId, goalsFor(experiment, variant));
@@ -394,7 +412,7 @@
 
       // Check "visited a URL" goals on every page load — including pages with no
       // on-page experiment at all, e.g. a /thank-you confirmation page.
-      await checkUrlGoals(visitorId);
+      await checkUrlGoals(visitorId, enrolledThisView);
     } catch (err) {
       console.warn('[ab] failed to load experiments:', err);
       revealPage(); // never leave the page hidden just because the API call failed

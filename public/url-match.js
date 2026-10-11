@@ -203,6 +203,134 @@
     return false;
   }
 
+  // Page targeting. Goal matching above is unchanged.
+  // Exact for a page ignores the query string, the hash and one trailing
+  // slash, so https://example.com/ and https://example.com/?utm=1#sale are
+  // the same page. Contains stays a substring, and the live query for a
+  // stored "contains" test is still the case-insensitive SQL match that
+  // already shipped. A site root or homepage defaults to exact because
+  // "contains" on that address matches every page on the site.
+  const HOME_FILE = /^\/(?:index|default|home)\.(?:html?|php|aspx)$/i;
+
+  function stripQueryHash(value) {
+    let s = String(value || '').trim();
+    const hash = s.indexOf('#');
+    if (hash !== -1) s = s.slice(0, hash);
+    const query = s.indexOf('?');
+    if (query !== -1) s = s.slice(0, query);
+    return s;
+  }
+
+  function normalPath(path) {
+    let p = path || '/';
+    if (!p.startsWith('/')) p = '/' + p;
+    if (p.length > 1) p = p.replace(/\/+$/, '');
+    return p || '/';
+  }
+
+  function pageParts(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    if (/^https?:\/\//i.test(raw)) {
+      try {
+        const u = new URL(raw);
+        return { kind: 'url', host: u.host.toLowerCase(), path: normalPath(u.pathname) };
+      } catch (err) {
+        return null;
+      }
+    }
+    const bare = stripQueryHash(raw);
+    if (!bare) return { kind: 'path', host: '', path: '/' };
+    if (bare.startsWith('/')) return { kind: 'path', host: '', path: normalPath(bare) };
+    const hostish = bare.replace(/\/+$/, '');
+    if (hostish === 'localhost' || /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i.test(hostish)) {
+      return { kind: 'url', host: hostish.toLowerCase(), path: '/' };
+    }
+    return { kind: 'text', host: '', path: '', text: hostish };
+  }
+
+  function isSiteRoot(pattern) {
+    const parts = pageParts(pattern);
+    if (!parts) return false;
+    if (parts.kind === 'text') return false;
+    if (parts.path === '/') return true;
+    return HOME_FILE.test(parts.path);
+  }
+
+  function defaultPageMatch(pattern) {
+    return isSiteRoot(pattern) ? 'exact' : 'contains';
+  }
+
+  function exactPage(pattern, href) {
+    const left = pageParts(pattern);
+    const right = pageParts(href);
+    if (!left || !right) return false;
+    if (left.kind === 'url') {
+      return right.kind === 'url' && left.host === right.host && left.path === right.path;
+    }
+    if (left.kind === 'path') {
+      return (right.kind === 'url' || right.kind === 'path') && left.path === right.path;
+    }
+    return right.kind === 'text' && left.text === right.text;
+  }
+
+  function matchPageUrl(pattern, href, matchType) {
+    const type = matchType || 'contains';
+    if (type === 'exact') return exactPage(pattern, href);
+    if (type === 'contains' || type === 'starts_with' || type === 'regex') {
+      return matchUrlGoal(pattern, href, type);
+    }
+    return false;
+  }
+
+  function resolvePageMatch(pattern, requested) {
+    const text = String(pattern == null ? '' : pattern).trim();
+    if (!text) return { ok: false, error: 'url_match is required' };
+    if (text.length > 500) return { ok: false, error: 'url_match is too long' };
+    if (requested == null || requested === '') {
+      return { ok: true, type: defaultPageMatch(text) };
+    }
+    const type = String(requested).trim();
+    if (MATCH_TYPES.indexOf(type) === -1) {
+      return { ok: false, error: 'url_match_type must be contains, exact, starts_with or regex' };
+    }
+    if (type === 'regex' && !isSafeRegex(text)) {
+      return { ok: false, error: 'that regular expression is not safe to run' };
+    }
+    return { ok: true, type: type };
+  }
+
+  function pageMatchLabel(type) {
+    return {
+      contains: 'Contains',
+      exact: 'Exact',
+      starts_with: 'Starts with',
+      regex: 'Regular expression',
+    }[type] || 'Contains';
+  }
+
+  function pageMatchHint(type, pattern) {
+    const root = isSiteRoot(pattern);
+    const stored = type || 'contains';
+    if (stored === 'exact') {
+      return root
+        ? 'Exact. This is the site homepage, so the test runs on that page only. A query string, a hash and a trailing slash still match.'
+        : 'Exact. The test runs only when the page is this address. A query string, a hash and a trailing slash still match.';
+    }
+    if (stored === 'starts_with') {
+      return root
+        ? 'Starts with. The homepage address is the start of every page on this site, so this also runs on /shop, /about and /checkout. Exact limits it to the homepage.'
+        : 'Starts with. The test runs on pages whose address begins with this text.';
+    }
+    if (stored === 'regex') {
+      return 'Regular expression. The test runs when the page address matches this pattern.';
+    }
+    if (root) {
+      return 'Contains. Every page on this site includes the homepage address, so the test also runs on /shop, /about and /checkout. Exact limits it to the homepage.';
+    }
+    return 'Contains. The test runs on any page whose address includes this text.';
+  }
+
   function testUrlGoal(match, pattern, sample) {
     const type = match || 'contains';
     if (!pattern || !String(pattern).trim()) {
@@ -230,5 +358,11 @@
     isSafeRegex: isSafeRegex,
     matchUrlGoal: matchUrlGoal,
     testUrlGoal: testUrlGoal,
+    isSiteRoot: isSiteRoot,
+    defaultPageMatch: defaultPageMatch,
+    matchPageUrl: matchPageUrl,
+    resolvePageMatch: resolvePageMatch,
+    pageMatchLabel: pageMatchLabel,
+    pageMatchHint: pageMatchHint,
   };
 });

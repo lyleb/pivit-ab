@@ -9,6 +9,7 @@ const { outcomeGate } = require('../experiment-plan');
 const { hideOutcomeRow } = require('../reading');
 const { buildVerdict } = require('../verdict');
 const { ownedExperiment } = require('../tenant');
+const { csvFilename, sendCsv } = require('../csv');
 const router = express.Router();
 
 router.use(requireAuth(['owner'])); // results are for your eyes only, not the public snippet
@@ -31,17 +32,52 @@ function wantsTestTraffic(req) {
 // "returning" on any later day they come back. This deliberately does NOT count
 // a second pageview in the same sitting (e.g. a refresh) as "returning" — only
 // an actual later visit does. Test traffic follows the same rule as the table.
-function firstSeenCte() {
+function firstSeenCte(mode) {
   return `
   WITH first_seen AS (
     SELECT visitor_id, MIN(created_at)::date AS first_day
     FROM events
     WHERE experiment_id = $1 AND event_type = 'view'
-      AND ${visibleEventSql('', 2)}
+      AND ${visibleEventSql('', 2, mode)}
     GROUP BY visitor_id
   )
 `;
 }
+
+const TEST_ONLY_LABEL = 'Test traffic only. Real visitors are not included. This is not the verdict, and opening it does not count as an early look.';
+
+function wantsTestOnly(req) {
+  return flagIsOn(req.query && req.query.test_only);
+}
+
+// GET /api/results/:experimentId/test-traffic
+// Owner only. Full figures for test traffic, even while real results are
+// blind. Never mixes in real visitors, and does not set peeked_at.
+router.get('/:experimentId/test-traffic', async (req, res) => {
+  const { experimentId } = req.params;
+  try {
+    if (!(await assertOwned(req, res, experimentId))) return;
+    const options = { testOnly: true };
+    const [{ results, primaryKey }, breakdown] = await Promise.all([
+      getVariantResults(experimentId, undefined, options),
+      getGoalBreakdown(experimentId, options),
+    ]);
+    res.json({
+      experiment_id: experimentId,
+      test_only: true,
+      include_test: false,
+      blinded: false,
+      peeked: false,
+      label: TEST_ONLY_LABEL,
+      primary_goal: primaryKey,
+      results,
+      goals: breakdown.goals,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
 
 // GET /api/results/:experimentId?visitor_type=new|returning
 // conversions is unique converting visitors (rate cannot exceed 100%).
@@ -126,40 +162,57 @@ router.get('/:experimentId/recent', async (req, res) => {
   }
 });
 
-// Minimal CSV field escaping: wrap in quotes and double up any embedded quotes
-// whenever the field contains a comma, quote, or newline.
-function csvField(value) {
-  const str = value === null || value === undefined ? '' : String(value);
-  if (/[",\n]/.test(str)) return '"' + str.replace(/"/g, '""') + '"';
-  return str;
+function eventCsvRows(rows, extraColumn) {
+  const header = ['created_at', 'event_type', 'variant_name', 'goal_id', 'visitor_id', 'visitor_type', 'unique_conversion'];
+  if (extraColumn) header.push(extraColumn);
+  const body = annotateUniqueConversions(rows).map((row) => header.map((col) => {
+    if (col === 'traffic') return 'test';
+    return row[col];
+  }));
+  return [header, ...body];
 }
 
 // GET /api/results/:experimentId/export
 // Every raw event for this experiment as a downloadable CSV — one row per event,
 // including a computed new/returning label per the same day-based rule used above.
+// The browser saves this response as-is (GET + Content-Disposition). Do not
+// re-wrap it in a blob on the client.
 router.get('/:experimentId/export', async (req, res) => {
   const { experimentId } = req.params;
   try {
-    if (!(await assertOwned(req, res, experimentId))) return;
+    const experiment = await assertOwned(req, res, experimentId);
+    if (!experiment) return;
+    // Test traffic only, including conversions, even while real results are
+    // blind. Real visitor rows are not in this file, and peeked_at is not set.
+    if (wantsTestOnly(req)) {
+      const { rows } = await db.query(
+        `${firstSeenCte('test')}
+         SELECT e.created_at, e.event_type, v.name AS variant_name, e.goal_id, e.visitor_id,
+           CASE WHEN e.created_at::date = fs.first_day THEN 'new' ELSE 'returning' END AS visitor_type
+         FROM events e
+         JOIN variants v ON v.id = e.variant_id
+         LEFT JOIN first_seen fs ON fs.visitor_id = e.visitor_id
+         WHERE e.experiment_id = $1 AND ${visibleEventSql('e', 2, 'test')}
+         ORDER BY e.created_at ASC`,
+        [experimentId, false]
+      );
+      sendCsv(res, csvFilename(experiment.name, 'test-traffic'), eventCsvRows(rows, 'traffic'));
+      return;
+    }
     const includeTest = wantsTestTraffic(req);
     const gate = await outcomeGate(experimentId, includeTest, req.account.id);
     if (!gate.visible) {
       const header = ['variant_name', 'visitors', 'target_visitors', 'traffic_split_percent', 'days_elapsed', 'minimum_days'];
-      const lines = [header.join(',')];
       const progress = (gate.reading && gate.reading.variants) || [];
-      progress.forEach((row) => {
-        lines.push([
-          csvField(row.variant_name),
-          row.visitors,
-          row.target == null ? '' : row.target,
-          row.traffic_split == null ? '' : row.traffic_split,
-          gate.reading.days_elapsed,
-          gate.reading.min_runtime_days == null ? '' : gate.reading.min_runtime_days,
-        ].join(','));
-      });
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename="experiment-${experimentId}-progress.csv"`);
-      res.send(lines.join('\n'));
+      const body = progress.map((row) => [
+        row.variant_name,
+        row.visitors,
+        row.target == null ? '' : row.target,
+        row.traffic_split == null ? '' : row.traffic_split,
+        gate.reading.days_elapsed,
+        gate.reading.min_runtime_days == null ? '' : gate.reading.min_runtime_days,
+      ]);
+      sendCsv(res, csvFilename(experiment.name, 'progress'), [header, ...body]);
       return;
     }
     const { rows } = await db.query(
@@ -174,17 +227,9 @@ router.get('/:experimentId/export', async (req, res) => {
       [experimentId, includeTest]
     );
 
-    const header = ['created_at', 'event_type', 'variant_name', 'goal_id', 'visitor_id', 'visitor_type', 'unique_conversion'];
-    const lines = [header.join(',')];
     // unique_conversion is 1 only on the first convert for that visitor, variant
     // and goal. Later repeats are 0, so a sum of the column is unique converters.
-    annotateUniqueConversions(rows).forEach((r) => {
-      lines.push(header.map((col) => csvField(r[col])).join(','));
-    });
-
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="experiment-${experimentId}-export.csv"`);
-    res.send(lines.join('\n'));
+    sendCsv(res, csvFilename(experiment.name, 'results'), eventCsvRows(rows));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });
