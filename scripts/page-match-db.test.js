@@ -5,6 +5,7 @@ const assert = require('assert');
 const http = require('http');
 const express = require('express');
 const pg = require('./test-postgres');
+const { csvFilename } = require('../src/csv');
 
 function request(server, method, urlPath, body, headers) {
   return new Promise((resolve, reject) => {
@@ -228,14 +229,22 @@ async function main() {
     assert.strictEqual(afterPeek.rows[0].peeked_at, null);
 
     const progressCsv = await request(ownerServer, 'GET', `/api/results/${blindId}/export`);
-    assert.ok(progressCsv.headers['content-disposition'].includes('progress.csv'));
+    const progressName = csvFilename('Blind sale', 'progress');
+    assert.ok(progressCsv.headers['content-disposition'].includes(`filename="${progressName.ascii}"`));
+    assert.strictEqual(progressCsv.headers['content-type'], 'text/csv; charset=utf-8');
+    assert.strictEqual(progressCsv.headers['x-content-type-options'], 'nosniff');
+    assert.strictEqual(progressCsv.text.charCodeAt(0), 0xFEFF);
     assert.ok(!progressCsv.text.includes('v_test_a'));
     assert.ok(!progressCsv.text.includes('convert'));
 
     const testCsv = await request(ownerServer, 'GET', `/api/results/${blindId}/export?test_only=1`);
     assert.strictEqual(testCsv.status, 200);
-    assert.ok(testCsv.headers['content-disposition'].includes('test-traffic.csv'));
-    assert.ok(testCsv.text.startsWith('created_at,event_type'));
+    const testName = csvFilename('Blind sale', 'test-traffic');
+    assert.ok(testCsv.headers['content-disposition'].includes(`filename="${testName.ascii}"`));
+    assert.ok(testCsv.headers['content-disposition'].includes("filename*=UTF-8''"));
+    assert.strictEqual(testCsv.headers['content-type'], 'text/csv; charset=utf-8');
+    assert.strictEqual(testCsv.headers['x-content-type-options'], 'nosniff');
+    assert.ok(testCsv.text.slice(1).startsWith('created_at,event_type'));
     assert.ok(testCsv.text.includes(',traffic'));
     assert.ok(testCsv.text.includes('v_test_a'));
     assert.ok(testCsv.text.includes('convert'));
