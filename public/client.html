@@ -453,7 +453,9 @@ function bindReview(experimentId) {
     }
     const when = result.data.requested_label || '';
     button.replaceWith(Object.assign(document.createElement('p'), {
-      textContent: when ? `Review requested on ${when}. It's with the person who runs your tests.` : 'Review requested. It's with the person who runs your tests.',
+      textContent: when
+        ? `Review requested on ${when}. It's with the person who runs your tests.`
+        : "Review requested. It's with the person who runs your tests.",
     }));
     if (msg) msg.textContent = '';
   });
