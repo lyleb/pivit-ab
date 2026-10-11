@@ -187,6 +187,8 @@ module.exports = {
   percentLabel,
   ruleOutLine,
   controlIndex,
+  posteriorPair,
+  intervalExcludesZero,
   buildVerdict,
   decisionLevel,
 };

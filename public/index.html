@@ -298,6 +298,11 @@
         <p id="first-run-conflict" class="banner" hidden>Another account has also added this domain. A test runs only where that account's snippet is installed.</p>
         <button type="button" id="first-run-create" disabled>Create your first test</button>
       </div>
+      <div class="card" id="review-requests-card" hidden>
+        <h2>Review requests</h2>
+        <p class="hint" style="margin-top:0;">A client asked you to look at a test. You decide whether to stop. Marking it seen does not stop the test or reveal a result.</p>
+        <div id="review-requests-list"></div>
+      </div>
       <div class="page-head">
         <div>
           <h1>Experiments</h1>
@@ -1162,6 +1167,7 @@ async function loadExperimentList() {
     table.classList.remove('is-visible');
     document.getElementById('exp-list-body').innerHTML = '';
     renderStatusPage();
+    loadReviewRequests();
     return;
   }
   msgEl.textContent = '';
@@ -1181,6 +1187,7 @@ async function loadExperimentList() {
   table.classList.add('is-visible');
   fillSignals(experiments);
   renderStatusPage();
+  loadReviewRequests();
 }
 
 function fillSignals(experiments) {
@@ -1190,6 +1197,43 @@ function fillSignals(experiments) {
     cell.textContent = exp.signal || UI.signalText(exp.status, exp.reading || null);
   });
 }
+
+async function loadReviewRequests() {
+  const card = document.getElementById('review-requests-card');
+  const list = document.getElementById('review-requests-list');
+  if (!card || !list) return;
+  const result = await callApi('/api/review-requests', { headers: authHeaders() });
+  if (!result.ok || !result.data || !result.data.requests || !result.data.requests.length) {
+    card.hidden = true;
+    list.innerHTML = '';
+    return;
+  }
+  card.hidden = false;
+  list.innerHTML = result.data.requests.map((row) => `<div class="activity-row">
+      <span><strong>${UI.escapeHtml(row.client_name || 'A client')}</strong> asked for a review of <button type="button" class="name-btn" data-open="${row.experiment_id}">${UI.escapeHtml(row.experiment_name || 'a test')}</button><span class="hint"> · ${UI.escapeHtml(row.requested_label || '')}</span></span>
+      <button type="button" class="btn-ghost" data-review-seen="${row.id}">Seen</button>
+    </div>`).join('');
+}
+
+document.getElementById('review-requests-list').addEventListener('click', async (event) => {
+  const open = event.target.closest('[data-open]');
+  if (open && event.target.closest('#review-requests-list')) {
+    go(`#experiment/${open.dataset.open}/overview`);
+    return;
+  }
+  const seen = event.target.closest('[data-review-seen]');
+  if (!seen) return;
+  seen.disabled = true;
+  const result = await callApi(`/api/review-requests/${seen.dataset.reviewSeen}/decide`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  if (!result.ok) {
+    seen.disabled = false;
+    return;
+  }
+  loadReviewRequests();
+});
 
 document.getElementById('exp-list-body').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-open]');
@@ -2503,6 +2547,17 @@ function renderVerdict(verdict) {
   mount.innerHTML = cards + details;
 }
 
+async function loadOwnerSnapshotNote(expId) {
+  const result = await callApi(`/api/experiments/${expId}/snapshot-note`, { headers: authHeaders() });
+  if (!currentDetail || currentDetail.id !== expId) return;
+  const panel = document.getElementById('plan-panel');
+  if (!panel || !result.ok || !result.data || !result.data.owner_note) return;
+  const note = document.createElement('div');
+  note.className = 'peek-banner';
+  note.innerHTML = `<strong>Owner note.</strong> ${UI.escapeHtml(result.data.owner_note)}`;
+  panel.prepend(note);
+}
+
 function showResultsGate(text) {
   const gate = document.getElementById('results-gate');
   const live = document.getElementById('results-live');
@@ -2544,6 +2599,7 @@ async function loadResults() {
     : results.reduce((sum, row) => sum + Number(row.visitors || 0), 0);
   if (reading && reading.mode === 'blind') {
     renderPlanPanel(reading);
+    loadOwnerSnapshotNote(expId);
     const gate = document.getElementById('results-gate');
     const live = document.getElementById('results-live');
     if (gate) gate.hidden = true;

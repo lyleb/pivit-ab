@@ -8,6 +8,7 @@ const path = require('path');
 const db = require('./index');
 const { applyTenancy } = require('./tenancy');
 const { applySignup } = require('./signup');
+const { applyPortal } = require('./portal');
 
 const LOCK_KEY = 814021;
 
@@ -20,6 +21,9 @@ const VERSIONS = [
   { version: '000', name: 'baseline', run: applyBaseline },
   { version: '001', name: 'tenancy', run: applyTenancy },
   { version: '002', name: 'signup', run: applySignup },
+  // 003 is the url_match_type hotfix. 004 is reserved for the landing page.
+  // Both merge before this, so the portal objects are 005.
+  { version: '005', name: 'portal', run: applyPortal },
 ];
 
 async function ensureMigrationsTable(queryable) {

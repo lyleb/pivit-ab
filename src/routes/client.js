@@ -7,6 +7,9 @@ const { getVariantResults, getGoalBreakdown, getTimeseries, getPrimaryVariantDat
 const { outcomeGate } = require('../experiment-plan');
 const { hideOutcomeRow } = require('../reading');
 const { buildVerdict } = require('../verdict');
+const { listForClient, detailForClient, owned } = require('../client-portal');
+const { requestReview } = require('../review-request');
+const { formatLondonDay, londonDateISO } = require('../clock');
 const router = express.Router();
 
 router.use(requireAuth(['client']));
@@ -23,15 +26,63 @@ async function assertOwnsExperiment(clientId, experimentId, accountId) {
   return rows[0] || null;
 }
 
-// GET /api/client/experiments — this client's own experiments only
+// GET /api/client/experiments — this client's own experiments only.
+// Headlines and progress come from the stored daily snapshot. This handler
+// does not count events or run a verdict.
 router.get('/experiments', async (req, res) => {
   try {
-    const { rows } = await db.query(
-      `SELECT id, name, status, url_match, created_at FROM experiments
-       WHERE client_id = $1 AND account_id = $2 ORDER BY url_match, created_at DESC`,
+    const payload = await listForClient(req.session.clientId, req.account.id);
+    res.set('Cache-Control', 'no-store');
+    res.json(payload);
+  } catch (err) {
+    res.status(500).json(publicServerError(err));
+  }
+});
+
+// GET /api/client/experiments/:experimentId — blind or concluded portal view.
+// Reads the snapshot and the test setup (name, page, variants). No live stats.
+router.get('/experiments/:experimentId', async (req, res) => {
+  try {
+    const detail = await detailForClient(req.session.clientId, req.account.id, req.params.experimentId);
+    if (!detail) return res.status(404).json({ error: 'no experiment found with that id' });
+    res.set('Cache-Control', 'no-store');
+    res.json(detail);
+  } catch (err) {
+    if (err && err.code === 'BLIND_LEAK') {
+      console.error(err.message);
+      return res.status(500).json(publicServerError(err));
+    }
+    res.status(500).json(publicServerError(err));
+  }
+});
+
+// POST /api/client/experiments/:experimentId/review-request
+// Logs the ask and notifies the owner. Does not reveal results or stop the test.
+// An email failure is recorded and still returns ok.
+router.post('/experiments/:experimentId/review-request', async (req, res) => {
+  try {
+    const experiment = await owned(req.session.clientId, req.account.id, req.params.experimentId);
+    if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (experiment.status === 'draft') {
+      return res.status(400).json({ error: 'This test has not started, so there is nothing to review yet.' });
+    }
+    const client = await db.query(
+      `SELECT name FROM clients WHERE id = $1 AND account_id = $2`,
       [req.session.clientId, req.account.id]
     );
-    res.json({ experiments: rows });
+    const result = await requestReview({
+      experiment,
+      clientId: req.session.clientId,
+      clientName: client.rows[0] ? client.rows[0].name : 'A client',
+      accountId: req.account.id,
+      ip: req.ip,
+    });
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      ok: true,
+      requested_at: result.requested_at,
+      requested_label: result.requested_label || formatLondonDay(londonDateISO(new Date(result.requested_at))),
+    });
   } catch (err) {
     res.status(500).json(publicServerError(err));
   }

@@ -29,6 +29,8 @@ const auditRouter = require('./routes/audit');
 const { setupRouter, sitesRouter } = require('./routes/setup');
 const webhooksRouter = require('./routes/webhooks');
 const { sendOwnerPage } = require('./owner-page');
+const reviewRouter = require('./routes/review-requests');
+const { startSnapshotScheduler } = require('./snapshot-schedule');
 
 const app = express();
 // Railway (like most hosts) sits behind a reverse proxy. Without this, Express
@@ -98,6 +100,7 @@ app.use('/api/results', resultsRouter);
 app.use('/api/goals', goalsRouter);
 app.use('/api/clients', clientsRouter);
 app.use('/api/client', clientRouter);
+app.use('/api/review-requests', reviewRouter);
 app.use('/api/editor', editorRouter);
 app.use('/api/host-hits', hostHitsRouter);
 
@@ -181,5 +184,8 @@ runMigrations().then(async () => {
     console.error('Goal migration failed:', err);
   }
   await logHostScoping();
-  app.listen(PORT, () => console.log(`AB platform running on port ${PORT}`));
+  app.listen(PORT, () => {
+    console.log(`AB platform running on port ${PORT}`);
+    startSnapshotScheduler();
+  });
 });
