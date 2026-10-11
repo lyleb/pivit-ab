@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>pivitlab: A/B testing without the enterprise baggage</title>
+<meta name="description" content="Self-serve A/B testing for small and growing businesses. Plan the test, let it run, and get an honest Win, Loss or Inconclusive verdict. Built in the UK. Private beta, invite only.">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://pivitlab.com/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="pivitlab">
+<meta property="og:url" content="https://pivitlab.com/">
+<meta property="og:title" content="pivitlab: A/B testing without the enterprise baggage">
+<meta property="og:description" content="Plan the test, let it run, get an honest answer. Self-serve A/B testing for small and growing businesses.">
+<meta property="og:image" content="https://pivitlab.com/assets/og-pivitlab.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="pivitlab: A/B testing without the enterprise baggage">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="pivitlab: A/B testing without the enterprise baggage">
+<meta name="twitter:description" content="Plan the test, let it run, get an honest answer. Self-serve A/B testing for small and growing businesses.">
+<meta name="twitter:image" content="https://pivitlab.com/assets/og-pivitlab.png">
+<meta name="theme-color" content="#0c0e14">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/svg+xml" href="/assets/pivitlab-icon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "name": "pivitlab",
+      "url": "https://pivitlab.com/",
+      "email": "info@pivitlab.com",
+      "parentOrganization": {
+        "@type": "Organization",
+        "name": "Heclr",
+        "url": "https://heclr.com"
+      }
+    },
+    {
+      "@type": "WebSite",
+      "name": "pivitlab",
+      "url": "https://pivitlab.com/",
+      "inLanguage": "en-GB"
+    }
+  ]
+}
+</script>
+<style>
+:root{
+  --ink:#e8e9f0;--indigo:#5635FB;--indigo-dark:#4527d6;--mint:#02DEB5;--mint-dark:#7dffe2;
+  --bg:#0c0e14;--bg-2:#10131a;--card:#171a22;--card-2:#1e222c;--border:#2c3140;
+  --muted:#9398ab;--danger:#f07178;--warn:#e6c27a;--radius:14px;
+  font-family:-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased}
+a{color:var(--mint-dark)}
+h1,h2,h3{margin:0;letter-spacing:-0.02em;font-weight:700;color:#fff}
+p{margin:0}
+.wrap{max-width:1160px;margin:0 auto;padding:0 32px}
+.kicker{font-size:.75rem;text-transform:uppercase;letter-spacing:.09em;font-weight:700;color:var(--mint)}
+.muted{color:var(--muted)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:11px 20px;border-radius:10px;font-weight:600;font-size:.95rem;text-decoration:none;border:1px solid transparent;cursor:pointer;font-family:inherit;transition:background .15s,border-color .15s,transform .15s}
+.btn-primary{background:var(--indigo);color:#fff;box-shadow:0 8px 28px -10px rgba(86,53,251,.8)}
+.btn-primary:hover{background:var(--indigo-dark);transform:translateY(-1px)}
+.btn-ghost{background:transparent;color:var(--ink);border-color:var(--border)}
+.btn-ghost:hover{background:#1b1f29;border-color:#3a4054}
+.tag{display:inline-block;padding:3px 9px;border-radius:999px;font-size:.68rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap}
+.tag-soon{background:rgba(86,53,251,.18);color:#c4b6ff}
+.tag-live{background:rgba(2,222,181,.14);color:var(--mint-dark)}
+header.top{position:sticky;top:0;z-index:20;background:rgba(12,14,20,.82);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid rgba(44,49,64,.6)}
+header.top .wrap{display:flex;align-items:center;justify-content:space-between;height:72px}
+.logo{display:block;height:34px}
+.logo img{height:100%;width:auto;display:block}
+nav.links{display:flex;align-items:center;gap:28px}
+nav.links a{color:var(--muted);text-decoration:none;font-size:.92rem;font-weight:500}
+nav.links a:hover{color:var(--ink)}
+.top-actions{display:flex;gap:10px;align-items:center}
+.top-actions .btn{min-height:40px;padding:8px 16px;font-size:.9rem}
+.hero{position:relative;overflow:hidden;padding:88px 0 96px}
+.hero::before{content:"";position:absolute;inset:-200px -100px auto auto;width:720px;height:720px;background:radial-gradient(closest-side,rgba(86,53,251,.30),transparent 70%);pointer-events:none}
+.hero::after{content:"";position:absolute;left:-220px;bottom:-260px;width:640px;height:640px;background:radial-gradient(closest-side,rgba(2,222,181,.14),transparent 70%);pointer-events:none}
+.hero .wrap{position:relative;z-index:1;display:grid;grid-template-columns:1.05fr .95fr;gap:64px;align-items:center}
+.beta-pill{display:inline-flex;align-items:center;gap:8px;padding:6px 12px 6px 8px;border:1px solid var(--border);border-radius:999px;background:rgba(23,26,34,.7);font-size:.82rem;color:var(--muted);margin-bottom:24px}
+.beta-pill .dot{width:8px;height:8px;border-radius:50%;background:var(--mint);box-shadow:0 0 0 4px rgba(2,222,181,.18)}
+.hero h1{font-size:3.6rem;line-height:1.04;letter-spacing:-0.035em}
+.hero h1 .accent{background:linear-gradient(92deg,var(--mint) 0%,#8f7bff 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero .sub{font-size:1.2rem;color:#c3c6d4;margin-top:22px;max-width:540px}
+.hero .ctas{display:flex;gap:12px;margin-top:34px;flex-wrap:wrap}
+.hero .ctas .btn{min-height:50px;padding:13px 24px;font-size:1rem}
+.hero .small{margin-top:18px;font-size:.86rem;color:var(--muted)}
+.product{background:linear-gradient(180deg,#1a1e28 0%,#151821 100%);border:1px solid var(--border);border-radius:18px;padding:22px;box-shadow:0 40px 80px -30px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.02) inset}
+.product-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px}
+.product-head .name{font-weight:700;font-size:1rem;color:#fff}
+.product-head .url{font-family:"SF Mono",Menlo,monospace;font-size:.75rem;color:var(--muted);margin-top:3px}
+.progress{background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:14px}
+.progress .row{display:flex;justify-content:space-between;font-size:.8rem;color:var(--muted);margin-bottom:8px}
+.progress .row b{color:var(--ink);font-weight:600}
+.bar{height:8px;background:#262b37;border-radius:99px;overflow:hidden}
+.bar span{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--indigo),var(--mint))}
+.verdict{display:grid;grid-template-columns:auto 1fr auto;gap:4px 14px;align-items:center;padding:13px 14px;border:1px solid var(--border);border-radius:10px;background:var(--card)}
+.verdict + .verdict{margin-top:8px}
+.verdict .v{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-weight:700;font-size:.85rem;background:#262b37;color:var(--ink)}
+.verdict .label{font-weight:600;font-size:.92rem}
+.verdict .range{grid-column:2/4;font-size:.78rem;color:var(--muted)}
+.verdict .range .rangebar{position:relative;height:6px;background:#262b37;border-radius:99px;margin-top:7px}
+.verdict .range .rangebar i{position:absolute;top:0;bottom:0;border-radius:99px}
+.verdict .range .rangebar .zero{position:absolute;top:-3px;bottom:-3px;width:2px;background:#5b6175;left:40%}
+.v-win{background:rgba(2,222,181,.14);color:var(--mint-dark);border:1px solid rgba(2,184,149,.4)}
+.v-inc{background:#262b37;color:#c7cad6;border:1px solid #3a4054}
+.verdict.win{border-color:rgba(2,184,149,.45);background:rgba(2,222,181,.06)}
+.product-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:14px;font-size:.78rem;color:var(--muted)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:99px;background:var(--bg-2);border:1px solid var(--border);font-size:.74rem;color:#c3c6d4}
+.chip svg{width:12px;height:12px}
+.example{font-size:.72rem;color:#6d7286;text-align:right;margin-top:10px}
+section.block{padding:96px 0;border-top:1px solid rgba(44,49,64,.55)}
+section.alt{background:linear-gradient(180deg,#0f1219 0%,#0c0e14 100%)}
+.section-head{max-width:680px;margin-bottom:48px}
+.section-head h2{font-size:2.35rem;line-height:1.12;margin-top:12px}
+.section-head p{font-size:1.08rem;color:#b9bdcc;margin-top:14px}
+.center{text-align:center;margin-left:auto;margin-right:auto}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;counter-reset:s}
+.step{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:28px 26px;position:relative}
+.step .num{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;font-weight:700;background:rgba(2,222,181,.12);color:var(--mint);border:1px solid rgba(2,222,181,.3);margin-bottom:20px}
+.step h3{font-size:1.2rem;margin-bottom:10px}
+.step p{color:#b9bdcc;font-size:.96rem}
+.step .mini{margin-top:20px;background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-size:.8rem;color:var(--muted)}
+.step .mini b{color:var(--ink);font-weight:600}
+.step .mini code{font-family:"SF Mono",Menlo,monospace;font-size:.76rem;color:var(--mint-dark)}
+.hidden-dots{display:flex;gap:6px;margin-top:8px}
+.hidden-dots span{flex:1;height:22px;border-radius:6px;background:repeating-linear-gradient(135deg,#232733 0 6px,#1b1f29 6px 12px)}
+.features{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.feature{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:26px}
+.feature .ico{width:42px;height:42px;border-radius:11px;display:grid;place-items:center;background:rgba(86,53,251,.16);border:1px solid rgba(86,53,251,.4);margin-bottom:18px}
+.feature .ico svg{width:20px;height:20px;stroke:#b6a8ff}
+.feature h3{font-size:1.08rem;margin-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.feature p{color:#b9bdcc;font-size:.94rem}
+.compare{margin-top:28px;display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.compare > div{padding:24px 28px}
+.compare .them{background:#12151c}
+.compare .us{background:linear-gradient(135deg,rgba(86,53,251,.12),rgba(2,222,181,.06))}
+.compare h4{margin:0 0 12px;font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.compare .us h4{color:var(--mint)}
+.compare ul{margin:0;padding:0;list-style:none}
+.compare li{padding:7px 0 7px 26px;position:relative;font-size:.96rem;color:#c3c6d4}
+.compare .them li::before{content:"–";position:absolute;left:4px;color:#6d7286}
+.compare .us li::before{content:"";position:absolute;left:2px;top:13px;width:12px;height:7px;border-left:2px solid var(--mint);border-bottom:2px solid var(--mint);transform:rotate(-45deg)}
+.who{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.persona{border:1px solid var(--border);border-radius:var(--radius);padding:28px;background:var(--card)}
+.persona .kicker{color:#b6a8ff}
+.persona h3{font-size:1.2rem;margin:10px 0 10px}
+.persona p{color:#b9bdcc;font-size:.95rem}
+.persona ul{margin:16px 0 0;padding:0;list-style:none;font-size:.9rem;color:var(--muted)}
+.persona li{padding:4px 0 4px 18px;position:relative}
+.persona li::before{content:"";position:absolute;left:0;top:12px;width:7px;height:7px;border-radius:50%;background:var(--mint)}
+.not-for{margin-top:22px;font-size:.92rem;color:var(--muted);text-align:center}
+.pricing{display:grid;grid-template-columns:1.2fr .8fr;gap:24px;align-items:stretch}
+.price-card{border-radius:18px;padding:36px;border:1px solid rgba(86,53,251,.45);background:radial-gradient(600px 300px at 0% 0%,rgba(86,53,251,.22),transparent 70%),var(--card)}
+.price-card h3{font-size:1.7rem;margin:14px 0 12px}
+.price-card p{color:#c3c6d4;font-size:1.02rem;max-width:520px}
+.price-points{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:26px}
+.price-points div{background:rgba(12,14,20,.55);border:1px solid var(--border);border-radius:10px;padding:14px 16px;font-size:.9rem;color:#c3c6d4}
+.price-points b{display:block;color:#fff;font-size:.96rem;margin-bottom:2px}
+.starter{border-radius:18px;padding:36px;border:1px dashed rgba(2,222,181,.45);background:rgba(2,222,181,.04);display:flex;flex-direction:column;justify-content:space-between}
+.starter .big{font-size:3rem;font-weight:800;letter-spacing:-0.03em;color:var(--mint);line-height:1}
+.starter h3{font-size:1.25rem;margin:14px 0 8px}
+.starter p{color:#b9bdcc;font-size:.95rem}
+.starter .btn{margin-top:24px;align-self:flex-start}
+.faq{max-width:820px;margin:0 auto}
+.faq details{border:1px solid var(--border);border-radius:12px;background:var(--card);padding:0 24px}
+.faq details + details{margin-top:12px}
+.faq summary{list-style:none;cursor:pointer;padding:20px 0;font-weight:600;font-size:1.05rem;display:flex;justify-content:space-between;gap:16px;align-items:center;color:#fff}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:"+";font-size:1.4rem;color:var(--mint);font-weight:400;line-height:1}
+.faq details[open] summary::after{content:"–"}
+.faq details p{padding:0 0 22px;color:#b9bdcc;font-size:.98rem;max-width:700px}
+.request{display:grid;grid-template-columns:.9fr 1.1fr;gap:56px;align-items:start}
+.request h2{font-size:2.35rem;line-height:1.12;margin-top:12px}
+.request .lede{font-size:1.08rem;color:#b9bdcc;margin-top:14px}
+.request ol{margin:28px 0 0;padding:0;list-style:none;counter-reset:r}
+.request ol li{counter-increment:r;position:relative;padding:0 0 18px 44px;color:#c3c6d4;font-size:.96rem}
+.request ol li::before{content:counter(r);position:absolute;left:0;top:-2px;width:28px;height:28px;border-radius:8px;background:rgba(2,222,181,.12);border:1px solid rgba(2,222,181,.3);color:var(--mint);font-weight:700;font-size:.85rem;display:grid;place-items:center}
+.form-card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:32px;box-shadow:0 30px 60px -30px rgba(0,0,0,.6)}
+.form-card label{display:block;font-weight:600;font-size:.88rem;margin:0 0 6px}
+.form-card .field{margin-bottom:18px}
+.form-card input{width:100%;padding:12px 13px;font-size:1rem;border:1px solid #3a4054;border-radius:9px;background:var(--bg-2);color:var(--ink);font-family:inherit}
+.form-card input:focus{outline:none;border-color:var(--indigo);box-shadow:0 0 0 3px rgba(86,53,251,.28)}
+.prefix{display:flex}
+.prefix span{display:flex;align-items:center;padding:0 12px;border:1px solid #3a4054;border-right:0;border-radius:9px 0 0 9px;background:#1b1f29;color:var(--muted);font-size:.95rem}
+.prefix input{border-radius:0 9px 9px 0}
+.form-card .btn{width:100%;min-height:50px;font-size:1rem;margin-top:4px}
+.form-card .where{margin-top:16px;font-size:.84rem;color:var(--muted);text-align:center}
+.form-error{min-height:1.2em;margin:12px 0 0;color:var(--danger);font-size:.88rem;font-weight:600;text-align:center}
+.mailto-fallback{font-size:1.05rem;text-align:center;margin:8px 0}
+.mailto-fallback a{font-weight:700}
+.thanks{display:none;text-align:center;padding:24px 0}
+.thanks .tick{width:52px;height:52px;border-radius:50%;margin:0 auto 16px;background:rgba(2,222,181,.14);border:1px solid rgba(2,184,149,.5);display:grid;place-items:center;color:var(--mint);font-size:1.4rem}
+.thanks h3{font-size:1.3rem;margin-bottom:8px}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+footer{border-top:1px solid rgba(44,49,64,.6);padding:40px 0 48px;font-size:.88rem;color:var(--muted)}
+footer .wrap{display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
+footer .left{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+footer .logo{height:24px}
+footer a{color:var(--muted);text-decoration:none}
+footer a:hover{color:var(--ink)}
+footer .built a{color:var(--ink);font-weight:600}
+footer nav{display:flex;gap:22px;flex-wrap:wrap}
+@media (max-width:1000px){
+  nav.links{display:none}
+  .hero .wrap{grid-template-columns:1fr;gap:48px}
+  .hero h1{font-size:3rem}
+  .steps,.features,.who{grid-template-columns:1fr 1fr}
+  .pricing,.request{grid-template-columns:1fr}
+}
+@media (max-width:640px){
+  .wrap{padding:0 20px}
+  header.top .wrap{height:62px}
+  .logo{height:28px}
+  .top-actions .btn-primary{display:none}
+  .hero{padding:48px 0 64px}
+  .hero h1{font-size:2.3rem}
+  .hero .sub{font-size:1.05rem}
+  .hero .ctas .btn{width:100%}
+  .product{padding:16px}
+  section.block{padding:64px 0}
+  .section-head{margin-bottom:32px}
+  .section-head h2,.request h2{font-size:1.8rem}
+  .steps,.features,.who{grid-template-columns:1fr}
+  .compare{grid-template-columns:1fr}
+  .compare > div{padding:20px}
+  .price-card,.starter{padding:26px 22px}
+  .price-points{grid-template-columns:1fr}
+  .form-card{padding:24px 20px}
+  .faq details{padding:0 18px}
+  .faq summary{font-size:1rem}
+  footer .wrap{flex-direction:column;align-items:flex-start}
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a href="/" class="logo" aria-label="pivitlab home"><img src="/assets/pivitlab-logo-white.svg" alt="pivitlab"></a>
+    <nav class="links" aria-label="Page sections">
+      <a href="#how">How it works</a>
+      <a href="#why">Why pivitlab</a>
+      <a href="#who">Who it's for</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <div class="top-actions">
+      <a class="btn btn-ghost" href="/login.html">Sign in</a>
+      <a class="btn btn-primary" href="#request">Request access</a>
+    </div>
+  </div>
+</header>
+
+<main>
+<section class="hero">
+  <div class="wrap">
+    <div>
+      <div class="beta-pill"><span class="dot"></span>Private beta · invite only</div>
+      <h1>A/B testing without the <span class="accent">enterprise baggage</span>.</h1>
+      <p class="sub">Test a change on your website and get an honest answer. pivitlab plans the test with you, keeps the score hidden until there's enough data, then tells you plainly: Win, Loss or Inconclusive.</p>
+      <div class="ctas">
+        <a class="btn btn-primary" href="#request">Request access</a>
+        <a class="btn btn-ghost" href="#how">See how it works</a>
+      </div>
+      <p class="small">No annual contract. No sales call. One line of code on your site.</p>
+    </div>
+
+    <div aria-label="Example of a finished pivitlab test">
+      <div class="product">
+        <div class="product-head">
+          <div>
+            <div class="name">Homepage: hero button wording</div>
+            <div class="url">example.co.uk/</div>
+          </div>
+          <span class="tag tag-live">Plan reached</span>
+        </div>
+        <div class="progress">
+          <div class="row"><span>Visitors per version</span><b>9,840 of 9,800</b></div>
+          <div class="bar"><span style="width:100%"></span></div>
+          <div class="row" style="margin:8px 0 0"><span>Minimum runtime</span><b>14 of 14 days</b></div>
+        </div>
+        <div class="verdict win">
+          <div class="v v-win">B</div>
+          <div class="label">"Start your free trial"</div>
+          <span class="tag tag-live">Win</span>
+          <div class="range">+7.8% sign-ups against Control · 95% range +2.4% to +13.1%
+            <div class="rangebar"><span class="zero"></span><i style="left:46%;width:30%;background:linear-gradient(90deg,rgba(2,222,181,.45),var(--mint))"></i></div>
+          </div>
+        </div>
+        <div class="verdict">
+          <div class="v v-inc">C</div>
+          <div class="label">"See plans and pricing"</div>
+          <span class="tag" style="background:#262b37;color:#c7cad6">Inconclusive</span>
+          <div class="range">−0.6% against Control · 95% range −5.9% to +4.8%
+            <div class="rangebar"><span class="zero"></span><i style="left:28%;width:24%;background:#5b6175"></i></div>
+          </div>
+        </div>
+        <div class="product-foot">
+          <span class="chip"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8.5l3 3 7-7"/></svg>412 test visits removed</span>
+          <span class="chip">Export CSV</span>
+        </div>
+      </div>
+      <p class="example">Example result for illustration</p>
+    </div>
+  </div>
+</section>
+
+<section class="block alt" id="how">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="kicker">How it works</span>
+      <h2>Three steps, and no statistics degree.</h2>
+      <p>You decide what to test. pivitlab works out how long it needs, keeps you honest while it runs, and gives you a straight answer at the end.</p>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="num">1</div>
+        <h3>Set it up</h3>
+        <p>Add one line of code to your site, then change a headline, a button or an image in the editor. You can test up to three versions at once. The planner tells you how many visitors you'll need and roughly how long that will take.</p>
+        <div class="mini"><b>"About 9,800 visitors per version, roughly 2 weeks at your current traffic."</b></div>
+      </div>
+      <div class="step">
+        <div class="num">2</div>
+        <h3>It runs to plan</h3>
+        <p>Your visitors are split fairly between the versions. The score stays hidden until the plan is reached, so nobody calls a winner on Tuesday that's gone by Friday. You can see progress and a health check the whole time.</p>
+        <div class="mini">Progress <b>62%</b> · day 9 of 14<div class="hidden-dots"><span></span><span></span><span></span></div><div style="margin-top:8px">Results hidden until the plan is reached</div></div>
+      </div>
+      <div class="step">
+        <div class="num">3</div>
+        <h3>Get an honest verdict</h3>
+        <p>Each version gets a clear Win, Loss or Inconclusive, with a 95% range showing how big the effect could really be. Share it with your team or client in their own portal, or export the numbers as a CSV.</p>
+        <div class="mini"><b style="color:var(--mint-dark)">Win</b> · +7.8% · 95% range +2.4% to +13.1%</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="why">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="kicker">Why pivitlab</span>
+      <h2>Clear spend. Honest results. Nothing confusing.</h2>
+      <p>The big testing platforms are built for teams with an analyst, a developer and a five-figure budget. pivitlab is built for everyone else.</p>
+    </div>
+    <div class="features">
+      <div class="feature">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h4"/></svg></div>
+        <h3>Pay per test <span class="tag tag-soon">Coming soon</span></h3>
+        <p>You'll pay for the tests you run, priced before you start. No subscription quietly renewing in the background.</p>
+      </div>
+      <div class="feature">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+        <h3>Finishes on plan</h3>
+        <p>Every test has a planned number of visitors and a minimum run time. When both are reached, the verdict appears. No guessing when to stop.</p>
+      </div>
+      <div class="feature">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg></div>
+        <h3>Win, Loss or Inconclusive</h3>
+        <p>Read once, at the planned sample, so a false win stays near 1 in 20. "Inconclusive" is a real answer too, and we'll say so rather than dress it up.</p>
+      </div>
+      <div class="feature">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg></div>
+        <h3>Clean data</h3>
+        <p>Your own clicks, test runs and obvious bots are flagged and kept out of the numbers, so the result reflects real visitors.</p>
+      </div>
+      <div class="feature">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5M16 4.5a3.5 3.5 0 010 7M18.5 14.8c1.7.8 2.7 2.6 3 5.2"/></svg></div>
+        <h3>Made for agencies too</h3>
+        <p>Give each client their own login to see their tests and results, without handing over the keys to your account.</p>
+      </div>
+      <div class="feature">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-5.5-7-11a7 7 0 0114 0c0 5.5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg></div>
+        <h3>Built in the UK</h3>
+        <p>Designed and built in Britain by Heclr. Plain English, real people, and a reply when you get in touch.</p>
+      </div>
+    </div>
+
+    <div class="compare">
+      <div class="them">
+        <h4>Enterprise testing suites</h4>
+        <ul>
+          <li>Annual contract and a sales call before you start</li>
+          <li>A live "probability to win" that invites you to stop early</li>
+          <li>Dozens of reports you'll need training to read</li>
+          <li>Your own visits mixed in with your customers'</li>
+        </ul>
+      </div>
+      <div class="us">
+        <h4>pivitlab</h4>
+        <ul>
+          <li>Invite, sign in by email, test the same day</li>
+          <li>Score hidden until the plan is reached</li>
+          <li>One verdict per version, in plain English</li>
+          <li>Test traffic flagged and removed</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block alt" id="who">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="kicker">Who it's for</span>
+      <h2>For businesses that want answers, not a platform.</h2>
+      <p>If you've got a website that matters to your business and a change you're not sure about, pivitlab is for you.</p>
+    </div>
+    <div class="who">
+      <div class="persona">
+        <span class="kicker">Small businesses</span>
+        <h3>Online shops and service businesses</h3>
+        <p>You're making changes to your site anyway. Find out which ones actually bring in more sales or enquiries.</p>
+        <ul><li>No developer needed for most changes</li><li>Plain verdicts you can act on</li></ul>
+      </div>
+      <div class="persona">
+        <span class="kicker">Growing teams</span>
+        <h3>Marketing teams at larger firms</h3>
+        <p>You need proper testing but can't justify an enterprise contract, or wait three months for procurement.</p>
+        <ul><li>Spend you can see per test</li><li>Results you can defend in a meeting</li></ul>
+      </div>
+      <div class="persona">
+        <span class="kicker">Agencies and freelancers</span>
+        <h3>People who test for clients</h3>
+        <p>Run tests across several client sites and give each client their own view of the results.</p>
+        <ul><li>A separate login for each client</li><li>CSV export for your own reports</li></ul>
+      </div>
+    </div>
+    <p class="not-for">Running hundreds of tests a month with a data science team? A bigger platform may suit you better, and that's fine.</p>
+  </div>
+</section>
+
+<section class="block" id="pricing">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="kicker">Pricing</span>
+      <h2>Simple pricing is on its way.</h2>
+      <p>pivitlab is in private beta while we finish pricing. Here's what we're aiming for.</p>
+    </div>
+    <div class="pricing">
+      <div class="price-card">
+        <span class="tag tag-soon">Coming soon</span>
+        <h3>Pay per test</h3>
+        <p>One price for each test, shown before you start it. You'll know what it costs before your visitors see a thing.</p>
+        <div class="price-points">
+          <div><b>No subscription</b>Nothing to cancel between tests.</div>
+          <div><b>No contract</b>Run one test or fifty.</div>
+          <div><b>Price shown up front</b>Agreed before the test goes live.</div>
+          <div><b>Beta testers first</b>Early users hear about pricing first.</div>
+        </div>
+      </div>
+      <div class="starter">
+        <div>
+          <span class="tag tag-soon">Planned</span>
+          <div class="big" style="margin-top:18px">Free</div>
+          <h3>Your first test, on us</h3>
+          <p>We're planning a free starter test, so you can try pivitlab on your own site before you spend anything.</p>
+        </div>
+        <a class="btn btn-ghost" href="#request">Request access</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block alt" id="faq">
+  <div class="wrap">
+    <div class="section-head center">
+      <span class="kicker">FAQ</span>
+      <h2>Good questions</h2>
+    </div>
+    <div class="faq">
+      <details open>
+        <summary>Do I need a developer?</summary>
+        <p>Usually not. Someone needs to add one line of code to your site once, much like adding Google Analytics. After that you can change text, buttons and images in the editor yourself.</p>
+      </details>
+      <details>
+        <summary>Why can't I see the results while the test is running?</summary>
+        <p>Because peeking is the most common way A/B tests go wrong. Early numbers swing about, and stopping when they look good produces "wins" that aren't real. pivitlab shows progress and a health check while it runs, and reveals the result once the planned number of visitors and the minimum run time are both reached.</p>
+      </details>
+      <details>
+        <summary>What does "Inconclusive" mean?</summary>
+        <p>It means the test didn't find a difference big enough to be confident about. That's still useful: the 95% range tells you how big any effect could realistically be, so you can decide whether to keep the change, try something bolder, or move on.</p>
+      </details>
+      <details>
+        <summary>How much will it cost?</summary>
+        <p>We're finalising pay-per-test pricing during the beta. There'll be no subscription, and the price will be shown before you start each test. We're also planning a free starter test.</p>
+      </details>
+      <details>
+        <summary>Why is it invite-only?</summary>
+        <p>We're in private beta and want to work closely with each new customer. Request access below and we'll be in touch with an invite code if pivitlab is a good fit for your site.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="request">
+  <div class="wrap request">
+    <div>
+      <span class="kicker">Request access</span>
+      <h2>Try pivitlab on your site.</h2>
+      <p class="lede">Tell us a little about you and we'll get back to you personally.</p>
+      <ol>
+        <li>Send us your name, email and website.</li>
+        <li>We'll take a look at your site and reply by email, with an invite code if it's a good fit.</li>
+        <li>Create your account with the code, sign in by email and set up your first test.</li>
+      </ol>
+    </div>
+<!--ACCESS_OFF-->
+    <div class="form-card">
+      <p class="mailto-fallback">Request access: <a href="mailto:info@pivitlab.com">email info@pivitlab.com</a></p>
+    </div>
+<!--ACCESS_ON-->
+    <div class="form-card">
+      <form id="req-form" novalidate>
+        <div class="field">
+          <label for="r-name">Your name</label>
+          <input id="r-name" name="name" type="text" autocomplete="name" placeholder="Sam Taylor" required maxlength="80">
+        </div>
+        <div class="field">
+          <label for="r-email">Work email</label>
+          <input id="r-email" name="email" type="email" autocomplete="email" placeholder="sam@example.co.uk" required>
+        </div>
+        <div class="field">
+          <label for="r-site">Your website</label>
+          <div class="prefix"><span>https://</span><input id="r-site" name="website" type="text" inputmode="url" autocomplete="url" placeholder="example.co.uk" required></div>
+        </div>
+        <div class="hp" aria-hidden="true">
+          <label for="pivit-hp">Leave this empty</label>
+          <input id="pivit-hp" name="pivit_hp" type="text" tabindex="-1" autocomplete="off">
+        </div>
+        <button class="btn btn-primary" type="submit">Request access</button>
+        <p class="form-error" id="req-error" role="alert"></p>
+        <p class="where">Your request goes straight to the pivitlab team, not a mailing list. We'll only use your details to reply. <a href="/privacy.html">Privacy notice</a></p>
+      </form>
+      <div class="thanks" id="thanks" role="status">
+        <div class="tick">✓</div>
+        <h3>Thanks, we've got it.</h3>
+        <p class="muted">We'll reply by email, usually within a couple of working days.</p>
+      </div>
+      <script>
+      document.getElementById('req-form').addEventListener('submit', async function (event) {
+        event.preventDefault();
+        if (!this.checkValidity()) { this.reportValidity(); return; }
+        var button = this.querySelector('button');
+        var errorEl = document.getElementById('req-error');
+        errorEl.textContent = '';
+        button.disabled = true;
+        try {
+          var res = await fetch('/api/access-requests', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: document.getElementById('r-name').value,
+              email: document.getElementById('r-email').value,
+              website: document.getElementById('r-site').value,
+              pivit_hp: document.getElementById('pivit-hp').value
+            })
+          });
+          var data = {};
+          try { data = await res.json(); } catch (err) { data = {}; }
+          if (!res.ok) {
+            errorEl.textContent = (data && data.error) || 'We couldn’t send that. Please try again, or email info@pivitlab.com.';
+            button.disabled = false;
+            return;
+          }
+          this.style.display = 'none';
+          document.getElementById('thanks').style.display = 'block';
+        } catch (err) {
+          errorEl.textContent = 'We couldn’t send that. Please try again, or email info@pivitlab.com.';
+          button.disabled = false;
+        }
+      });
+      </script>
+    </div>
+<!--ACCESS_END-->
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="left">
+      <a href="/" class="logo" aria-label="pivitlab home"><img src="/assets/pivitlab-logo-white.svg" alt="pivitlab"></a>
+      <span class="built">Built by <a href="https://heclr.com">Heclr</a></span>
+      <span>© 2026</span>
+    </div>
+    <nav aria-label="Footer">
+      <a href="/privacy.html">Privacy</a>
+      <a href="/legal.html">Terms</a>
+      <a href="mailto:info@pivitlab.com">info@pivitlab.com</a>
+      <a href="/login.html">Sign in</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

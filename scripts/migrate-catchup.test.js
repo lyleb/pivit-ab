@@ -94,7 +94,7 @@ async function main() {
     assert.strictEqual(await columnInfo(db), null);
 
     const applied = await migrate();
-    assert.deepStrictEqual(applied, ['003']);
+    assert.deepStrictEqual(applied, ['003', '004']);
 
     const column = await columnInfo(db);
     assert.ok(column, 'url_match_type should exist after 003');
@@ -120,7 +120,7 @@ async function main() {
     assert.strictEqual(kept.rows[0].url_match_type, 'exact');
 
     const versions = await db.query(`SELECT version FROM schema_migrations ORDER BY version`);
-    assert.deepStrictEqual(versions.rows.map((row) => row.version), ['000', '001', '002', '003']);
+    assert.deepStrictEqual(versions.rows.map((row) => row.version), ['000', '001', '002', '003', '004']);
 
     console.log('migrate catch-up tests passed');
   } finally {

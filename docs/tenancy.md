@@ -14,6 +14,7 @@ Account #1 is named **Heclr**. The superadmin user is **info@heclr.com**, with `
 | 001 | `src/db/tenancy.js`. Creates accounts, users, memberships and sites, attaches existing rows to Heclr, then checks totals. |
 | 002 | `src/db/signup.js`. Invite codes, sign-in tokens, rate limits and the audit log. See [signup.md](signup.md). |
 | 003 | `src/db/url-match-type.js`. Adds `experiments.url_match_type`, default `contains`. Does not rewrite existing rows. |
+| 004 | `src/db/access-requests.js`. The public landing-page access-request table. Not added to `schema.sql`. |
 
 Once every version above is recorded, startup logs `Database schema is up to date.` and does nothing else. A statement added only to `schema.sql` after 000 is recorded does not run; it needs a new version. Running `npm run migrate` does the same thing.
 

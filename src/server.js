@@ -10,7 +10,7 @@ const { csrfMiddleware } = require('./csrf');
 
 const { hostScopingMode } = require('./host-scope');
 const { configuredAppOrigin, sendPublicConfig, canonicalHtmlMiddleware } = require('./app-origin');
-const { robotsTagMiddleware, sendRobotsTxt } = require('./robots');
+const { robotsTagMiddleware, sendRobotsTxt, sendSitemap } = require('./robots');
 const { hostHitMiddleware } = require('./host-hits');
 const { backfillExperimentGoals } = require('./goals');
 const { hstsMiddleware } = require('./hsts');
@@ -25,10 +25,12 @@ const clientRouter = require('./routes/client');
 const editorRouter = require('./routes/editor');
 const hostHitsRouter = require('./routes/host-hits');
 const invitesRouter = require('./routes/invites');
+const accessRequestsRouter = require('./routes/access-requests');
 const auditRouter = require('./routes/audit');
 const { setupRouter, sitesRouter } = require('./routes/setup');
 const webhooksRouter = require('./routes/webhooks');
 const { sendOwnerPage } = require('./owner-page');
+const { sendLandingPage } = require('./landing');
 
 const app = express();
 // Railway (like most hosts) sits behind a reverse proxy. Without this, Express
@@ -37,8 +39,9 @@ const app = express();
 // req.ip (used for the login throttle) would show the proxy's IP for everyone.
 app.set('trust proxy', 1);
 
-// noindex on every response (HTML, static files, /snippet, /api, /health).
-// See src/robots.js. Does not change caching or CORS.
+// noindex on every response except the public landing page (/) and
+// /sitemap.xml. The dashboard, client portal, snippet, /api and /health
+// stay noindexed. See src/robots.js. Does not change caching or CORS.
 app.use(robotsTagMiddleware);
 
 // HSTS on every HTTPS response (pages, /snippet, /api, /health). See src/hsts.js.
@@ -68,14 +71,18 @@ app.use('/snippet/editor.js', (req, res, next) => {
   next();
 });
 
-// Leave the HTML crawlable so Google can read the noindex. Disallow: /
-// would stop that. /api and /snippet are not pages, so those stay disallowed.
-// See src/robots.js. There is no sitemap.xml — a sitemap belongs on the
-// future marketing site, not on this app.
+// Leave the HTML crawlable so Google can read the landing page, and the
+// noindex on every other page. Disallow: / would stop that. /api, /snippet
+// and /owner stay disallowed. The sitemap lists only /. See src/robots.js.
 app.get('/robots.txt', sendRobotsTxt);
+app.get('/sitemap.xml', sendSitemap);
 // Unlisted owner-password page. Not a file under public/, so /owner.html is
 // not served. Not linked from the sign-in page.
 app.get('/owner', sendOwnerPage);
+// Logged-out visitors get the landing page. Owners and customers are sent
+// to the dashboard (/index.html). Client sessions go to /client.html.
+// Registered before the static files so / is not the dashboard.
+app.get('/', sendLandingPage);
 
 // Fills in <link rel="canonical"> from APP_ORIGIN (else https://pivitlab.com)
 // before the static handler can send the file unchanged.
@@ -87,6 +94,8 @@ app.use(express.static(path.join(__dirname, '../public')));
 
 app.use('/api/auth', authRouter);
 app.use('/api/invites', invitesRouter);
+app.use('/api/access-requests', accessRequestsRouter);
+app.use('/api/access-requests', accessRequestsRouter.adminRouter);
 app.use('/api/audit', auditRouter);
 app.use('/api/setup', setupRouter);
 app.use('/api/sites', sitesRouter);
