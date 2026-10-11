@@ -1,5 +1,7 @@
-// Migration 003. Access requests from the public landing page, stored next
-// to invite codes. Safe to run again: the table and index use IF NOT EXISTS.
+// Migration 004. Access requests from the public landing page, stored next
+// to invite codes. Version 003 is the url_match_type hotfix, so this table
+// is not added to schema.sql (version 000 is already recorded and would not
+// run). Safe to run again: the table and index use IF NOT EXISTS.
 // The caller wraps this in a transaction.
 
 async function applyAccessRequests(client) {

@@ -21,7 +21,9 @@ const VERSIONS = [
   { version: '000', name: 'baseline', run: applyBaseline },
   { version: '001', name: 'tenancy', run: applyTenancy },
   { version: '002', name: 'signup', run: applySignup },
-  { version: '003', name: 'access_requests', run: applyAccessRequests },
+  // 003 is experiments.url_match_type (hotfix). Access requests are 004 so
+  // they run after that column. New objects stay out of schema.sql.
+  { version: '004', name: 'access_requests', run: applyAccessRequests },
 ];
 
 async function ensureMigrationsTable(queryable) {

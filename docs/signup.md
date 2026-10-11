@@ -54,6 +54,6 @@ The landing page at `/` is public. Logged-in owners and customers are redirected
 
 The request form (name, work email, website) is off until `ACCESS_REQUESTS_ENABLED` is set. Until then the page says to email info@pivitlab.com, and `POST /api/access-requests` returns 404 and stores nothing.
 
-When the form is on, a request is stored in `access_requests` (migration 003, next to invite codes) and an email is sent to `ACCESS_REQUEST_EMAIL`, or to `EMAIL_REPLY_TO` when that is unset. The message still goes out through Postmark. If the email fails, the row is kept. A honeypot field and a rate limit (5 per email address and 10 per IP, each hour) sit in front of it. Turnstile runs only when `TURNSTILE_SECRET_KEY` is already set.
+When the form is on, a request is stored in `access_requests` (migration 004, next to invite codes) and an email is sent to `ACCESS_REQUEST_EMAIL`, or to `EMAIL_REPLY_TO` when that is unset. The message still goes out through Postmark. If the email fails, the row is kept. A honeypot field and a rate limit (5 per email address and 10 per IP, each hour) sit in front of it. Turnstile runs only when `TURNSTILE_SECRET_KEY` is already set.
 
 The superadmin invite card on the dashboard lists the requests. **Create invite code** makes one code for that person, with their name, email and website in the note, and shows the code once. A second click does not make another code. Do not turn the form on until `/privacy.html` has Lyle's wording. That page is a placeholder.

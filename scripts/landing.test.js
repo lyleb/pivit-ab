@@ -55,6 +55,10 @@ function staticChecks() {
 
   const sessionSrc = read('src/session.js');
   assert.ok(sessionSrc.includes("name: 'pivit.sid'"));
+  const migrateSrc = read('src/db/migrate.js');
+  const schema = read('src/db/schema.sql');
+  assert.ok(migrateSrc.includes("{ version: '004', name: 'access_requests', run: applyAccessRequests }"));
+  assert.ok(!schema.includes('access_requests'));
   const snippet = read('snippet/ab.js');
   assert.ok(snippet.includes('function'));
 }
@@ -198,7 +202,7 @@ async function dbChecks() {
   let server;
   try {
     const applied = await migrate();
-    assert.ok(applied.includes('003'));
+    assert.ok(applied.includes('004'));
     const again = await migrate();
     assert.deepStrictEqual(again, []);
     takeLastLoggedEmail();
