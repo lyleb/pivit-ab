@@ -8,6 +8,7 @@ const path = require('path');
 const db = require('./index');
 const { applyTenancy } = require('./tenancy');
 const { applySignup } = require('./signup');
+const { applyUrlMatchType } = require('./url-match-type');
 
 const LOCK_KEY = 814021;
 
@@ -20,6 +21,7 @@ const VERSIONS = [
   { version: '000', name: 'baseline', run: applyBaseline },
   { version: '001', name: 'tenancy', run: applyTenancy },
   { version: '002', name: 'signup', run: applySignup },
+  { version: '003', name: 'url-match-type', run: applyUrlMatchType },
 ];
 
 async function ensureMigrationsTable(queryable) {
