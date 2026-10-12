@@ -16,6 +16,7 @@ Account #1 is named **Heclr**. The superadmin user is **info@heclr.com**, with `
 | 003 | `src/db/url-match-type.js`. Adds `experiments.url_match_type`, default `contains`. Does not rewrite existing rows. |
 | 004 | `src/db/access-requests.js`. The public landing-page access-request table. Not added to `schema.sql`. |
 | 005 | `src/db/portal.js`. Optional `experiments.hypothesis`, daily `status_snapshots`, and `review_requests`. Not added to `schema.sql`. |
+| 006 | `src/db/install-check.js`. Optional note on an unverified site when a visit from its domain arrives without that site's key. Not added to `schema.sql`. Existing verified sites, including cantsaythat.co.uk, are left alone. |
 
 Once every version above is recorded, startup logs `Database schema is up to date.` and does nothing else. A statement added only to `schema.sql` after 000 is recorded does not run; it needs a new version. Running `npm run migrate` does the same thing.
 

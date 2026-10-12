@@ -810,13 +810,10 @@ function paintFirstRun(setup) {
     snippetStep.classList.toggle('done', !!site.verified);
     checkStep.classList.toggle('done', !!site.verified);
     conflict.hidden = !site.conflict;
-    if (site.verified) {
-      checkText.textContent = `We can see pivitlab on ${domain}.`;
-      create.disabled = false;
-    } else {
-      checkText.textContent = 'Waiting for a page on your site to load the snippet.';
-      create.disabled = true;
-    }
+    const line = UI.installCheckLine(site, domain);
+    checkText.textContent = line.text;
+    checkText.className = line.problem ? 'error-msg' : 'hint';
+    create.disabled = !site.verified;
   } else {
     siteStep.classList.remove('done');
     form.hidden = false;
@@ -824,6 +821,8 @@ function paintFirstRun(setup) {
     document.getElementById('first-run-snippet').textContent = 'Add your site to get the snippet.';
     snippetStep.classList.remove('done');
     checkStep.classList.remove('done');
+    checkText.textContent = 'Waiting for a page on your site to load the snippet.';
+    checkText.className = 'hint';
     conflict.hidden = true;
     create.disabled = true;
   }
@@ -861,7 +860,11 @@ async function refreshFirstRun(experimentCount) {
   if (list) list.hidden = show;
   if (hits) hits.hidden = show;
   const site = result.data.site;
-  if (unverified) unverified.hidden = show || !site || site.verified;
+  if (unverified) {
+    const line = UI.installCheckLine(site, site && ((site.domains && site.domains[0]) || site.name));
+    unverified.textContent = line.banner || 'We have not seen the snippet on your site yet. You can build a test, and you can start it once the check ticks.';
+    unverified.hidden = show || !site || site.verified;
+  }
   if (!show) {
     stopFirstRunPoll();
     return;

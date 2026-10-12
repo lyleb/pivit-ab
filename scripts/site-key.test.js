@@ -1,6 +1,8 @@
 // Site key formatting. No database. Old snippet tags stay unchanged, and old
 // edit and preview tokens still verify.
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const snippet = require('../snippet/ab.js');
 const ui = require('../public/admin-ui.js');
 const { createEditToken, inspectEditToken, verifyEditToken } = require('../src/edit-token');
@@ -82,5 +84,47 @@ assert.strictEqual(inspectPreviewToken(
   variantId,
   now
 ).siteId, null);
+
+const snippetSource = fs.readFileSync(path.join(__dirname, '../snippet/ab.js'), 'utf8');
+const siteCalls = snippetSource.match(/withSite\([\s\S]*?SITE_KEY\)/g) || [];
+assert.ok(siteCalls.length >= 2, 'the snippet should send the site key on each experiments fetch');
+assert.ok(snippetSource.includes('fields.site = SITE_KEY'), 'event beacons should send the site key');
+
+const dashboard = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+assert.ok(dashboard.includes('data.snippet_site_key'));
+assert.ok(dashboard.includes('site.public_key'));
+assert.ok(dashboard.includes('UI.installCheckLine'));
+assert.ok(dashboard.includes('UI.snippetTag'));
+
+const waiting = ui.installCheckLine({ verified: false, install_check: null }, 'example.co.uk');
+assert.strictEqual(waiting.problem, false);
+assert.strictEqual(waiting.text, 'Waiting for a page on your site to load the snippet.');
+assert.ok(waiting.banner.includes('snippet'));
+
+const missingMessage = 'We saw a visit from example.co.uk, but the snippet had no site key. Copy the snippet from pivitlab and replace the tag on your site.';
+const missing = ui.installCheckLine({
+  verified: false,
+  domains: ['example.co.uk'],
+  install_check: { reason: 'missing', message: missingMessage },
+}, 'example.co.uk');
+assert.strictEqual(missing.problem, true);
+assert.strictEqual(missing.text, missingMessage);
+assert.strictEqual(missing.banner, missingMessage);
+assert.ok(!missing.text.includes('Pivit'));
+
+const wrongMessage = 'We saw a visit from example.co.uk, but the site key did not match this account. Copy the snippet from pivitlab and replace the tag on your site.';
+const wrong = ui.installCheckLine({
+  verified: false,
+  install_check: { reason: 'wrong', message: wrongMessage },
+}, 'example.co.uk');
+assert.strictEqual(wrong.text, wrongMessage);
+
+const seen = ui.installCheckLine({
+  verified: true,
+  install_check: { message: 'stale' },
+}, 'example.co.uk');
+assert.strictEqual(seen.text, 'We can see pivitlab on example.co.uk.');
+assert.strictEqual(seen.problem, false);
+assert.strictEqual(seen.banner, '');
 
 console.log('site-key tests passed');

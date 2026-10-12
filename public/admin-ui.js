@@ -252,6 +252,24 @@
     return `<script src="${origin}/snippet/ab.js" data-api="${origin}"${siteAttr}>${closeTag}`;
   }
 
+  const INSTALL_WAITING = 'Waiting for a page on your site to load the snippet.';
+  const INSTALL_BANNER = 'We have not seen the snippet on your site yet. You can build a test, and you can start it once the check ticks.';
+
+  // The check line on the setup screen. A server message wins when the visit
+  // arrived without this account's site key. A verified site always shows the
+  // success line, even if an older note is still on the payload.
+  function installCheckLine(site, domain) {
+    const name = domain || (site && site.domains && site.domains[0]) || (site && site.name) || 'your site';
+    if (site && site.verified) {
+      return { text: `We can see pivitlab on ${name}.`, problem: false, banner: '' };
+    }
+    const message = site && site.install_check && typeof site.install_check.message === 'string'
+      ? site.install_check.message.trim()
+      : '';
+    if (message) return { text: message, problem: true, banner: message };
+    return { text: INSTALL_WAITING, problem: false, banner: INSTALL_BANNER };
+  }
+
   function clientLoginUrl(origin) {
     return `${origin}/login.html?role=client`;
   }
@@ -288,6 +306,7 @@
     formatCreated,
     displayOrigin,
     snippetTag,
+    installCheckLine,
     clientLoginUrl,
     shouldShowSignpost,
   };

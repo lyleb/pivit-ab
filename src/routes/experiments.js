@@ -27,12 +27,26 @@ const {
 } = require('../host-scope');
 const { publicScope, ownedExperiment, placeOnSite } = require('../tenant');
 const { matchPageUrl, resolvePageMatch } = require('../../public/url-match');
-const { noteSnippetSeen } = require('../site-verify');
+const { noteSnippetSeen, noteInstallCheck, installCheckPayload } = require('../site-verify');
 const { normaliseStatusChange } = require('../experiment-status');
 const router = express.Router();
 
 function publicScopeSql(accountParam, siteParam) {
   return `($${siteParam}::uuid IS NULL AND account_id = $${accountParam}) OR ($${siteParam}::uuid IS NOT NULL AND site_id = $${siteParam})`;
+}
+
+// Key decides the account. The host check below decides whether that account's
+// experiment may run on this page. A bad key does not fall back to Heclr.
+// The install note is owner-facing and never changes this response.
+async function openPublicScope(req) {
+  const scope = await publicScope(req.query.site);
+  if (!scope.ok) {
+    await noteInstallCheck(scope, req);
+    return null;
+  }
+  await noteSnippetSeen(scope, req);
+  await noteInstallCheck(scope, req);
+  return scope;
 }
 
 // A stored "contains" match stays the historical SQL ILIKE, including its
@@ -99,9 +113,8 @@ router.get('/', async (req, res) => {
   });
 
   try {
-    const scope = await publicScope(req.query.site);
-    if (!scope.ok) return res.json({ experiments: [] });
-    await noteSnippetSeen(scope, req);
+    const scope = await openPublicScope(req);
+    if (!scope) return res.json({ experiments: [] });
 
     const { rows: experiments } = await db.query(
       `SELECT id, name, url_match, url_match_type, allowed_hosts, goals FROM experiments
@@ -175,8 +188,8 @@ router.get('/by-ids', async (req, res) => {
   if (idList.length === 0) return res.json({ experiments: [] });
 
   try {
-    const scope = await publicScope(req.query.site);
-    if (!scope.ok) return res.json({ experiments: [] });
+    const scope = await openPublicScope(req);
+    if (!scope) return res.json({ experiments: [] });
     const { rows: experiments } = await db.query(
       `SELECT id, name, allowed_hosts, goals FROM experiments
        WHERE id = ANY($1::uuid[])
@@ -924,12 +937,16 @@ router.patch('/:id/status', async (req, res) => {
       }
       if (existing.site_id) {
         const site = await db.query(
-          `SELECT verified_at FROM sites WHERE id = $1 AND account_id = $2`,
+          `SELECT verified_at, install_note, install_note_host
+           FROM sites WHERE id = $1 AND account_id = $2`,
           [existing.site_id, req.account.id]
         );
         if (site.rows[0] && !site.rows[0].verified_at) {
+          const problem = installCheckPayload(site.rows[0].install_note, site.rows[0].install_note_host);
           return res.status(400).json({
-            error: 'Add the snippet to your site before starting a test. We have not seen it load there yet.',
+            error: problem
+              ? problem.message
+              : 'Add the snippet to your site before starting a test. We have not seen it load there yet.',
           });
         }
       }
