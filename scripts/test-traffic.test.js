@@ -62,6 +62,10 @@ assert.strictEqual(flags.requestIsTestTraffic(request({
   body: { visitor_id: 'v_shopper' },
 })), true);
 assert.strictEqual(flags.requestIsTestTraffic(request()), false);
+assert.strictEqual(flags.requestHasQaFlag(request({ query: { pivit_qa: '1' } })), true);
+assert.strictEqual(flags.requestHasQaFlag(request({ query: { pivit_qa: '0' } })), false);
+assert.strictEqual(flags.requestHasQaFlag(request({ referer: 'https://example.co.uk/?pivit_qa=1' })), true);
+assert.strictEqual(flags.requestHasQaFlag(request({ header: '1', body: { visitor_id: 'v_ptabc', is_test: true } })), false);
 
 const store = memoryStore();
 const cookies = [];

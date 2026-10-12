@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>pivitlab</title>
-<link rel="stylesheet" href="/assets/pivit.css?v=5">
+<link rel="stylesheet" href="/assets/pivit.css?v=6">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="/url-match.js"></script>
 <script src="/plan.js"></script>
@@ -287,13 +287,20 @@
       </div>
       <div id="unverified-banner" class="banner" hidden>We have not seen the snippet on your site yet. You can build a test, and you can start it once the check ticks.</div>
       <div class="card" id="first-run" hidden>
-        <h2>Set up your site</h2>
-        <p class="hint" style="margin-top:0;">Three steps. The last one ticks itself when a page on your site loads the snippet.</p>
+        <div class="first-run-head">
+          <div>
+            <h2>Set up your first test</h2>
+            <p class="hint" id="first-run-intro">Five steps. Each one ticks itself from what pivitlab has actually seen. You can hide this list and carry on with the experiments underneath. It also disappears once every step has ticked.</p>
+          </div>
+          <button type="button" class="btn-ghost" id="first-run-dismiss">Hide checklist</button>
+        </div>
         <ol class="setup-list">
           <li id="step-site">
             <span class="setup-num">1</span>
             <div style="flex:1;min-width:0;">
-              <strong>Your site</strong>
+              <strong>Add your site</strong>
+              <span class="setup-state">To do</span>
+              <p class="hint">This is the website the test will run on. pivitlab only serves a test for the domains you add here. If you signed up with a website, this step is already ticked.</p>
               <p class="hint" id="step-site-host" style="margin:4px 0 0;">Add the site you want to test.</p>
               <form id="add-site-form" hidden style="margin-top:10px;">
                 <label for="add-site-website">Website</label>
@@ -306,24 +313,47 @@
           <li id="step-snippet">
             <span class="setup-num">2</span>
             <div style="flex:1;min-width:0;">
-              <strong>Add the snippet</strong>
-              <p class="hint">Paste this before the closing body tag. It includes your site key.</p>
+              <strong>Install the snippet</strong>
+              <span class="setup-state">To do</span>
+              <p class="hint">Paste this one line before the closing body tag on every page you might test. It includes your site key, so pivitlab can tell the visit is yours. In Google Tag Manager, add a Custom HTML tag with the same line and fire it on all pages. Then open the site in a browser. The status below updates on its own, usually within a few seconds. You can build a test before it ticks. You cannot start a test until it does.</p>
               <pre id="first-run-snippet"></pre>
               <button type="button" class="btn-ghost" id="first-run-copy">Copy snippet</button>
               <span id="first-run-copied" class="hint"></span>
-              <p class="hint">In Google Tag Manager, add a Custom HTML tag with the same snippet and fire it on all pages.</p>
+              <p class="hint" id="step-check-text" style="margin:8px 0 0;">Waiting for a page on your site to load the snippet.</p>
             </div>
           </li>
-          <li id="step-check">
+          <li id="step-test">
             <span class="setup-num">3</span>
-            <div>
-              <strong>Check it's working</strong>
-              <p class="hint" id="step-check-text" style="margin:4px 0 0;">Waiting for a page on your site to load the snippet.</p>
+            <div style="flex:1;min-width:0;">
+              <strong>Create your first test</strong>
+              <span class="setup-state">To do</span>
+              <p class="hint">A test compares the page you have now with one change. Give it a name and the page address, then save. It stays a draft, so visitors still see the normal page. This step ticks when a test exists, even if the snippet has not been seen yet.</p>
+              <p class="hint" id="step-test-done" hidden>You have a test saved. It stays a draft until you start it.</p>
+              <button type="button" id="first-run-create" disabled>Create your first test</button>
+            </div>
+          </li>
+          <li id="step-preview">
+            <span class="setup-num">4</span>
+            <div style="flex:1;min-width:0;">
+              <strong>Preview with ?pivit_qa=1</strong>
+              <span class="setup-state">To do</span>
+              <p class="hint">Open the page you are testing and add ?pivit_qa=1 to the address. pivitlab remembers that browser and treats the visit as a test, so those views stay out of the results. If the test is still a draft, the page itself does not change yet. The visit still counts, and this step ticks when that call arrives. When you want this browser to count as a normal visitor again, open the same page with ?pivit_qa=0.</p>
+              <p class="mono" id="first-run-preview-url">https://example.co.uk/?pivit_qa=1</p>
+              <button type="button" class="btn-ghost" id="first-run-preview-copy">Copy preview address</button>
+              <span id="first-run-preview-copied" class="hint"></span>
+            </div>
+          </li>
+          <li id="step-start">
+            <span class="setup-num">5</span>
+            <div style="flex:1;min-width:0;">
+              <strong>Start the test</strong>
+              <span class="setup-state">To do</span>
+              <p class="hint">When the snippet status has ticked and the preview looks right, open the test and choose Start. Visitors then see either the original page or your change. Until you start it, the test stays a draft. pivitlab will refuse to start while the snippet has not been seen. This step ticks as soon as a test has been started.</p>
+              <button type="button" class="btn-ghost" id="first-run-open" hidden>Open your draft</button>
             </div>
           </li>
         </ol>
         <p id="first-run-conflict" class="banner" hidden>Another account has also added this domain. A test runs only where that account's snippet is installed.</p>
-        <button type="button" id="first-run-create" disabled>Create your first test</button>
       </div>
       <div class="card" id="review-requests-card" hidden>
         <h2>Review requests</h2>
@@ -817,41 +847,71 @@ async function loadInvites() {
   }).join('');
 }
 
+function checklistStepDone(checklist, id) {
+  const steps = checklist && checklist.steps;
+  if (!Array.isArray(steps)) return false;
+  const found = steps.find((step) => step.id === id);
+  return !!(found && found.done);
+}
+
+function markSetupStep(elementId, done) {
+  const item = document.getElementById(elementId);
+  if (!item) return;
+  item.classList.toggle('done', done);
+  const state = item.querySelector('.setup-state');
+  if (state) state.textContent = done ? 'Done' : 'To do';
+}
+
 function paintFirstRun(setup) {
   const site = setup && setup.site;
-  const siteStep = document.getElementById('step-site');
-  const snippetStep = document.getElementById('step-snippet');
-  const checkStep = document.getElementById('step-check');
+  const checklist = (setup && setup.checklist) || {};
   const host = document.getElementById('step-site-host');
   const form = document.getElementById('add-site-form');
   const conflict = document.getElementById('first-run-conflict');
   const create = document.getElementById('first-run-create');
+  const testDoneHint = document.getElementById('step-test-done');
   const checkText = document.getElementById('step-check-text');
+  const previewUrl = document.getElementById('first-run-preview-url');
+  const openDraft = document.getElementById('first-run-open');
+  const siteDone = checklistStepDone(checklist, 'site');
+  const snippetDone = checklistStepDone(checklist, 'snippet');
+  const testDone = checklistStepDone(checklist, 'test');
+  markSetupStep('step-site', siteDone);
+  markSetupStep('step-snippet', snippetDone);
+  markSetupStep('step-test', testDone);
+  markSetupStep('step-preview', checklistStepDone(checklist, 'preview'));
+  markSetupStep('step-start', checklistStepDone(checklist, 'started'));
+  const domain = site ? ((site.domains && site.domains[0]) || site.name) : '';
   if (site) {
-    siteStep.classList.add('done');
     form.hidden = true;
-    const domain = (site.domains && site.domains[0]) || site.name;
     host.textContent = domain;
     if (typeof site.public_key === 'string') snippetSiteKey = site.public_key;
     document.getElementById('first-run-snippet').textContent = snippetTag();
-    snippetStep.classList.toggle('done', !!site.verified);
-    checkStep.classList.toggle('done', !!site.verified);
     conflict.hidden = !site.conflict;
-    const line = UI.installCheckLine(site, domain);
-    checkText.textContent = line.text;
-    checkText.className = line.problem ? 'error-msg' : 'hint';
-    create.disabled = !site.verified;
   } else {
-    siteStep.classList.remove('done');
     form.hidden = false;
     host.textContent = 'Add the site you want to test.';
     document.getElementById('first-run-snippet').textContent = 'Add your site to get the snippet.';
-    snippetStep.classList.remove('done');
-    checkStep.classList.remove('done');
-    checkText.textContent = 'Waiting for a page on your site to load the snippet.';
-    checkText.className = 'hint';
     conflict.hidden = true;
-    create.disabled = true;
+  }
+  const line = UI.installCheckLine(site, domain);
+  checkText.textContent = line.text;
+  checkText.className = line.problem ? 'error-msg' : 'hint';
+  if (previewUrl) previewUrl.textContent = UI.previewExampleUrl(domain);
+  if (create) {
+    create.hidden = testDone || !site;
+    create.disabled = !site;
+  }
+  if (testDoneHint) {
+    testDoneHint.hidden = !testDone;
+    testDoneHint.textContent = checklistStepDone(checklist, 'started')
+      ? 'You have a test, and it has been started.'
+      : 'You have a test saved. It stays a draft until you start it.';
+  }
+  if (openDraft) {
+    const draft = (experimentsCache || []).find((exp) => exp.status === 'draft');
+    openDraft.hidden = !draft;
+    openDraft.dataset.id = draft ? draft.id : '';
   }
 }
 
@@ -862,30 +922,23 @@ function stopFirstRunPoll() {
 
 function startFirstRunPoll() {
   if (firstRunTimer) return;
-  firstRunTimer = setInterval(async () => {
-    const result = await callApi('/api/setup');
-    if (!result.ok || !result.data.site || !result.data.site.verified) return;
-    paintFirstRun(result.data);
-    stopFirstRunPoll();
-  }, 4000);
+  firstRunTimer = setInterval(() => { refreshFirstRun(); }, 4000);
 }
 
-async function refreshFirstRun(experimentCount) {
+async function refreshFirstRun() {
   const card = document.getElementById('first-run');
-  const list = document.getElementById('home-list-card');
-  const hits = document.getElementById('host-hits-card');
   const unverified = document.getElementById('unverified-banner');
+  const dismiss = document.getElementById('first-run-dismiss');
   const result = await callApi('/api/setup');
   if (!result.ok) {
     card.hidden = true;
+    stopFirstRunPoll();
     return;
   }
-  const show = experimentCount === 0 && result.data.needs_setup;
+  const checklist = result.data.checklist || {};
+  const show = checklist.visible === true;
   card.hidden = !show;
-  const head = document.querySelector('#page-home > .page-head');
-  if (head) head.hidden = show;
-  if (list) list.hidden = show;
-  if (hits) hits.hidden = show;
+  if (dismiss) dismiss.hidden = !!(sessionMe && sessionMe.view_as && sessionMe.view_as.id);
   const site = result.data.site;
   if (unverified) {
     const line = UI.installCheckLine(site, site && ((site.domains && site.domains[0]) || site.name));
@@ -897,8 +950,7 @@ async function refreshFirstRun(experimentCount) {
     return;
   }
   paintFirstRun(result.data);
-  if (site && site.verified) stopFirstRunPoll();
-  else if (site) startFirstRunPoll();
+  startFirstRunPoll();
 }
 
 async function logout() {
@@ -1241,7 +1293,7 @@ async function loadExperimentList() {
   experimentsCache = experiments;
   experimentsLoaded = true;
   populateExperimentSelects(experiments);
-  await refreshFirstRun(experiments.length);
+  await refreshFirstRun();
   if (gen !== listGen) return;
   if (experiments.length === 0) {
     msgEl.className = 'hint';
@@ -4136,6 +4188,22 @@ document.getElementById('first-run-create').addEventListener('click', () => {
   go('#create');
 });
 
+document.getElementById('first-run-dismiss').addEventListener('click', async () => {
+  const result = await callApi('/api/setup/dismiss', { method: 'POST', headers: authHeaders() });
+  if (!result.ok) return;
+  await refreshFirstRun();
+});
+
+document.getElementById('first-run-preview-copy').addEventListener('click', () => {
+  const url = document.getElementById('first-run-preview-url');
+  copyText(url ? url.textContent : '', 'first-run-preview-copied');
+});
+
+document.getElementById('first-run-open').addEventListener('click', () => {
+  const id = document.getElementById('first-run-open').dataset.id;
+  if (id) go('#experiment/' + id);
+});
+
 document.getElementById('add-site-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const errorEl = document.getElementById('add-site-error');
@@ -4153,7 +4221,7 @@ document.getElementById('add-site-form').addEventListener('submit', async (event
     return;
   }
   if (result.data.site && result.data.site.public_key) snippetSiteKey = result.data.site.public_key;
-  await refreshFirstRun(experimentsCache.length);
+  await refreshFirstRun();
 });
 
 document.getElementById('invite-create').addEventListener('click', async () => {

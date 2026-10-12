@@ -19,6 +19,7 @@ Account #1 is named **Heclr**. The superadmin user is **info@heclr.com**, with `
 | 006 | `src/db/install-check.js`. Optional note on an unverified site when a visit from its domain arrives without that site's key. Not added to `schema.sql`. Existing verified sites, including cantsaythat.co.uk, are left alone. |
 | 007 | `src/db/sessions.js`. Lookup indexes on the session table. Not added to `schema.sql`. |
 | 008 | `src/db/rate-limits.js`. Index on `rate_limits.window_start`. Does not change existing counters. Not added to `schema.sql`. |
+| 009 | `src/db/first-run.js`. Nullable `accounts.checklist_dismissed_at` and `sites.qa_seen_at`. Does not backfill. Not added to `schema.sql`. |
 
 Once every version above is recorded, startup logs `Database schema is up to date.` and does nothing else. A statement added only to `schema.sql` after 000 is recorded does not run; it needs a new version. Running `npm run migrate` does the same thing.
 
@@ -73,7 +74,7 @@ Isolation has to live in the query. A new owner, client or public route should:
 ## Judgement calls, where the plan and the code differ
 
 - **View as, and the audit log.** PIV-022's audited superadmin view is Sprint 1b, because it depends on PIV-108. The user row stores `is_superadmin`. There is no view-as screen, so the owner login response and the dashboard do not change.
-- **Install check does not block Start.** Marking a site verified, and refusing to start a test until a hit arrives, is PIV-052. Migrated sites are marked verified because they already have traffic. A new site may have `verified_at` null. Starting still requires a non-empty `allowed_hosts` list, which is the rule that shipped with host scoping.
+- **Install check blocks Start.** A snippet call with the site key, from an Origin on that site's domain list, sets `verified_at`. Starting is refused until then. Migrated sites, including cantsaythat.co.uk, are marked verified because they already have traffic. A new site may have `verified_at` null. Starting still requires a non-empty `allowed_hosts` list. A duplicate domain sets `sites.conflict` and an audit row. A separate notice to Lyle is not built.
 - **`allowed_hosts` is not copied from the site.** The plan says a site drives `allowed_hosts`. Overwriting that column during the migration could add a host the experiment does not serve today, or drop one it does. Site domains are the normalised host set used to group tests. Serving still uses the experiment's own list plus the existing host check.
 - **`host_hits` stays one row per day, host and origin.** The primary key is unchanged, so the existing upsert and the metrics tests keep working. `account_id` is `NOT NULL` with a default of Heclr, and the admin reading filters on it. The box-tester exclusion windows are shown only to the legacy account. Hits for a later account cannot be told apart until the snippet sends a site key and the primary key includes the account. That is a Sprint 1b change, not this one.
 - **A failed migration stops the process.** Previously a schema error was logged and the server still listened. It now exits with status 1 after the rollback. That is fail-closed: a bad migration cannot serve traffic.

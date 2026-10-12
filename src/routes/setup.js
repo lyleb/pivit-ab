@@ -6,6 +6,7 @@ const { customerHost } = require('../auth-flow');
 const { newSiteKey } = require('../db/tenancy');
 const { recordAudit } = require('../audit');
 const { installCheckPayload } = require('../site-verify');
+const { checklistFromFacts } = require('../checklist');
 
 const setupRouter = express.Router();
 const sitesRouter = express.Router();
@@ -36,17 +37,64 @@ async function primarySite(accountId) {
   return rows[0] || null;
 }
 
+async function checklistFacts(accountId) {
+  const { rows } = await db.query(
+    `SELECT
+       (SELECT checklist_dismissed_at IS NOT NULL FROM accounts WHERE id = $1) AS dismissed,
+       (SELECT COUNT(*)::int FROM experiments WHERE account_id = $1) AS experiments,
+       EXISTS (
+         SELECT 1 FROM sites WHERE account_id = $1 AND qa_seen_at IS NOT NULL
+       ) AS qa_seen,
+       EXISTS (
+         SELECT 1 FROM events e
+         JOIN experiments x ON x.id = e.experiment_id
+         WHERE x.account_id = $1 AND e.is_test
+       ) AS test_events,
+       EXISTS (
+         SELECT 1 FROM experiments
+         WHERE account_id = $1
+           AND (started_at IS NOT NULL OR status IN ('running', 'paused'))
+       ) AS started`,
+    [accountId]
+  );
+  return rows[0] || {};
+}
+
+async function setupPayload(accountId) {
+  const facts = await checklistFacts(accountId);
+  const site = await primarySite(accountId);
+  const experiments = Number(facts.experiments) || 0;
+  return {
+    needs_setup: experiments === 0,
+    checklist: checklistFromFacts({
+      hasSite: !!site,
+      snippetSeen: !!(site && site.verified_at),
+      hasTest: experiments > 0,
+      previewSeen: facts.qa_seen === true || facts.test_events === true,
+      started: facts.started === true,
+      dismissed: facts.dismissed === true,
+    }),
+    site: sitePayload(site),
+  };
+}
+
 setupRouter.get('/', requireAuth(['owner']), async (req, res) => {
   try {
-    const count = await db.query(
-      `SELECT COUNT(*)::int AS n FROM experiments WHERE account_id = $1`,
+    res.json(await setupPayload(req.account.id));
+  } catch (err) {
+    res.status(500).json(publicServerError(err));
+  }
+});
+
+setupRouter.post('/dismiss', requireAuth(['owner']), async (req, res) => {
+  try {
+    await db.query(
+      `UPDATE accounts
+       SET checklist_dismissed_at = COALESCE(checklist_dismissed_at, now())
+       WHERE id = $1`,
       [req.account.id]
     );
-    const site = await primarySite(req.account.id);
-    res.json({
-      needs_setup: count.rows[0].n === 0,
-      site: sitePayload(site),
-    });
+    res.json(await setupPayload(req.account.id));
   } catch (err) {
     res.status(500).json(publicServerError(err));
   }

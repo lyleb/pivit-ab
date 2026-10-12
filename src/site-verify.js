@@ -104,4 +104,37 @@ async function noteInstallCheck(scope, req) {
   }
 }
 
-module.exports = { noteSnippetSeen, noteInstallCheck, installCheckPayload };
+// Records the first snippet call that carried ?pivit_qa=1 from a host on the
+// site's domain list. A verified site can still receive this, because the
+// preview step is separate from the install check. A visit with no Origin
+// or Referer is ignored, and so is a visit for a different host. The public
+// response is unchanged. A missing column (migration 009 not applied yet)
+// is logged and does not fail the snippet call.
+async function noteQaPreview(scope, req) {
+  try {
+    if (!scope || !scope.ok || !scope.accountId) return;
+    const host = originHostFromRequest(req);
+    if (!host) return;
+    const { rows } = await db.query(
+      `SELECT id, domains FROM sites
+       WHERE account_id = $1
+         AND qa_seen_at IS NULL
+         AND ($2::uuid IS NULL OR id = $2)`,
+      [scope.accountId, scope.siteId || null]
+    );
+    const ids = rows.filter((row) => {
+      const domains = (row.domains || []).map((entry) => normaliseHost(entry)).filter(Boolean);
+      return domains.includes(host);
+    }).map((row) => row.id);
+    if (!ids.length) return;
+    await db.query(
+      `UPDATE sites SET qa_seen_at = now()
+       WHERE id = ANY($1::uuid[]) AND qa_seen_at IS NULL`,
+      [ids]
+    );
+  } catch (err) {
+    console.error('qa preview note failed:', err);
+  }
+}
+
+module.exports = { noteSnippetSeen, noteInstallCheck, noteQaPreview, installCheckPayload };

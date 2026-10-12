@@ -53,6 +53,16 @@ function refererHasQaFlag(value) {
   }
 }
 
+// True only for the ?pivit_qa=1 mark, on this request or on the page Referer.
+// A test-visitor prefix or X-Pivit-Test header is test traffic, but it is not
+// this preview step.
+function requestHasQaFlag(req) {
+  if (!req) return false;
+  const query = req.query || {};
+  if (flagIsOn(query.pivit_qa)) return true;
+  return refererHasQaFlag(headerOf(req, 'referer') || headerOf(req, 'referrer'));
+}
+
 // True when this request should be stored as test traffic and left out of
 // the host-hit counter. Missing fields are not test traffic.
 function requestIsTestTraffic(req) {
@@ -341,6 +351,7 @@ module.exports = {
   flagIsOn,
   visitorIsTest,
   refererHasQaFlag,
+  requestHasQaFlag,
   requestIsTestTraffic,
   normalisePrefix,
   parseCriteria,
