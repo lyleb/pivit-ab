@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="/assets/pivit.css?v=5">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="/url-match.js"></script>
+<script src="/plan.js"></script>
 <script src="/admin-ui.js"></script>
 <style>
   .app-shell { display: flex; min-height: 100vh; align-items: stretch; }
@@ -90,6 +91,31 @@
   }
   .support-controls select option { color: #1a1d27; background: #fff; }
   .plan-sentence { font-size: 1.08em; font-weight: 750; margin: 8px 0 6px; letter-spacing: -0.01em; }
+  details.plan-more {
+    border: 0; margin: 4px 0 0; overflow: visible; background: transparent; border-radius: 0;
+  }
+  details.plan-more > summary {
+    display: inline-block; width: auto; padding: 0; background: none; font-weight: 600;
+    font-size: 0.85em; color: var(--text-muted); text-decoration: underline; text-underline-offset: 3px;
+    list-style: none;
+  }
+  details.plan-more > summary::-webkit-details-marker { display: none; }
+  details.plan-more > summary::marker { content: ""; }
+  details.plan-more[open] > summary { color: var(--ink); }
+  details.plan-more > summary:focus-visible { outline: 2px solid var(--indigo); outline-offset: 3px; border-radius: 4px; }
+  details.plan-more .accordion-body { padding: 12px 0 0; max-width: 68ch; }
+  details.plan-more h3 { margin: 14px 0 8px; }
+  details.plan-more h3:first-child { margin-top: 0; }
+  details.plan-more p { margin: 0 0 10px; }
+  details.plan-more ul { margin: 0 0 10px; padding-left: 1.2em; }
+  details.plan-more li { margin: 4px 0; }
+  .site-examples { display: grid; gap: 8px; margin-top: 8px; }
+  .site-example {
+    background: var(--card-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+  }
+  .site-example h3 { margin: 0 0 4px; }
+  .site-example .range { color: var(--text-muted); font-size: 0.85em; margin: 0 0 6px; }
+  .site-example .plan-sentence { font-size: 1em; margin: 0; }
   .progress-track { height: 8px; background: #262a38; border-radius: 99px; overflow: hidden; margin: 6px 0 14px; }
   .progress-bar { height: 100%; background: #5635FB; width: 0; }
   .verdict-card { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin: 12px 0; background: var(--card-2); }
@@ -209,6 +235,7 @@
     .page-actions button, .header-actions button { min-height: 44px; }
     .detail-top .header-actions button { flex: 1 1 auto; }
     details summary { display: flex; align-items: center; }
+    details.plan-more > summary { display: inline-block; min-height: 0; }
     input, select, textarea { font-size: 16px; }
   }
   @media (max-width: 640px) {
@@ -2393,6 +2420,39 @@ function fillPlannerNotes(prefix, plan) {
   }
   if (warn) warn.textContent = plan && plan.runtime_warning ? plan.runtime_warning : '';
   if (maths) maths.textContent = plan && plan.explanation ? plan.explanation : '';
+  rememberPlannerShape(prefix, plan);
+  renderTrafficGuide(prefix);
+}
+
+function rememberPlannerShape(prefix, plan) {
+  const root = plannerRoot(prefix);
+  if (!root || !plan) return;
+  const count = plan.planned_variants || plan.variant_count;
+  if (count) root.dataset.variantCount = String(count);
+  if (Array.isArray(plan.weights)) root.dataset.weights = JSON.stringify(plan.weights);
+}
+
+function plannerExampleInput(prefix) {
+  const body = readPlanner(prefix);
+  const root = plannerRoot(prefix);
+  const count = root ? Number(root.dataset.variantCount) : 0;
+  if (count >= 2) body.variant_count = count;
+  if (root && root.dataset.weights) {
+    try {
+      const weights = JSON.parse(root.dataset.weights);
+      if (Array.isArray(weights)) body.weights = weights;
+    } catch (err) {
+      // A bad stored split falls back to an equal split. The sample size is unchanged.
+    }
+  }
+  return body;
+}
+
+function renderTrafficGuide(prefix) {
+  const mount = document.getElementById(`${prefix}-site-examples`);
+  if (!mount || !UI.trafficGuideHtml) return;
+  if (!document.getElementById(`${prefix}-baseline`)) return;
+  mount.innerHTML = UI.trafficGuideHtml(plannerExampleInput(prefix));
 }
 
 async function previewPlanner(prefix, expId) {
@@ -2420,6 +2480,7 @@ function bindPlanner(prefix, expId) {
     if (!choice) return;
     applyChoice(prefix, choice.dataset.planChoice);
     if (prefix === 'wizard') markWizardPlanUnsaved();
+    renderTrafficGuide(prefix);
     previewPlanner(prefix, expId);
   });
   ['baseline', 'relative', 'weekly', 'weeks'].forEach((field) => {
@@ -2433,6 +2494,7 @@ function bindPlanner(prefix, expId) {
         const warn = document.getElementById(`${prefix}-week-warn`);
         if (warn) warn.textContent = Number(input.value) < 2 ? 'One week can miss a weekday pattern. Two weeks is the usual minimum.' : '';
       }
+      renderTrafficGuide(prefix);
       previewPlanner(prefix, expId);
     });
   });

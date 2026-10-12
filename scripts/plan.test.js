@@ -111,6 +111,52 @@ assert.strictEqual(reading.listSignal('running', { mode: 'blind', days_elapsed: 
 assert.strictEqual(reading.listSignal('running', { mode: 'unplanned' }), 'Set a plan');
 assert.ok(!reading.listSignal('running', { mode: 'blind', days_elapsed: 1, min_runtime_days: 14 }).includes('prob'));
 
+const exampleInput = {
+  baseline_rate: 0.03,
+  relative_effect: 0.1,
+  effect_choice: 'medium',
+  min_runtime_days: 14,
+  variant_count: 2,
+};
+const smallBand = plan.SITE_SIZE_EXAMPLES.find((row) => row.id === 'small');
+assert.ok(smallBand.range.includes('250'));
+assert.ok(smallBand.range.includes('1,000'));
+assert.ok(smallBand.weekly_traffic >= 250 && smallBand.weekly_traffic <= 1000);
+const examples = plan.siteDurationExamples(exampleInput);
+assert.strictEqual(examples.length, 3);
+examples.forEach((row) => {
+  const band = plan.SITE_SIZE_EXAMPLES.find((item) => item.id === row.id);
+  const direct = plan.buildPlan(Object.assign({}, exampleInput, { weekly_traffic: band.weekly_traffic }));
+  assert.strictEqual(direct.ok, true);
+  assert.strictEqual(row.ok, true);
+  assert.strictEqual(row.visitors_per_variant, direct.plan.visitors_per_variant);
+  assert.strictEqual(row.estimated_weeks, direct.plan.estimated_weeks);
+  assert.strictEqual(row.estimated_days, direct.plan.estimated_days);
+  assert.strictEqual(row.sentence, direct.plan.sentence);
+  assert.strictEqual(row.weekly_traffic, band.weekly_traffic);
+});
+assert.strictEqual(examples[0].visitors_per_variant, examples[1].visitors_per_variant);
+assert.strictEqual(examples[1].visitors_per_variant, examples[2].visitors_per_variant);
+assert.ok(examples[0].estimated_weeks > examples[1].estimated_weeks);
+assert.ok(examples[1].estimated_weeks > examples[2].estimated_weeks);
+
+const weightedExamples = plan.siteDurationExamples(Object.assign({}, exampleInput, { weights: [90, 10] }));
+const weightedDirect = plan.buildPlan(Object.assign({}, exampleInput, {
+  weights: [90, 10],
+  weekly_traffic: weightedExamples[0].weekly_traffic,
+}));
+assert.strictEqual(weightedExamples[0].estimated_weeks, weightedDirect.plan.estimated_weeks);
+assert.strictEqual(weightedExamples[0].visitors_per_variant, weightedDirect.plan.visitors_per_variant);
+assert.ok(weightedExamples[0].estimated_weeks > examples[0].estimated_weeks);
+
+const threeExamples = plan.siteDurationExamples(Object.assign({}, exampleInput, { variant_count: 3 }));
+const threeDirect = plan.buildPlan(Object.assign({}, exampleInput, {
+  variant_count: 3,
+  weekly_traffic: threeExamples[0].weekly_traffic,
+}));
+assert.strictEqual(threeExamples[0].visitors_per_variant, threeDirect.plan.visitors_per_variant);
+assert.ok(threeExamples[0].visitors_per_variant > examples[0].visitors_per_variant);
+
 console.log('plan tests passed', {
   two: two.plan.visitors_per_variant,
   three: three.plan.visitors_per_variant,
