@@ -63,7 +63,7 @@ Isolation has to live in the query. A new owner, client or public route should:
 - use `ownedExperiment` or an `account_id = $n` predicate, and return 404 when the row is missing
 - for a public snippet call, use `publicScope` and serve nothing when the key is invalid or unknown
 - put `account_id` and `site_id` on any new edit or preview token
-- add a case to `scripts/isolation-db.test.js`
+- add a case to `scripts/isolation-db.test.js` (legacy account) or `scripts/cross-account.test.js` (two customer accounts)
 
 `src/metrics.js` is still unscoped. The HTTP results routes check ownership before they call it. A new caller must do the same.
 
