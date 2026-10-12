@@ -9,7 +9,7 @@ const { sha256, timingSafeStringEqual } = require('./timing');
 const { normaliseHost } = require('./host-scope');
 const { newSiteKey } = require('./db/tenancy');
 const { recordAudit } = require('./audit');
-const { hit } = require('./rate-limit');
+const { hit, LIMITED_MESSAGE } = require('./rate-limit');
 const { sendEmail } = require('./mailer');
 const { configuredAppOrigin } = require('./app-origin');
 
@@ -89,12 +89,25 @@ function signInText({ link, code, signup }) {
   ].join('\n');
 }
 
-async function allowLinkRequest(email, ip) {
+async function allowLinkRequest(email, ip, extraBucket) {
   const emailHit = await hit(`auth-email:${email}`, EMAIL_LIMIT, HOUR_MS);
   if (!emailHit.ok) return emailHit;
   const ipHit = await hit(`auth-ip:${ip || 'unknown'}`, IP_LIMIT, HOUR_MS);
   if (!ipHit.ok) return ipHit;
+  if (extraBucket) {
+    const extra = await hit(extraBucket, IP_LIMIT, HOUR_MS);
+    if (!extra.ok) return extra;
+  }
   return { ok: true };
+}
+
+function limitedResult(limited) {
+  return {
+    ok: false,
+    status: 429,
+    error: LIMITED_MESSAGE,
+    retryAfter: limited.retryAfter,
+  };
 }
 
 async function latestOpenToken(email) {
@@ -165,7 +178,7 @@ function inviteUsable(invite, now = Date.now()) {
 async function requestSignIn(email, req) {
   const ip = requestIp(req);
   const limited = await allowLinkRequest(email, ip);
-  if (!limited.ok) return { ok: false, status: 429, error: 'Please wait a while before asking for another link.' };
+  if (!limited.ok) return limitedResult(limited);
 
   const recent = await latestOpenToken(email);
   if (recent && Date.now() - new Date(recent.created_at).getTime() < RESEND_COOLDOWN_MS) {
@@ -198,8 +211,8 @@ async function requestSignIn(email, req) {
 
 async function requestSignup({ email, website, inviteCode, req }) {
   const ip = requestIp(req);
-  const limited = await allowLinkRequest(email, ip);
-  if (!limited.ok) return { ok: false, status: 429, error: 'Please wait a while before asking for another link.' };
+  const limited = await allowLinkRequest(email, ip, `auth-invite:${ip || 'unknown'}`);
+  if (!limited.ok) return limitedResult(limited);
 
   const invite = await loadInvite(inviteCode);
   if (!inviteUsable(invite)) {

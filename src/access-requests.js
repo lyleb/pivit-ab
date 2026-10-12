@@ -6,7 +6,7 @@
 const db = require('./db');
 const { normaliseEmail, customerHost, createInvite, requestIp } = require('./auth-flow');
 const { recordAudit } = require('./audit');
-const { hit } = require('./rate-limit');
+const { hit, LIMITED_MESSAGE } = require('./rate-limit');
 const { sendEmail, replyToAddress } = require('./mailer');
 const { configuredAppOrigin } = require('./app-origin');
 const { accessRequestsEnabled } = require('./access-flag');
@@ -60,7 +60,7 @@ async function submitAccessRequest(req) {
     return {
       ok: false,
       status: 429,
-      error: 'Please wait a moment and try again.',
+      error: LIMITED_MESSAGE,
       retryAfter: ipHit.retryAfter,
     };
   }
@@ -80,7 +80,7 @@ async function submitAccessRequest(req) {
     return {
       ok: false,
       status: 429,
-      error: 'Please wait a moment and try again.',
+      error: LIMITED_MESSAGE,
       retryAfter: emailHit.retryAfter,
     };
   }

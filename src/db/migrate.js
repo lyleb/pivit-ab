@@ -13,6 +13,7 @@ const { applyAccessRequests } = require('./access-requests');
 const { applyPortal } = require('./portal');
 const { applyInstallCheck } = require('./install-check');
 const { applySessions } = require('./sessions');
+const { applyRateLimits } = require('./rate-limits');
 
 const LOCK_KEY = 814021;
 
@@ -34,6 +35,8 @@ const VERSIONS = [
   { version: '006', name: 'install-check', run: applyInstallCheck },
   // Session lookup indexes stay out of schema.sql too.
   { version: '007', name: 'sessions', run: applySessions },
+  // The rate-limit index stays out of schema.sql too.
+  { version: '008', name: 'rate-limits', run: applyRateLimits },
 ];
 
 async function ensureMigrationsTable(queryable) {

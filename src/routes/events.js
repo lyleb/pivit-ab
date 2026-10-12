@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
-const { isLikelyBot, isRateLimited } = require('../bot-filter');
+const { isLikelyBot } = require('../bot-filter');
+const { eventAllowed } = require('../rate-limit');
 const { checkHost, originHostFromRequest, hostScopingMode } = require('../host-scope');
 const { scheduleEventDrop } = require('../event-drops');
 const { requestIsTestTraffic } = require('../test-traffic');
@@ -42,9 +43,12 @@ router.post('/', async (req, res) => {
   // erroring, since a sendBeacon caller never looks at the response anyway and
   // there's no reason to reveal to a bot that it was filtered. The drop is
   // counted for the owner health panel. A counter failure must not change
-  // this response. See src/bot-filter.js and src/event-drops.js.
+  // this response. The per-IP cap is in Postgres and fails open, so a limiter
+  // error still records the event. Over the cap the reply stays 204, which is
+  // what the live snippet already ignores. See src/bot-filter.js,
+  // src/rate-limit.js and src/event-drops.js.
   const bot = isLikelyBot(req.get('user-agent'));
-  const limited = !bot && isRateLimited(req.ip);
+  const limited = !bot && !(await eventAllowed(req.ip));
   if (bot || limited) {
     scheduleEventDrop(experiment_id, bot ? 'bot' : 'rate_limited');
     return res.status(204).end();

@@ -14,7 +14,8 @@ Set this on the app service:
 | `EMAIL_FROM` | No | From address. Default `no-reply@pivitlab.com`. |
 | `EMAIL_REPLY_TO` | No | Reply-To on every message. Default `info@heclr.com`. pivitlab.com has a null MX, so replies cannot go to the from address. |
 | `POSTMARK_WEBHOOK_TOKEN` | No | Only if you turn on the bounce webhook. Postmark must send the same value in the `X-Postmark-Token` header. Leave unset and `POST /api/webhooks/postmark` stays closed. |
-| `TURNSTILE_SECRET_KEY` | No | Leave unset. Turnstile runs only when this is set. Sign-up stays invite-only. The access-request form uses the same check. |
+| `TURNSTILE_SITE_KEY` | No | Leave unset. Public site key. Turnstile stays off unless this and `TURNSTILE_SECRET_KEY` are both set. |
+| `TURNSTILE_SECRET_KEY` | No | Leave unset. Secret key. Both keys are required before the widget or the check runs. |
 | `ACCESS_REQUESTS_ENABLED` | No | Leave unset. The landing-page form stores nothing until this is `true`, `1`, `yes` or `on`. `/privacy.html` is still a placeholder, so leave the form off until that page has real wording. |
 | `ACCESS_REQUEST_EMAIL` | No | Inbox for each access request. Defaults to `EMAIL_REPLY_TO` (`info@heclr.com`). |
 
@@ -36,7 +37,7 @@ pivitlab.com still has a null MX, so the domain does not receive mail. Every out
 4. That first sign-in is the email verification. The account is named after the domain. The site is not verified yet.
 5. The empty home screen is the first-run checklist: the site, the snippet (with `data-site`), and a check that ticks when a page on that domain loads the snippet. A test can be built before that, and cannot be started until the check has passed. If a visit from the site arrives with no site key, or with a key that is not this account's, the check says so. The public snippet response stays an empty list, the same as a host that is not allowed.
 
-The reply to "email me a link" is always "If that address can be used, we've sent a link." Sign-up and that request are limited to 5 per email address per hour and 20 per IP per hour. The limits and the password lockout (5 tries, then 60 seconds) are in Postgres.
+The reply to "email me a link" is always "If that address can be used, we've sent a link." Asking for a link, signing up (including an invite code) and the access-request form are limited in Postgres: 5 per email address per hour, and 20 per IP per hour (10 per IP per hour for an access request). The owner page at `/owner` and the emergency password are limited too, as is client password sign-in (5 failures, then 60 seconds). A limit answers 429 with `Retry-After` and "Please wait a moment and try again." The counters survive a redeploy and are shared by every instance. `POST /api/event` keeps a separate limit of 60 events a minute per IP, also in Postgres. A normal visit stays under it, the reply stays 204 so the live snippet is unchanged, and a limiter error does not drop the event.
 
 A customer session lasts 30 days of use (idle) and never more than 90 days from sign-in (absolute), even if they keep coming back. Both deadlines are stored in the session row in Postgres. A superadmin session, including the emergency password, lasts 12 hours from sign-in and is not renewed. Signing in does not end other sessions. **Sign out everywhere** does, for an owner on the dashboard and for a client viewer on their portal. Changing a client viewer's password, or deleting that viewer, ends their sessions. Changing `ADMIN_API_KEY` ends emergency-password sessions only. Each sign-in replaces the session id, and so does starting or stopping view-as.
 
@@ -56,6 +57,6 @@ The landing page at `/` is public. Logged-in owners and customers are redirected
 
 The request form (name, work email, website) is off until `ACCESS_REQUESTS_ENABLED` is set. Until then the page says to email info@pivitlab.com, and `POST /api/access-requests` returns 404 and stores nothing.
 
-When the form is on, a request is stored in `access_requests` (migration 004, next to invite codes) and an email is sent to `ACCESS_REQUEST_EMAIL`, or to `EMAIL_REPLY_TO` when that is unset. The message still goes out through Postmark. If the email fails, the row is kept. A honeypot field and a rate limit (5 per email address and 10 per IP, each hour) sit in front of it. Turnstile runs only when `TURNSTILE_SECRET_KEY` is already set.
+When the form is on, a request is stored in `access_requests` (migration 004, next to invite codes) and an email is sent to `ACCESS_REQUEST_EMAIL`, or to `EMAIL_REPLY_TO` when that is unset. The message still goes out through Postmark. If the email fails, the row is kept. A honeypot field and a rate limit (5 per email address and 10 per IP, each hour) sit in front of it. The sign-in page, the sign-up page, the owner page and this form can show a Cloudflare Turnstile widget. It stays off unless both `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` are set. With either one missing, those pages do not load the Turnstile script and the check is skipped.
 
 The superadmin invite card on the dashboard lists the requests. **Create invite code** makes one code for that person, with their name, email and website in the note, and shows the code once. A second click does not make another code. Do not turn the form on until `/privacy.html` has Lyle's wording. That page is a placeholder.

@@ -4,7 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { hit } = require('./rate-limit');
+const { hit, LIMITED_MESSAGE } = require('./rate-limit');
 const { applyCanonical, canonicalUrl } = require('./app-origin');
 
 const HTML = fs.readFileSync(path.join(__dirname, 'pages', 'owner.html'), 'utf8');
@@ -22,7 +22,7 @@ async function sendOwnerPage(req, res) {
     const limited = await hit(`page:owner:${req.ip || 'unknown'}`, ownerPageLimit(), WINDOW_MS);
     if (!limited.ok) {
       res.set('Retry-After', String(limited.retryAfter));
-      res.status(429).type('text/plain').send('Please wait a moment and try again.');
+      res.status(429).type('text/plain').send(LIMITED_MESSAGE);
       return;
     }
   } catch (err) {

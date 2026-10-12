@@ -1,11 +1,22 @@
 // Fixed-window counters and the login lockout, stored in Postgres so a
-// redeploy does not clear them.
+// redeploy does not clear them and every instance shares the same counts.
 
 const db = require('./db');
 
-async function hit(bucket, limit, windowMs, queryable) {
+const LIMITED_MESSAGE = 'Please wait a moment and try again.';
+const EVENT_WINDOW_MS = 60 * 1000;
+const DEFAULT_EVENT_LIMIT = 60;
+
+function eventLimit() {
+  const n = Number(process.env.EVENT_RATE_LIMIT);
+  if (Number.isFinite(n) && n >= 1) return Math.round(n);
+  return DEFAULT_EVENT_LIMIT;
+}
+
+async function hit(bucket, limit, windowMs, queryable, nowMs) {
   const query = (queryable || db).query.bind(queryable || db);
-  const windowStart = new Date(Math.floor(Date.now() / windowMs) * windowMs);
+  const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+  const windowStart = new Date(Math.floor(now / windowMs) * windowMs);
   const { rows } = await query(
     `INSERT INTO rate_limits (bucket, hits, window_start)
      VALUES ($1, 1, $2)
@@ -21,7 +32,7 @@ async function hit(bucket, limit, windowMs, queryable) {
   );
   const hits = Number(rows[0].hits);
   if (hits > limit) {
-    const retryAfter = Math.max(1, Math.ceil((windowStart.getTime() + windowMs - Date.now()) / 1000));
+    const retryAfter = Math.max(1, Math.ceil((windowStart.getTime() + windowMs - now) / 1000));
     return { ok: false, retryAfter, hits };
   }
   return { ok: true, hits };
@@ -58,4 +69,35 @@ async function loginSuccess(bucket) {
   await db.query(`DELETE FROM rate_limits WHERE bucket = $1`, [bucket]);
 }
 
-module.exports = { hit, loginLocked, loginFailure, loginSuccess };
+function tooMany(res, retryAfter) {
+  const seconds = Math.max(1, Math.ceil(Number(retryAfter) || 1));
+  res.set('Retry-After', String(seconds));
+  return res.status(429).json({ error: LIMITED_MESSAGE });
+}
+
+// True when this event may be stored. A limiter error allows the event, so a
+// database blip cannot drop live snippet traffic. The cap is generous: one
+// browser stays well under 60 events a minute.
+async function eventAllowed(ip, queryable) {
+  try {
+    const key = String(ip || 'unknown').slice(0, 64);
+    const decision = await hit(`event-ip:${key}`, eventLimit(), EVENT_WINDOW_MS, queryable);
+    return decision.ok !== false;
+  } catch (err) {
+    console.error('[event] rate limit check failed', err);
+    return true;
+  }
+}
+
+module.exports = {
+  LIMITED_MESSAGE,
+  EVENT_WINDOW_MS,
+  DEFAULT_EVENT_LIMIT,
+  eventLimit,
+  hit,
+  loginLocked,
+  loginFailure,
+  loginSuccess,
+  tooMany,
+  eventAllowed,
+};

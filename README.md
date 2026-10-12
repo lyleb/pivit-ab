@@ -214,9 +214,9 @@ If active variants' traffic splits don't sum to 100%, "Preview & Manage Variants
 `POST /api/event` — the endpoint every visitor's browser calls to log a view/conversion — now filters out obvious bots and scripted floods before anything reaches the database:
 
 - **Known bot/crawler User-Agents** (Googlebot, AhrefsBot, SemrushBot, UptimeRobot, Pingdom, and similar) are silently ignored
-- **A per-IP rate limit** (60 events/minute) catches a scripted flood using a spoofed or generic User-Agent that the pattern list alone wouldn't catch
+- **A per-IP rate limit** (60 events/minute), stored in Postgres so a redeploy does not clear it and every instance shares it. A normal visit stays well under that. If the limiter cannot be checked, the event is still recorded.
 
-Filtered requests still get a normal `204` response — nothing about what the caller sees reveals that filtering happened. This is heuristic protection, not a complete bot-detection system (nothing simple is), but it stops the obvious cases from quietly skewing results. See `src/bot-filter.js`.
+Filtered requests still get a normal `204` response — nothing about what the caller sees reveals that filtering happened, and the live snippet is unchanged. This is heuristic protection, not a complete bot-detection system (nothing simple is), but it stops the obvious cases from quietly skewing results. See `src/bot-filter.js` and `src/rate-limit.js`.
 
 ## Bayesian analysis
 
@@ -248,7 +248,7 @@ There's a real login screen now at `/login.html` (branded, matching the dashboar
 - Your owner password is still your existing `ADMIN_API_KEY` value. It stays available at the unlisted address `/owner` (not linked from the sign-in page). Do not rotate it as part of turning on email sign-in. Owners use email sign-in (the superadmin address is info@heclr.com) once that is set up.
 - Sessions are signed cookies stored in Postgres (not memory), so a later redeploy does not clear them. The cookie is `pivit.sid` locally. In production it is `__Host-pivit.sid` (HttpOnly, Secure, SameSite=Lax). The first deploy of that name signs everyone out once, because the browser will not send the old `pivit.sid` cookie under the new name. Customer sessions idle out after 30 days and end 90 days after sign-in. Superadmin and emergency-password sessions last 12 hours and are not renewed. See [docs/signup.md](docs/signup.md).
 - A required env var: `SESSION_SECRET` (see `.env.example`). It must be at least 32 characters. Any character set is accepted — it does not have to be hex or base64. When `NODE_ENV=production`, a missing or shorter secret aborts startup with a log line and the process does not boot. Outside production, a dev-only fallback is used and a warning is logged. Set the production value on the host before deploying, and do not rotate one that is already long enough.
-- 5 failed password attempts locks that IP out for 60 seconds. The lockout is stored in Postgres, so a redeploy does not clear it.
+- 5 failed password attempts locks that IP out for 60 seconds. The lockout is stored in Postgres, so a redeploy does not clear it. The reply is 429 with `Retry-After`.
 - Every admin route now requires an active owner session; the old `x-api-key` header no longer does anything.
 
 ## Client login

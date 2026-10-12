@@ -111,6 +111,7 @@ async function main() {
   delete process.env.EMAIL_FROM;
   delete process.env.EMAIL_REPLY_TO;
   delete process.env.APP_ORIGIN;
+  delete process.env.TURNSTILE_SITE_KEY;
   delete process.env.TURNSTILE_SECRET_KEY;
   delete process.env.PIVIT_TENANCY_FAULT;
 

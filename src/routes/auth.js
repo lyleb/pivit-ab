@@ -3,11 +3,11 @@ const db = require('../db');
 const { publicServerError } = require('../public-error');
 const { snippetSiteKey, resolveSessionAccount, legacyAccount } = require('../tenant');
 const { timingSafeStringEqual } = require('../timing');
-const { loginLocked, loginFailure, loginSuccess } = require('../rate-limit');
+const { loginLocked, loginFailure, loginSuccess, tooMany } = require('../rate-limit');
 const { recordAudit, endUserSessions, endClientSessions } = require('../audit');
 const { clearSessionCookie } = require('../session-cookie');
 const { stampSessionLifetime } = require('../session-lifetime');
-const { turnstileOk } = require('../turnstile');
+const { turnstileOk, turnstilePublicConfig } = require('../turnstile');
 const {
   LINK_SENT,
   normaliseEmail,
@@ -120,12 +120,30 @@ async function ownerFromPassword(req) {
   });
 }
 
+function sendFlowResult(res, result) {
+  if (result.ok) return false;
+  if (result.status === 429) {
+    tooMany(res, result.retryAfter);
+    return true;
+  }
+  res.status(result.status || 400).json({ error: result.error });
+  return true;
+}
+
+// Public widget config. The secret is never included. Enabled only when both
+// Turnstile keys are set; otherwise the pages do not load the script.
+router.get('/turnstile', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(turnstilePublicConfig());
+});
+
 // POST /api/auth/login  { password }  — emergency owner login
 router.post('/login', async (req, res) => {
   const bucket = `login:owner:${req.ip || 'unknown'}`;
   try {
+    if (!(await turnstileOk(req))) return res.status(400).json({ error: 'Please try again.' });
     const secondsLeft = await loginLocked(bucket);
-    if (secondsLeft) return res.status(429).json({ error: `too many attempts — try again in ${secondsLeft}s` });
+    if (secondsLeft) return tooMany(res, secondsLeft);
 
     const { password } = req.body || {};
     const expected = process.env.ADMIN_API_KEY;
@@ -151,8 +169,9 @@ router.post('/login', async (req, res) => {
 router.post('/client-login', async (req, res) => {
   const bucket = `login:client:${req.ip || 'unknown'}`;
   try {
+    if (!(await turnstileOk(req))) return res.status(400).json({ error: 'Please try again.' });
     const secondsLeft = await loginLocked(bucket);
-    if (secondsLeft) return res.status(429).json({ error: `too many attempts — try again in ${secondsLeft}s` });
+    if (secondsLeft) return tooMany(res, secondsLeft);
 
     const { username, password } = req.body || {};
     if (!username || !password) {
@@ -200,7 +219,7 @@ router.post('/email', async (req, res) => {
     const email = normaliseEmail(req.body && req.body.email);
     if (!email) return res.status(400).json({ error: 'Enter your work email.' });
     const result = await requestSignIn(email, req);
-    if (!result.ok) return res.status(result.status || 400).json({ error: result.error });
+    if (sendFlowResult(res, result)) return;
     res.json({ ok: true, message: result.message || LINK_SENT, email });
   } catch (err) {
     res.status(500).json(publicServerError(err));
@@ -216,7 +235,7 @@ router.post('/signup', async (req, res) => {
     if (!email) return res.status(400).json({ error: 'Enter your work email.' });
     if (!website) return res.status(400).json({ error: 'Enter your website, such as example.co.uk.' });
     const result = await requestSignup({ email, website, inviteCode, req });
-    if (!result.ok) return res.status(result.status || 400).json({ error: result.error });
+    if (sendFlowResult(res, result)) return;
     res.json({ ok: true, message: result.message || LINK_SENT, email });
   } catch (err) {
     res.status(500).json(publicServerError(err));
