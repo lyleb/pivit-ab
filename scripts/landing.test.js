@@ -182,6 +182,7 @@ async function dbChecks() {
   delete process.env.EMAIL_REPLY_TO;
   delete process.env.ACCESS_REQUEST_EMAIL;
   delete process.env.APP_ORIGIN;
+  delete process.env.TURNSTILE_SITE_KEY;
   delete process.env.TURNSTILE_SECRET_KEY;
   process.env.ACCESS_REQUESTS_ENABLED = 'true';
 
@@ -289,6 +290,7 @@ async function dbChecks() {
     assert.strictEqual(custom.to, 'lyle@example.com');
     delete process.env.ACCESS_REQUEST_EMAIL;
 
+    process.env.TURNSTILE_SITE_KEY = 'test-site';
     process.env.TURNSTILE_SECRET_KEY = 'test-secret';
     const blocked = await request(server, 'POST', '/api/access-requests', {
       name: 'Casey',
@@ -296,6 +298,7 @@ async function dbChecks() {
       website: 'casey.example',
     }, {}, Object.assign({ 'X-Forwarded-For': '203.0.113.10' }, origin));
     assert.strictEqual(blocked.status, 400);
+    delete process.env.TURNSTILE_SITE_KEY;
     delete process.env.TURNSTILE_SECRET_KEY;
     const stillTwo = await db.query('SELECT COUNT(*)::int AS n FROM access_requests');
     assert.strictEqual(stillTwo.rows[0].n, 2);

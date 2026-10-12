@@ -538,6 +538,7 @@ footer nav{display:flex;gap:22px;flex-wrap:wrap}
           <label for="pivit-hp">Leave this empty</label>
           <input id="pivit-hp" name="pivit_hp" type="text" tabindex="-1" autocomplete="off">
         </div>
+        <div id="turnstile-slot"></div>
         <button class="btn btn-primary" type="submit">Request access</button>
         <p class="form-error" id="req-error" role="alert"></p>
         <p class="where">Your request goes straight to the pivitlab team, not a mailing list. We'll only use your details to reply. <a href="/privacy.html">Privacy notice</a></p>
@@ -547,6 +548,7 @@ footer nav{display:flex;gap:22px;flex-wrap:wrap}
         <h3>Thanks, we've got it.</h3>
         <p class="muted">We'll reply by email, usually within a couple of working days.</p>
       </div>
+      <script src="/turnstile-widget.js"></script>
       <script>
       document.getElementById('req-form').addEventListener('submit', async function (event) {
         event.preventDefault();
@@ -563,7 +565,8 @@ footer nav{display:flex;gap:22px;flex-wrap:wrap}
               name: document.getElementById('r-name').value,
               email: document.getElementById('r-email').value,
               website: document.getElementById('r-site').value,
-              pivit_hp: document.getElementById('pivit-hp').value
+              pivit_hp: document.getElementById('pivit-hp').value,
+              turnstile_token: window.pivitTurnstileToken ? window.pivitTurnstileToken() : ''
             })
           });
           var data = {};

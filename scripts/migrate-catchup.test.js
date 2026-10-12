@@ -94,7 +94,11 @@ async function main() {
     assert.strictEqual(await columnInfo(db), null);
 
     const applied = await migrate();
-    assert.deepStrictEqual(applied, ['003', '004', '005', '006', '007']);
+    assert.deepStrictEqual(applied, ['003', '004', '005', '006', '007', '008']);
+    const index = await db.query(
+      `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_rate_limits_window_start'`
+    );
+    assert.strictEqual(index.rows.length, 1);
 
     const column = await columnInfo(db);
     assert.ok(column, 'url_match_type should exist after 003');
@@ -120,7 +124,7 @@ async function main() {
     assert.strictEqual(kept.rows[0].url_match_type, 'exact');
 
     const versions = await db.query(`SELECT version FROM schema_migrations ORDER BY version`);
-    assert.deepStrictEqual(versions.rows.map((row) => row.version), ['000', '001', '002', '003', '004', '005', '006', '007']);
+    assert.deepStrictEqual(versions.rows.map((row) => row.version), ['000', '001', '002', '003', '004', '005', '006', '007', '008']);
 
     console.log('migrate catch-up tests passed');
   } finally {

@@ -73,11 +73,13 @@
     <div id="client-forgot-note" class="forgot-note">Contact the person who gave you access — they can reset your password for you from their dashboard.</div>
   </form>
 
+  <div id="turnstile-slot"></div>
   <p id="login-error" class="error-msg"></p>
   <button type="button" class="mode-switch" id="show-email">Email sign-in</button>
   <button type="button" class="mode-switch" id="show-client">Client login</button>
 </div>
 
+<script src="/turnstile-widget.js"></script>
 <script>
 let mode = 'email';
 
@@ -146,7 +148,10 @@ document.getElementById('email-form').addEventListener('submit', async (e) => {
     const res = await fetch('/api/auth/email', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({
+        email,
+        turnstile_token: window.pivitTurnstileToken ? window.pivitTurnstileToken() : '',
+      }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -171,6 +176,7 @@ document.getElementById('client-form').addEventListener('submit', (e) => {
   submitLogin('/api/auth/client-login', {
     username: document.getElementById('username').value,
     password: document.getElementById('client-password').value,
+    turnstile_token: window.pivitTurnstileToken ? window.pivitTurnstileToken() : '',
   }, btn);
 });
 

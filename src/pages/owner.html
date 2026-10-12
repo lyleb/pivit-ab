@@ -46,6 +46,7 @@
   <form id="owner-form">
     <label for="password">Password</label>
     <input id="password" type="password" placeholder="Enter your password" autofocus required>
+    <div id="turnstile-slot"></div>
     <button id="owner-btn" type="submit">Log in</button>
     <a class="forgot-link" id="owner-forgot">Forgot password?</a>
     <div id="owner-forgot-note" class="forgot-note">The owner password is managed in your hosting settings. There's no in-app reset for it.</div>
@@ -53,6 +54,7 @@
   <p id="login-error" class="error-msg"></p>
   <p class="hint" style="text-align:center;margin-top:16px;"><a href="/login.html">Email sign-in</a></p>
 </div>
+<script src="/turnstile-widget.js"></script>
 <script>
 document.getElementById('owner-forgot').addEventListener('click', () => {
   const el = document.getElementById('owner-forgot-note');
@@ -71,7 +73,10 @@ document.getElementById('owner-form').addEventListener('submit', async (event) =
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: document.getElementById('password').value }),
+      body: JSON.stringify({
+        password: document.getElementById('password').value,
+        turnstile_token: window.pivitTurnstileToken ? window.pivitTurnstileToken() : '',
+      }),
     });
     const data = await res.json().catch(() => ({}));
     if (res.ok) {
