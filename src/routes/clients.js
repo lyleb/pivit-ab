@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const db = require('../db');
+const { endClientSessions } = require('../audit');
 const { requireAuth } = require('../middleware/auth');
 const router = express.Router();
 
@@ -71,6 +72,7 @@ router.patch('/:id', async (req, res) => {
        RETURNING id, name, username, created_at`,
       [newName, newUsername, newHash, id, req.account.id]
     );
+    if (password) await endClientSessions(id);
     res.json(rows[0]);
   } catch (err) {
     console.error(err);
@@ -87,6 +89,7 @@ router.delete('/:id', async (req, res) => {
       [req.params.id, req.account.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no client found with that id' });
+    await endClientSessions(req.params.id);
     res.status(204).end();
   } catch (err) {
     console.error(err);

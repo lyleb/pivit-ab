@@ -54,7 +54,12 @@ function staticChecks() {
   assert.ok(!dashboard.includes('ADMIN_API_KEY'));
 
   const sessionSrc = read('src/session.js');
-  assert.ok(sessionSrc.includes("name: 'pivit.sid'"));
+  const cookieSrc = read('src/session-cookie.js');
+  assert.ok(cookieSrc.includes("const COOKIE_NAME = 'pivit.sid'"));
+  assert.ok(cookieSrc.includes('__Host-'));
+  assert.ok(sessionSrc.includes('httpOnly: true'));
+  assert.ok(sessionSrc.includes("sameSite: 'lax'"));
+  assert.ok(sessionSrc.includes('ACTIVE_COOKIE_NAME'));
   const migrateSrc = read('src/db/migrate.js');
   const schema = read('src/db/schema.sql');
   assert.ok(migrateSrc.includes("{ version: '004', name: 'access_requests', run: applyAccessRequests }"));
