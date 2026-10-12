@@ -1,5 +1,8 @@
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const ui = require('../public/admin-ui.js');
+const plan = require('../src/plan');
 
 const bayesLead = {
   total_visitors: 240,
@@ -36,6 +39,59 @@ assert.ok(planner.includes('about 5% relative'));
 assert.ok(planner.includes('Advanced'));
 assert.ok(!planner.includes('MDE'));
 assert.ok(planner.includes('id="wizard-plan-sentence"'));
+assert.ok(planner.includes('<details class="plan-more">'));
+assert.ok(!planner.includes('<details class="plan-more" open'));
+assert.ok(planner.includes('>More info</summary>'));
+assert.ok(planner.includes('flipping a coin'));
+assert.ok(planner.includes('pivitlab reads the result once, at the planned sample'));
+assert.ok(!planner.includes('Pivitlab'));
+assert.ok(!planner.includes('PivitLab'));
+assert.ok(planner.includes('id="wizard-site-examples"'));
+assert.ok(!planner.includes("You'll need about"));
+
+const adminPage = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+const planScript = adminPage.indexOf('src="/plan.js"');
+const uiScript = adminPage.indexOf('src="/admin-ui.js"');
+assert.ok(planScript > -1 && uiScript > planScript);
+
+function assertGuideMatchesEngine(input) {
+  const shown = ui.trafficGuideHtml(input);
+  assert.ok(shown.includes('250–1,000'));
+  assert.ok(!shown.includes('MDE'));
+  plan.SITE_SIZE_EXAMPLES.forEach((band) => {
+    const direct = plan.buildPlan(Object.assign({}, input, { weekly_traffic: band.weekly_traffic }));
+    assert.strictEqual(direct.ok, true, direct.error);
+    assert.ok(shown.includes(ui.escapeHtml(direct.plan.sentence)), direct.plan.sentence);
+    assert.ok(shown.includes(direct.plan.visitors_per_variant.toLocaleString('en-GB')));
+    assert.ok(shown.includes(band.weekly_traffic.toLocaleString('en-GB')));
+    const fromEngine = plan.siteDurationExamples(input).find((row) => row.id === band.id);
+    assert.strictEqual(fromEngine.visitors_per_variant, direct.plan.visitors_per_variant);
+    assert.strictEqual(fromEngine.estimated_weeks, direct.plan.estimated_weeks);
+    assert.strictEqual(fromEngine.sentence, direct.plan.sentence);
+  });
+  return shown;
+}
+
+const guideInput = {
+  baseline_rate: 0.03,
+  relative_effect: 0.1,
+  effect_choice: 'medium',
+  min_runtime_days: 14,
+  variant_count: 2,
+};
+const mediumGuide = assertGuideMatchesEngine(guideInput);
+const biggerChange = assertGuideMatchesEngine(Object.assign({}, guideInput, {
+  relative_effect: 0.2,
+  effect_choice: 'big',
+}));
+assert.notStrictEqual(mediumGuide, biggerChange);
+const threeGuide = ui.trafficGuideHtml(Object.assign({}, guideInput, { variant_count: 3 }));
+const threeDirect = plan.buildPlan(Object.assign({}, guideInput, {
+  variant_count: 3,
+  weekly_traffic: plan.SITE_SIZE_EXAMPLES[0].weekly_traffic,
+}));
+assert.ok(threeGuide.includes(ui.escapeHtml(threeDirect.plan.sentence)));
+assert.ok(!ui.trafficGuideHtml({ baseline_rate: 0, relative_effect: 0.1 }).includes("You'll need about"));
 
 assert.strictEqual(ui.resultsGated('draft', 0), true);
 assert.strictEqual(ui.resultsGated('draft', 12), true);

@@ -2,10 +2,11 @@
 // rules can be checked without a browser. Loaded as a classic script in the
 // dashboard (window.PivitUI) and via require() in scripts/admin-ui.test.js.
 (function (root, factory) {
-  const api = factory();
+  const plan = (typeof module === 'object' && module.exports) ? require('../src/plan') : root.PivitPlan;
+  const api = factory(plan);
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.PivitUI = api;
-})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (plan) {
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
       '&': '&amp;',
@@ -76,6 +77,26 @@
       <p class="plan-sentence" id="${id}-plan-sentence"></p>
       <p class="hint" id="${id}-plan-meta"></p>
       <p class="hint" id="${id}-baseline-note"></p>
+      <details class="plan-more">
+        <summary>More info</summary>
+        <div class="accordion-body">
+          <h3>Why traffic sets how long a test takes</h3>
+          <p>A test is like flipping a coin to check whether it is weighted.</p>
+          <ul>
+            <li><strong>Flip it 10 times, get 6 heads.</strong> That could easily be luck. You can't tell.</li>
+            <li><strong>Flip it 1,000 times, get 600 heads.</strong> That's no accident. The coin is weighted.</li>
+          </ul>
+          <p>Your website works the same way. Every visitor is a flip of the coin. Conversion rates go up and down by themselves, so a few extra sales after a change might just be a good week. The more visitors you have, the sooner you can tell a real improvement from luck.</p>
+          <ul>
+            <li><strong>More visitors, a faster answer.</strong> Double your traffic and the test takes roughly half as long.</li>
+            <li><strong>Small changes are hard to spot.</strong> A tiny difference is easily lost in the everyday ups and downs. Halve the change you're looking for and you need about four times the visitors.</li>
+            <li><strong>Fewer sales means slower learning.</strong> What counts is conversions. A page where 1 in 100 people buy needs far more visitors than one where 1 in 10 do.</li>
+          </ul>
+          <p>pivitlab reads the result once, at the planned sample. The weeks below are how long those visitors take to arrive. The test also waits out the minimum runtime, and it does not call a winner before both are in.</p>
+          <h3>Small, medium and large sites</h3>
+          <div id="${id}-site-examples"></div>
+        </div>
+      </details>
       <details>
         <summary>Advanced</summary>
         <div class="accordion-body">
@@ -136,6 +157,30 @@
   }
 
   const PLAN_PRESETS = { small: 5, medium: 10, big: 20 };
+
+  // Same baseline, change and variants as the plan on screen. Weekly traffic
+  // is the only thing that changes, and the sentences are buildPlan's own.
+  function trafficGuideHtml(input) {
+    if (!plan || typeof plan.siteDurationExamples !== 'function') {
+      return '<p class="hint">Examples are unavailable.</p>';
+    }
+    const examples = plan.siteDurationExamples(input || {});
+    const failed = examples.find((row) => !row.ok);
+    if (!examples.length || failed) {
+      const message = failed && failed.error ? failed.error : 'Enter a baseline and a change to see these examples.';
+      return `<p class="hint">${escapeHtml(message)}</p>`;
+    }
+    const small = examples.find((row) => row.id === 'small');
+    const intro = small
+      ? `<p class="hint">Same baseline, change and variants as the plan above. Only the weekly visits change. A small site is ${escapeHtml(small.range)}.</p>`
+      : '';
+    const cards = examples.map((row) => `<section class="site-example">
+        <h3>${escapeHtml(row.label)}</h3>
+        <p class="range">${escapeHtml(row.range)}, at ${escapeHtml(row.weekly_label)} visits a week</p>
+        <p class="plan-sentence">${escapeHtml(row.sentence)}</p>
+      </section>`).join('');
+    return `${intro}<div class="site-examples">${cards}</div>`;
+  }
 
   function plannerChoice(relativePct) {
     const value = Number(relativePct);
@@ -286,6 +331,7 @@
     shortVariantLabel,
     signalText,
     plannerShell,
+    trafficGuideHtml,
     resultsGated,
     overviewBanner,
     showNextSteps,

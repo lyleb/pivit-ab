@@ -8,6 +8,15 @@
 // With more than one challenger, alpha is divided by the number of
 // comparisons (Bonferroni). Three variants means Control plus two
 // challengers, so each comparison uses 2.5% instead of 5%.
+//
+// The dashboard loads this file in the browser as well as from Node, so the
+// planner's "More info" examples can call buildPlan directly.
+
+(function (root, factory) {
+  const api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.PivitPlan = api;
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
 
 const POWER = 0.8;
 const ALPHA = 0.05;
@@ -269,7 +278,42 @@ function autoPlanInput(suggestion, variants) {
   };
 }
 
-module.exports = {
+// Inputs only. A small site is about 250–1,000 visits a week; 500 sits in
+// that band. The visitors and the weeks are whatever buildPlan returns for
+// the plan currently on screen, with this weekly traffic filled in.
+const SITE_SIZE_EXAMPLES = [
+  { id: 'small', label: 'Small site', range: 'about 250–1,000 visits a week', weekly_traffic: 500 },
+  { id: 'medium', label: 'Medium site', range: 'about 1,000–10,000 visits a week', weekly_traffic: 5000 },
+  { id: 'large', label: 'Large site', range: 'about 10,000–100,000 visits a week', weekly_traffic: 50000 },
+];
+
+function siteDurationExamples(input) {
+  const base = Object.assign({}, input || {});
+  return SITE_SIZE_EXAMPLES.map((example) => {
+    const built = buildPlan(Object.assign({}, base, { weekly_traffic: example.weekly_traffic }));
+    const row = {
+      id: example.id,
+      label: example.label,
+      range: example.range,
+      weekly_traffic: example.weekly_traffic,
+      weekly_label: formatCount(example.weekly_traffic),
+      ok: built.ok,
+      error: built.ok ? '' : built.error,
+      visitors_per_variant: null,
+      estimated_weeks: null,
+      estimated_days: null,
+      sentence: '',
+    };
+    if (!built.ok) return row;
+    row.visitors_per_variant = built.plan.visitors_per_variant;
+    row.estimated_weeks = built.plan.estimated_weeks;
+    row.estimated_days = built.plan.estimated_days;
+    row.sentence = built.plan.sentence;
+    return row;
+  });
+}
+
+return {
   POWER,
   ALPHA,
   DEFAULT_BASELINE,
@@ -278,12 +322,15 @@ module.exports = {
   MIN_RUNTIME_DAYS,
   MIN_BASELINE_VISITORS,
   EFFECT_CHOICES,
+  SITE_SIZE_EXAMPLES,
   normalQuantile,
   sampleSizePerVariant,
   comparisonsFor,
   planSentence,
   buildPlan,
+  siteDurationExamples,
   autoPlanInput,
   parseRate,
   slowestWeeklyShare,
 };
+});

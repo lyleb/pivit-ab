@@ -90,6 +90,13 @@ app.get('/', sendLandingPage);
 // before the static handler can send the file unchanged.
 app.use(canonicalHtmlMiddleware);
 
+// Same sample-size functions the plan API uses. The dashboard's More info
+// examples call them in the browser, so there is one copy of the maths.
+app.get('/plan.js', (req, res) => {
+  res.type('application/javascript');
+  res.sendFile(path.join(__dirname, 'plan.js'));
+});
+
 // Serve the built snippet + the admin dashboard as static files
 app.use('/snippet', express.static(path.join(__dirname, '../snippet')));
 app.use(express.static(path.join(__dirname, '../public')));
