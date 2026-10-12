@@ -72,7 +72,12 @@ router.post('/', async (req, res) => {
       || (scope.legacy ? row.account_id !== scope.accountId : row.site_id !== scope.siteId);
     if (wrongAccount) {
       warnDrop(experiment_id, originHostFromRequest(req), scope.ok ? 'account' : 'site-key');
-      scheduleEventDrop(experiment_id, 'host');
+      // Counting the drop on a different account would let a public caller
+      // write that account's health totals. A same-account site mismatch
+      // still counts, so the owner can see a tag pointed at the wrong site.
+      if (scope.ok && row.account_id === scope.accountId) {
+        scheduleEventDrop(experiment_id, 'host');
+      }
       return res.status(204).end();
     }
 
