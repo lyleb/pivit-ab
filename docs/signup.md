@@ -1,6 +1,6 @@
 # Sign-up and sign-in (Sprint 1b)
 
-Invite-only. A customer enters a work email and a website, then signs in from a link or a 6-digit code. There is no customer password. The owner password (`ADMIN_API_KEY`) still works, on the unlisted page `/owner`. That page is not linked from sign-in, is noindexed, and is left out of `robots.txt`. The public sign-in page is email sign-in and client login. The session cookie is still `pivit.sid`. Do not rotate `SESSION_SECRET`.
+Invite-only. A customer enters a work email and a website, then signs in from a link or a 6-digit code. There is no customer password. The owner password (`ADMIN_API_KEY`) still works, on the unlisted page `/owner`. That page is not linked from sign-in, is noindexed, and is left out of `robots.txt`. The public sign-in page is email sign-in and client login. The session cookie is `pivit.sid` (in production, `__Host-pivit.sid`). Do not rotate `SESSION_SECRET`.
 
 Account #1 stays **Heclr**. The superadmin is **info@heclr.com**. The first email sign-in sets `verified_at`.
 
@@ -18,7 +18,7 @@ Set this on the app service:
 | `ACCESS_REQUESTS_ENABLED` | No | Leave unset. The landing-page form stores nothing until this is `true`, `1`, `yes` or `on`. `/privacy.html` is still a placeholder, so leave the form off until that page has real wording. |
 | `ACCESS_REQUEST_EMAIL` | No | Inbox for each access request. Defaults to `EMAIL_REPLY_TO` (`info@heclr.com`). |
 
-Do not change `ADMIN_API_KEY`, `SESSION_SECRET`, `DATABASE_URL`, or the cookie name.
+Do not change `SESSION_SECRET` or `DATABASE_URL`. You do not set the cookie name: production sends `__Host-pivit.sid` on its own. Changing `ADMIN_API_KEY` signs out emergency-password sessions. Magic-link and client sessions stay.
 
 Mail is sent with Postmark's HTTPS API (`https://api.postmarkapp.com/email`), not SMTP. Railway Hobby blocks outbound SMTP.
 
@@ -38,13 +38,15 @@ pivitlab.com still has a null MX, so the domain does not receive mail. Every out
 
 The reply to "email me a link" is always "If that address can be used, we've sent a link." Sign-up and that request are limited to 5 per email address per hour and 20 per IP per hour. The limits and the password lockout (5 tries, then 60 seconds) are in Postgres.
 
-A customer session lasts 30 days and is renewed while they use the app. A superadmin session, including the emergency password, lasts 12 hours. Signing in does not end other sessions. **Sign out everywhere** does. Each sign-in replaces the session id.
+A customer session lasts 30 days of use (idle) and never more than 90 days from sign-in (absolute), even if they keep coming back. Both deadlines are stored in the session row in Postgres. A superadmin session, including the emergency password, lasts 12 hours from sign-in and is not renewed. Signing in does not end other sessions. **Sign out everywhere** does, for an owner on the dashboard and for a client viewer on their portal. Changing a client viewer's password, or deleting that viewer, ends their sessions. Changing `ADMIN_API_KEY` ends emergency-password sessions only. Each sign-in replaces the session id, and so does starting or stopping view-as.
 
-State-changing requests must come from this app's origin. The snippet and the visual editor are exempt, because they run on the customer's site.
+In production the cookie is `__Host-pivit.sid`: HttpOnly, Secure, SameSite=Lax, Path=/, and no Domain. That prefix is only safe over HTTPS, so local development and the tests keep `pivit.sid`.
+
+State-changing requests must come from https://pivitlab.com, from `APP_ORIGIN`, or from an origin listed in `APP_ORIGINS`. The check uses Origin, or Referer when Origin was not sent. A request Host that is not one of those origins is not enough, so a Railway hostname or pivit.click cannot post into an account. Outside production the request's own origin is also allowed, so localhost works. The snippet's event endpoint, the visual editor, and the Postmark webhook are exempt, because they are not browser calls from pivitlab.com. The live tag on cantsaythat still posts `/api/event`.
 
 ## Audit log
 
-`audit_log` records sign-up, sign-in, failed codes, invites, sites, verification, Reveal early, test-traffic remove and restore, and superadmin view-as. An account owner sees their own rows. A superadmin sees the whole log, except while using view-as, which is limited to that account and cannot change anything.
+`audit_log` records sign-up, sign-in (magic link, client password, and the emergency password as `emergency_signin`), sign-out everywhere, failed codes, invites, sites, verification, Reveal early, test-traffic remove and restore, and superadmin view-as start and stop. An account owner sees their own rows. A superadmin sees the whole log, except while using view-as, which is limited to that account and cannot change anything. If the audit table is missing, those actions still succeed.
 
 The experiment screen still reads `test_traffic_audit`. New remove, restore and Reveal rows are written there and copied into `audit_log`. Rows that already existed are copied once by migration 002.
 

@@ -12,6 +12,7 @@ const { applyUrlMatchType } = require('./url-match-type');
 const { applyAccessRequests } = require('./access-requests');
 const { applyPortal } = require('./portal');
 const { applyInstallCheck } = require('./install-check');
+const { applySessions } = require('./sessions');
 
 const LOCK_KEY = 814021;
 
@@ -31,6 +32,8 @@ const VERSIONS = [
   { version: '005', name: 'portal', run: applyPortal },
   // Install-check notes stay out of schema.sql too.
   { version: '006', name: 'install-check', run: applyInstallCheck },
+  // Session lookup indexes stay out of schema.sql too.
+  { version: '007', name: 'sessions', run: applySessions },
 ];
 
 async function ensureMigrationsTable(queryable) {

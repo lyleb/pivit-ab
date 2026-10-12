@@ -5,10 +5,8 @@ const { snippetSiteKey, resolveSessionAccount, legacyAccount } = require('../ten
 const { timingSafeStringEqual } = require('../timing');
 const { loginLocked, loginFailure, loginSuccess } = require('../rate-limit');
 const { recordAudit, endUserSessions, endClientSessions } = require('../audit');
-const {
-  CUSTOMER_SESSION_MS,
-  SUPERADMIN_SESSION_MS,
-} = require('../session-lifetime');
+const { clearSessionCookie } = require('../session-cookie');
+const { stampSessionLifetime } = require('../session-lifetime');
 const { turnstileOk } = require('../turnstile');
 const {
   LINK_SENT,
@@ -22,29 +20,77 @@ const {
 
 const router = express.Router();
 
-function startSession(req, fields) {
+const SESSION_KEYS = [
+  'role',
+  'userId',
+  'accountId',
+  'superadmin',
+  'customer',
+  'emergency',
+  'emergencyKeyId',
+  'signedInAt',
+  'lastSeenAt',
+  'absoluteExpiresAt',
+  'clientId',
+  'clientName',
+  'viewAsAccountId',
+];
+
+function snapshotSession(session) {
+  const data = {};
+  if (!session) return data;
+  for (const key of SESSION_KEYS) {
+    if (session[key] !== undefined) data[key] = session[key];
+  }
+  if (session.cookie && session.cookie.originalMaxAge) data._maxAge = session.cookie.originalMaxAge;
+  return data;
+}
+
+function applySnapshot(session, data, mutate) {
+  for (const key of SESSION_KEYS) {
+    if (data[key] !== undefined) session[key] = data[key];
+  }
+  // Restore the previous lifetime first so sign-in can replace it, and so
+  // view-as keeps the clock that was already running.
+  if (data._maxAge && session.cookie) session.cookie.maxAge = data._maxAge;
+  if (typeof mutate === 'function') mutate(session);
+}
+
+// New session id, same person. Used at sign-in and when view-as changes
+// what the session is allowed to see.
+function rotateSession(req, mutate) {
   return new Promise((resolve, reject) => {
-    const apply = () => {
-      req.session.role = fields.role;
-      req.session.userId = fields.userId || null;
-      req.session.accountId = fields.accountId || null;
-      req.session.superadmin = fields.superadmin === true;
-      req.session.customer = fields.customer === true;
-      req.session.emergency = fields.emergency === true;
-      req.session.signedInAt = Date.now();
-      req.session.viewAsAccountId = null;
-      if (fields.clientId) {
-        req.session.clientId = fields.clientId;
-        req.session.clientName = fields.clientName || null;
-      }
-      if (req.session.cookie && fields.maxAge) req.session.cookie.maxAge = fields.maxAge;
+    if (!req.session) return reject(new Error('no session'));
+    const data = snapshotSession(req.session);
+    const finish = () => {
+      applySnapshot(req.session, data, mutate);
       if (typeof req.session.save === 'function') {
         req.session.save((err) => (err ? reject(err) : resolve()));
       } else resolve();
     };
-    if (req.session && typeof req.session.regenerate === 'function') {
-      req.session.regenerate((err) => (err ? reject(err) : apply()));
-    } else apply();
+    if (typeof req.session.regenerate === 'function') {
+      req.session.regenerate((err) => (err ? reject(err) : finish()));
+    } else finish();
+  });
+}
+
+function startSession(req, fields) {
+  return rotateSession(req, (session) => {
+    session.role = fields.role;
+    session.userId = fields.userId || null;
+    session.accountId = fields.accountId || null;
+    session.superadmin = fields.superadmin === true;
+    session.customer = fields.customer === true;
+    session.emergency = fields.emergency === true;
+    session.viewAsAccountId = null;
+    if (fields.clientId) {
+      session.clientId = fields.clientId;
+      session.clientName = fields.clientName || null;
+    } else {
+      delete session.clientId;
+      delete session.clientName;
+    }
+    stampSessionLifetime(session);
   });
 }
 
@@ -55,7 +101,6 @@ async function ownerFromPassword(req) {
     emergency: true,
     customer: false,
     superadmin: false,
-    maxAge: SUPERADMIN_SESSION_MS,
   };
   if (legacy) {
     fields.accountId = legacy.id;
@@ -133,7 +178,15 @@ router.post('/client-login', async (req, res) => {
       clientName: client.name,
       accountId: client.account_id || null,
       customer: true,
-      maxAge: CUSTOMER_SESSION_MS,
+    });
+    await recordAudit(db, {
+      accountId: client.account_id || null,
+      actorLabel: client.username,
+      action: 'signin',
+      targetType: 'client',
+      targetId: client.id,
+      detail: { via: 'client_password' },
+      ip: req.ip,
     });
     res.json({ role: 'client', client: { id: client.id, name: client.name } });
   } catch (err) {
@@ -178,7 +231,6 @@ async function beginUserSession(req, result) {
     superadmin: result.superadmin === true,
     customer: result.superadmin !== true,
     emergency: false,
-    maxAge: result.superadmin ? SUPERADMIN_SESSION_MS : CUSTOMER_SESSION_MS,
   });
 }
 
@@ -212,22 +264,36 @@ router.post('/logout', (req, res) => {
   }
   req.session.destroy((err) => {
     if (err) return res.status(500).json(publicServerError(err));
-    res.clearCookie('pivit.sid');
+    clearSessionCookie(res);
     res.status(204).end();
   });
 });
 
 router.post('/logout-all', async (req, res) => {
   try {
-    if (req.session && req.session.userId) await endUserSessions(req.session.userId);
-    else if (req.session && req.session.clientId) await endClientSessions(req.session.clientId);
+    const session = req.session || {};
+    const userId = session.userId || null;
+    const clientId = session.clientId || null;
+    if (userId || clientId) {
+      await recordAudit(db, {
+        accountId: session.accountId || null,
+        userId,
+        actorLabel: userId ? null : (session.clientName || 'client'),
+        action: 'signout_everywhere',
+        targetType: clientId && !userId ? 'client' : 'user',
+        targetId: userId || clientId,
+        ip: req.ip,
+      });
+      if (userId) await endUserSessions(userId);
+      if (clientId) await endClientSessions(clientId);
+    }
     if (!req.session || typeof req.session.destroy !== 'function') {
-      res.clearCookie('pivit.sid');
+      clearSessionCookie(res);
       return res.status(204).end();
     }
     req.session.destroy((err) => {
       if (err) return res.status(500).json(publicServerError(err));
-      res.clearCookie('pivit.sid');
+      clearSessionCookie(res);
       res.status(204).end();
     });
   } catch (err) {
@@ -247,25 +313,21 @@ router.post('/view-as', async (req, res) => {
     }
     const { rows } = await db.query(`SELECT id, name FROM accounts WHERE id = $1`, [accountId]);
     if (!rows[0]) return res.status(404).json({ error: 'not found' });
-    req.session.viewAsAccountId = rows[0].id;
+    const viewed = rows[0];
+    await rotateSession(req, (session) => {
+      session.viewAsAccountId = viewed.id;
+    });
     await recordAudit(db, {
-      accountId: rows[0].id,
+      accountId: viewed.id,
       userId: account.userId,
       actorLabel: 'superadmin',
       action: 'view_as',
       targetType: 'account',
-      targetId: rows[0].id,
-      detail: { name: rows[0].name },
+      targetId: viewed.id,
+      detail: { name: viewed.name },
       ip: req.ip,
     });
-    if (typeof req.session.save === 'function') {
-      req.session.save((err) => {
-        if (err) return res.status(500).json(publicServerError(err));
-        res.json({ view_as: { id: rows[0].id, name: rows[0].name } });
-      });
-      return;
-    }
-    res.json({ view_as: { id: rows[0].id, name: rows[0].name } });
+    res.json({ view_as: { id: viewed.id, name: viewed.name } });
   } catch (err) {
     if (err && err.code === '22P02') return res.status(404).json({ error: 'not found' });
     res.status(500).json(publicServerError(err));
@@ -277,7 +339,9 @@ router.post('/view-as/stop', async (req, res) => {
     const account = await resolveSessionAccount(req);
     if (!account) return res.status(401).json({ error: 'not authenticated' });
     const viewed = req.session.viewAsAccountId || null;
-    req.session.viewAsAccountId = null;
+    await rotateSession(req, (session) => {
+      session.viewAsAccountId = null;
+    });
     if (viewed) {
       await recordAudit(db, {
         accountId: viewed,
@@ -288,13 +352,6 @@ router.post('/view-as/stop', async (req, res) => {
         targetId: viewed,
         ip: req.ip,
       });
-    }
-    if (typeof req.session.save === 'function') {
-      req.session.save((err) => {
-        if (err) return res.status(500).json(publicServerError(err));
-        res.json({ view_as: null });
-      });
-      return;
     }
     res.json({ view_as: null });
   } catch (err) {

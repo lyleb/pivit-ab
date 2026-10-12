@@ -21,7 +21,7 @@
     padding: calc(14px + env(safe-area-inset-top)) 28px 14px;
   }
   .portal-top .brand-logo { height: 28px; }
-  .portal-top-actions { display: flex; align-items: center; gap: 14px; color: var(--text-muted); font-size: 0.92em; }
+  .portal-top-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 14px; color: var(--text-muted); font-size: 0.92em; }
   .portal-top-actions button { background: none; border: none; color: var(--mint); padding: 0; font-weight: 650; }
   .portal-top-actions button:hover { background: none; color: var(--mint-dark); }
   .portal-wrap { max-width: 1180px; margin: 0 auto; padding: 28px 28px 64px; }
@@ -110,6 +110,7 @@
   <span class="brand-logo" role="img" aria-label="pivitlab"></span>
   <div class="portal-top-actions">
     <span id="welcome-msg"></span>
+    <button type="button" id="logout-all-btn">Sign out everywhere</button>
     <button type="button" id="logout-btn">Sign out</button>
   </div>
 </header>
@@ -183,6 +184,11 @@ function iconHtml(icon) {
 
 document.getElementById('logout-btn').addEventListener('click', async () => {
   await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login.html';
+});
+
+document.getElementById('logout-all-btn').addEventListener('click', async () => {
+  await fetch('/api/auth/logout-all', { method: 'POST' });
   window.location.href = '/login.html';
 });
 
