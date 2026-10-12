@@ -10,7 +10,7 @@ const {
 } = require('../goals');
 const { detectSRM } = require('../srm');
 const { buildHealth } = require('../health');
-const { flagIsOn, summariseTestTraffic } = require('../test-traffic');
+const { flagIsOn, summariseTestTraffic, requestHasQaFlag } = require('../test-traffic');
 const { ensurePlanOnStart, recordReveal, loadReading, readingPayload, srmFor } = require('../experiment-plan');
 const { planProgress, describeReading, listSignal } = require('../reading');
 const { visibleEventSql } = require('../metrics');
@@ -27,7 +27,7 @@ const {
 } = require('../host-scope');
 const { publicScope, ownedExperiment, placeOnSite } = require('../tenant');
 const { matchPageUrl, resolvePageMatch } = require('../../public/url-match');
-const { noteSnippetSeen, noteInstallCheck, installCheckPayload } = require('../site-verify');
+const { noteSnippetSeen, noteInstallCheck, noteQaPreview, installCheckPayload } = require('../site-verify');
 const { normaliseStatusChange } = require('../experiment-status');
 const router = express.Router();
 
@@ -46,6 +46,7 @@ async function openPublicScope(req) {
   }
   await noteSnippetSeen(scope, req);
   await noteInstallCheck(scope, req);
+  if (requestHasQaFlag(req)) await noteQaPreview(scope, req);
   return scope;
 }
 

@@ -274,6 +274,18 @@
     return `${origin}/login.html?role=client`;
   }
 
+  // The address the owner opens to mark this browser as a test visit.
+  // Anything that is not a plain hostname falls back to a sample, so the
+  // checklist never prints a value that could break out of the page.
+  function previewExampleUrl(domain) {
+    const fallback = 'https://example.co.uk/?pivit_qa=1';
+    if (typeof domain !== 'string') return fallback;
+    let host = domain.trim().toLowerCase();
+    if (host.startsWith('www.')) host = host.slice(4);
+    if (!/^[a-z0-9.-]+$/.test(host) || !host.includes('.') || host.includes('..')) return fallback;
+    return `https://${host}/?pivit_qa=1`;
+  }
+
   // Whether the Make edits desktop note should appear. `matches` is the
   // narrow-or-touch media query; `stored` is the dismissal flag ('1' hides it).
   function shouldShowSignpost(matches, stored) {
@@ -308,6 +320,7 @@
     snippetTag,
     installCheckLine,
     clientLoginUrl,
+    previewExampleUrl,
     shouldShowSignpost,
   };
 });

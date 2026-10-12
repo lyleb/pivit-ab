@@ -14,6 +14,7 @@ const { applyPortal } = require('./portal');
 const { applyInstallCheck } = require('./install-check');
 const { applySessions } = require('./sessions');
 const { applyRateLimits } = require('./rate-limits');
+const { applyFirstRun } = require('./first-run');
 
 const LOCK_KEY = 814021;
 
@@ -37,6 +38,8 @@ const VERSIONS = [
   { version: '007', name: 'sessions', run: applySessions },
   // The rate-limit index stays out of schema.sql too.
   { version: '008', name: 'rate-limits', run: applyRateLimits },
+  // First-run dismissal and the QA preview timestamp stay out of schema.sql too.
+  { version: '009', name: 'first-run', run: applyFirstRun },
 ];
 
 async function ensureMigrationsTable(queryable) {

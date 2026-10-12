@@ -434,6 +434,25 @@ body.auth-page {
 }
 .setup-list li.done .setup-num { background: rgba(2,222,181,0.16); color: var(--mint-dark); }
 .setup-list li strong { display: block; }
+.setup-state {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.75em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.setup-list li.done .setup-state { color: var(--mint-dark); }
+.first-run-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.first-run-head h2 { margin-top: 0; }
+#first-run-preview-url { margin: 8px 0; word-break: break-all; }
 .legal-wrap { max-width: 680px; margin: 32px auto 64px; padding: 0 16px; }
 .legal-wrap a { color: var(--mint-dark); }
 .placeholder-mark {
