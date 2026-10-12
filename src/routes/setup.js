@@ -5,6 +5,7 @@ const { publicServerError } = require('../public-error');
 const { customerHost } = require('../auth-flow');
 const { newSiteKey } = require('../db/tenancy');
 const { recordAudit } = require('../audit');
+const { installCheckPayload } = require('../site-verify');
 
 const setupRouter = express.Router();
 const sitesRouter = express.Router();
@@ -19,12 +20,13 @@ function sitePayload(row) {
     verified: row.verified_at != null,
     verified_at: row.verified_at,
     conflict: row.conflict === true,
+    install_check: row.verified_at ? null : installCheckPayload(row.install_note, row.install_note_host),
   };
 }
 
 async function primarySite(accountId) {
   const { rows } = await db.query(
-    `SELECT id, name, domains, public_key, verified_at, conflict
+    `SELECT id, name, domains, public_key, verified_at, conflict, install_note, install_note_host
      FROM sites
      WHERE account_id = $1
      ORDER BY created_at
@@ -59,7 +61,7 @@ sitesRouter.post('/', requireAuth(['owner']), async (req, res) => {
     const inserted = await db.query(
       `INSERT INTO sites (account_id, name, domains, public_key)
        VALUES ($1, $2, $3::text[], $4)
-       RETURNING id, name, domains, public_key, verified_at, conflict`,
+       RETURNING id, name, domains, public_key, verified_at, conflict, install_note, install_note_host`,
       [req.account.id, host, [host], newSiteKey()]
     );
     const others = await db.query(

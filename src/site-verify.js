@@ -6,6 +6,34 @@ const db = require('./db');
 const { originHostFromRequest, normaliseHost } = require('./host-scope');
 const { recordAudit } = require('./audit');
 
+const INSTALL_PROBLEMS = {
+  missing: 'the snippet had no site key',
+  invalid: 'the site key was not valid',
+  wrong: 'the site key did not match this account',
+};
+
+// Owner-facing copy. Null when there is nothing to report. The public snippet
+// response does not include this.
+function installCheckPayload(note, host) {
+  const reason = Object.prototype.hasOwnProperty.call(INSTALL_PROBLEMS, note) ? note : null;
+  if (!reason) return null;
+  const safeHost = typeof host === 'string' && /^[a-z0-9.-]+$/.test(host) ? host : '';
+  const where = safeHost ? ` from ${safeHost}` : '';
+  return {
+    reason,
+    host: safeHost || null,
+    message: `We saw a visit${where}, but ${INSTALL_PROBLEMS[reason]}. Copy the snippet from pivitlab and replace the tag on your site.`,
+  };
+}
+
+function problemReason(scope) {
+  if (!scope || !scope.ok) {
+    return scope && scope.reason === 'invalid-key' ? 'invalid' : 'wrong';
+  }
+  if (scope.legacy) return 'missing';
+  return null;
+}
+
 async function noteSnippetSeen(scope, req) {
   try {
     if (!scope || !scope.siteId) return;
@@ -20,7 +48,11 @@ async function noteSnippetSeen(scope, req) {
     const domains = (site.domains || []).map((entry) => normaliseHost(entry)).filter(Boolean);
     if (!domains.includes(host)) return;
     const updated = await db.query(
-      `UPDATE sites SET verified_at = now()
+      `UPDATE sites
+       SET verified_at = now(),
+           install_note = NULL,
+           install_note_host = NULL,
+           install_note_at = NULL
        WHERE id = $1 AND verified_at IS NULL
        RETURNING id`,
       [site.id]
@@ -40,4 +72,36 @@ async function noteSnippetSeen(scope, req) {
   }
 }
 
-module.exports = { noteSnippetSeen };
+// Records a visit on unverified sites whose domain list contains the Origin
+// host, when that visit did not carry their key. A verified site is never
+// updated, so the live cantsaythat tag does not write a note on each hit.
+// A real key is excluded: that site is verified by noteSnippetSeen when the
+// host matches, and a stranger using the key must not mark its owner.
+async function noteInstallCheck(scope, req) {
+  try {
+    const host = originHostFromRequest(req);
+    if (!host) return;
+    let reason = problemReason(scope);
+    let excludeId = null;
+    if (!reason && scope && scope.siteId) {
+      reason = 'wrong';
+      excludeId = scope.siteId;
+    }
+    if (!reason) return;
+    await db.query(
+      `UPDATE sites
+       SET install_note = $1,
+           install_note_host = $2,
+           install_note_at = now()
+       WHERE verified_at IS NULL
+         AND $2 = ANY(domains)
+         AND ($3::uuid IS NULL OR id <> $3)
+         AND (install_note IS DISTINCT FROM $1 OR install_note_host IS DISTINCT FROM $2)`,
+      [reason, host, excludeId]
+    );
+  } catch (err) {
+    console.error('install check note failed:', err);
+  }
+}
+
+module.exports = { noteSnippetSeen, noteInstallCheck, installCheckPayload };

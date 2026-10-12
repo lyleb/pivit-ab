@@ -34,7 +34,7 @@ pivitlab.com still has a null MX, so the domain does not receive mail. Every out
 2. The person opens `/signup.html?code=…`, enters a work email and a website, and agrees to the terms version `beta-2026-10-09`. The terms page is a placeholder for Lyle to replace.
 3. The email contains a link and a 6-digit code. Both expire after 15 minutes. Either one works once. The link opens `/sign-in.html`, which does not sign them in until they press **Sign in**, so a mail scanner that only fetches the link does not use it up. The code allows 5 tries.
 4. That first sign-in is the email verification. The account is named after the domain. The site is not verified yet.
-5. The empty home screen is the first-run checklist: the site, the snippet (with `data-site`), and a check that ticks when a page on that domain loads the snippet. A test can be built before that, and cannot be started until the check has passed.
+5. The empty home screen is the first-run checklist: the site, the snippet (with `data-site`), and a check that ticks when a page on that domain loads the snippet. A test can be built before that, and cannot be started until the check has passed. If a visit from the site arrives with no site key, or with a key that is not this account's, the check says so. The public snippet response stays an empty list, the same as a host that is not allowed.
 
 The reply to "email me a link" is always "If that address can be used, we've sent a link." Sign-up and that request are limited to 5 per email address per hour and 20 per IP per hour. The limits and the password lockout (5 tries, then 60 seconds) are in Postgres.
 
