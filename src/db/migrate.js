@@ -15,6 +15,7 @@ const { applyInstallCheck } = require('./install-check');
 const { applySessions } = require('./sessions');
 const { applyRateLimits } = require('./rate-limits');
 const { applyFirstRun } = require('./first-run');
+const { applyConclusion } = require('./conclusion');
 
 const LOCK_KEY = 814021;
 
@@ -40,6 +41,8 @@ const VERSIONS = [
   { version: '008', name: 'rate-limits', run: applyRateLimits },
   // First-run dismissal and the QA preview timestamp stay out of schema.sql too.
   { version: '009', name: 'first-run', run: applyFirstRun },
+  // Conclusion PDFs and click-to-approve records stay out of schema.sql too.
+  { version: '010', name: 'conclusion', run: applyConclusion },
 ];
 
 async function ensureMigrationsTable(queryable) {

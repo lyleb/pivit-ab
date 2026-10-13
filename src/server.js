@@ -32,6 +32,7 @@ const webhooksRouter = require('./routes/webhooks');
 const { sendOwnerPage } = require('./owner-page');
 const { sendLandingPage } = require('./landing');
 const reviewRouter = require('./routes/review-requests');
+const { ownerRouter: conclusionOwnerRouter, noticesRouter } = require('./routes/conclusion');
 const { startSnapshotScheduler } = require('./snapshot-schedule');
 
 const app = express();
@@ -110,7 +111,9 @@ app.use('/api/setup', setupRouter);
 app.use('/api/sites', sitesRouter);
 app.use('/api/admin', auditRouter.adminRouter);
 app.use('/api/webhooks', webhooksRouter);
+app.use('/api/experiments', conclusionOwnerRouter);
 app.use('/api/experiments', experimentsRouter);
+app.use('/api/notices', noticesRouter);
 app.use('/api/event', eventsRouter);
 app.use('/api/results', resultsRouter);
 app.use('/api/goals', goalsRouter);

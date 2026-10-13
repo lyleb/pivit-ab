@@ -50,7 +50,9 @@ function appFor(session) {
   app.use('/api/setup', require('../src/routes/setup').setupRouter);
   app.use('/api/sites', require('../src/routes/setup').sitesRouter);
   app.use('/api/admin', require('../src/routes/audit').adminRouter);
+  app.use('/api/experiments', require('../src/routes/conclusion').ownerRouter);
   app.use('/api/experiments', require('../src/routes/experiments'));
+  app.use('/api/notices', require('../src/routes/conclusion').noticesRouter);
   app.use('/api/event', require('../src/routes/events'));
   app.use('/api/results', require('../src/routes/results'));
   app.use('/api/goals', require('../src/routes/goals').router);
@@ -284,6 +286,11 @@ async function main() {
       ['POST', `/api/experiments/${bExp.id}/test-traffic/restore`, { mode: 'test', confirm: true }],
       ['GET', `/api/experiments/${bExp.id}/test-traffic/audit`],
       ['GET', `/api/experiments/${bExp.id}/snapshot-note`],
+      ['GET', `/api/experiments/${bExp.id}/conclusion`],
+      ['POST', `/api/experiments/${bExp.id}/conclusion`, {}],
+      ['POST', `/api/experiments/${bExp.id}/conclusion/release`, {}],
+      ['GET', `/api/experiments/${bExp.id}/conclusion.pdf`],
+      ['GET', `/api/experiments/${bExp.id}/approval.pdf`],
       ['GET', `/api/experiments/${bExp.id}/plan`],
       ['PUT', `/api/experiments/${bExp.id}/plan`, {}],
       ['POST', `/api/experiments/${bExp.id}/reveal`, { confirm: true }],
@@ -340,6 +347,9 @@ async function main() {
     assert.deepStrictEqual(portal.json.experiments.map((exp) => exp.id), [aExp.id]);
     await expectMissing(serverClient, 'GET', `/api/client/experiments/${bExp.id}`);
     await expectMissing(serverClient, 'POST', `/api/client/experiments/${bExp.id}/review-request`, {});
+    await expectMissing(serverClient, 'GET', `/api/client/experiments/${bExp.id}/conclusion.pdf`);
+    await expectMissing(serverClient, 'POST', `/api/client/experiments/${bExp.id}/approve`, {});
+    await expectMissing(serverClient, 'GET', `/api/client/experiments/${bExp.id}/approval.pdf`);
 
     const bReview = await db.query(
       `INSERT INTO review_requests (account_id, experiment_id, client_id)
@@ -358,6 +368,35 @@ async function main() {
       [bReview.rows[0].id]
     );
     assert.strictEqual(stillOpen.rows[0].decided_at, null);
+
+    await db.query(
+      `INSERT INTO conclusion_reports (account_id, experiment_id, status, content, released_at, released_by)
+       VALUES ($1, $2, 'released', $3::jsonb, now(), 'owner')`,
+      [bId, bExp.id, JSON.stringify({
+        brand: 'pivitlab',
+        experiment_name: 'Account B',
+        concluded: { summary: 'SECRET-B-CONCLUSION', label: 'Win', visitors: 9, days: 2, rows: [] },
+      })]
+    );
+    await db.query(
+      `INSERT INTO owner_notices (account_id, kind, title, body, experiment_id)
+       VALUES ($1, 'conclusion_approved', 'Conclusion approved', 'SECRET-B-NOTICE', $2)`,
+      [bId, bExp.id]
+    );
+    const leakedPdf = await request(serverA, 'GET', `/api/experiments/${bExp.id}/conclusion.pdf`);
+    assert.strictEqual(leakedPdf.status, 404);
+    assert.ok(!leakedPdf.text.includes('SECRET-B-CONCLUSION'));
+    const ownPdf = await request(serverB, 'GET', `/api/experiments/${bExp.id}/conclusion.pdf`);
+    assert.strictEqual(ownPdf.status, 200);
+    assert.ok(ownPdf.text.includes('SECRET-B-CONCLUSION'));
+    const noticesA = await request(serverA, 'GET', '/api/notices');
+    assert.strictEqual(noticesA.status, 200);
+    assert.ok(!noticesA.text.includes('SECRET-B-NOTICE'));
+    const noticesB = await request(serverB, 'GET', '/api/notices');
+    assert.ok(noticesB.text.includes('SECRET-B-NOTICE'));
+    const clientPdf = await request(serverClient, 'GET', `/api/client/experiments/${bExp.id}/conclusion.pdf`);
+    assert.strictEqual(clientPdf.status, 404);
+    assert.ok(!clientPdf.text.includes('SECRET-B-CONCLUSION'));
 
     const badToken = createEditToken(bExp.variantId, undefined, { accountId: aId, siteId: aSiteId });
     const editor = await request(publicServer, 'GET', `/api/editor/variants/${bExp.variantId}?token=${encodeURIComponent(badToken)}`);

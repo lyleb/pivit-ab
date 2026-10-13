@@ -10,6 +10,13 @@ const { buildVerdict } = require('../verdict');
 const { listForClient, detailForClient, owned } = require('../client-portal');
 const { requestReview } = require('../review-request');
 const { formatLondonDay, londonDateISO } = require('../clock');
+const {
+  MISSING,
+  clientConclusionView,
+  clientPdf,
+  approveConclusion,
+  deliverPdf,
+} = require('../conclusion');
 const router = express.Router();
 
 router.use(requireAuth(['client']));
@@ -45,6 +52,8 @@ router.get('/experiments/:experimentId', async (req, res) => {
   try {
     const detail = await detailForClient(req.session.clientId, req.account.id, req.params.experimentId);
     if (!detail) return res.status(404).json({ error: 'no experiment found with that id' });
+    const conclusion = await clientConclusionView(req.session.clientId, req.account.id, req.params.experimentId);
+    detail.conclusion = conclusion.conclusion || null;
     res.set('Cache-Control', 'no-store');
     res.json(detail);
   } catch (err) {
@@ -83,6 +92,51 @@ router.post('/experiments/:experimentId/review-request', async (req, res) => {
       requested_at: result.requested_at,
       requested_label: result.requested_label || formatLondonDay(londonDateISO(new Date(result.requested_at))),
     });
+  } catch (err) {
+    res.status(500).json(publicServerError(err));
+  }
+});
+
+// GET /api/client/experiments/:experimentId/conclusion.pdf
+// Only a released conclusion. A draft is the same 404 as a missing test.
+router.get('/experiments/:experimentId/conclusion.pdf', async (req, res) => {
+  try {
+    const file = await clientPdf(req.session.clientId, req.account.id, req.params.experimentId, 'conclusion');
+    if (!deliverPdf(res, file)) return res.status(404).json({ error: MISSING });
+  } catch (err) {
+    res.status(500).json(publicServerError(err));
+  }
+});
+
+// POST /api/client/experiments/:experimentId/approve
+// Click to approve a released conclusion. Records who and when.
+router.post('/experiments/:experimentId/approve', async (req, res) => {
+  try {
+    const result = await approveConclusion({
+      clientId: req.session.clientId,
+      accountId: req.account.id,
+      experimentId: req.params.experimentId,
+      ip: req.ip,
+    });
+    if (result.error === 'missing') return res.status(404).json({ error: MISSING });
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      ok: true,
+      already: !!result.already,
+      approver_name: result.approver_name,
+      approved_at: result.approved_at,
+      approved_label: result.approved_label,
+    });
+  } catch (err) {
+    res.status(500).json(publicServerError(err));
+  }
+});
+
+// GET /api/client/experiments/:experimentId/approval.pdf
+router.get('/experiments/:experimentId/approval.pdf', async (req, res) => {
+  try {
+    const file = await clientPdf(req.session.clientId, req.account.id, req.params.experimentId, 'approval');
+    if (!deliverPdf(res, file)) return res.status(404).json({ error: MISSING });
   } catch (err) {
     res.status(500).json(publicServerError(err));
   }
