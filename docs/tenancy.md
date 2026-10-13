@@ -49,11 +49,11 @@ Public snippet calls that do not match an account return an empty experiment lis
 
 ## What you do on Railway
 
-1. Take a backup first, from a machine that can reach Postgres, and check that it restores. See [backups.md](backups.md). Store the dump off Railway.
+1. Take a backup first, from a machine that can reach Postgres, and check that it restores. See [BACKUPS.md](BACKUPS.md). Store the dump off Railway.
 2. Do not rotate `SESSION_SECRET`. Do not rename `pivit.sid`. Do not change `ADMIN_API_KEY`. No new variable is required for the app to boot.
 3. Deploy this release. Startup applies 001 and logs `Tenancy check passed` with the counts, then `Applied migration 001 (tenancy).` The next boot applies nothing.
 4. Sign in with the existing owner password. The response is still `{ "role": "owner" }`. The dashboard snippet tag for Heclr now includes `data-site`. Swapping the tag on cantsaythat.co.uk is optional and is the same edit as PIV-007. The tag that is already installed keeps working.
-5. Nightly off-host backups stay with Hosting Malarky. The commands in [backups.md](backups.md) are what that job should run.
+5. Nightly off-site backups are the Railway cron service in [BACKUPS.md](BACKUPS.md). That job copies the database to Cloudflare R2.
 
 A failed 001 rolls back. The process then exits, so Railway does not serve traffic against a half-applied schema. Redeploy the previous release. You do not need to restore the backup for that case: the data is still in the pre-account shape.
 
