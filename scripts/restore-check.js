@@ -1,8 +1,13 @@
-// Restore a custom-format dump into a scratch database and compare row counts
-// with the source. Drops the scratch database before it returns. Does not
-// write to the source database.
+// Two checks:
+//
+//   node scripts/restore-check.js --latest
+//     Download the latest R2 object, verify its sha256 sidecar, and run
+//     `pg_restore --list`. Does not write to a database.
 //
 //   DATABASE_URL=postgres://… node scripts/restore-check.js /path/to/pivitlab.dump
+//     Restore a custom-format dump into a scratch database and compare row
+//     counts with the source. Drops the scratch database before it returns.
+//     Does not write to the source database.
 
 const { spawnSync } = require('child_process');
 const { Client } = require('pg');
@@ -97,10 +102,39 @@ async function restoreAndCompare({ dumpFile, sourceUrl, adminUrl, scratchName })
 
 async function main() {
   require('dotenv').config();
+  if (process.argv[2] === '--latest') {
+    const {
+      readR2Config,
+      createR2Client,
+      runLatestRestoreCheck,
+      redactSecrets,
+      secretsFromEnv,
+    } = require('../src/r2-backup');
+    const config = readR2Config(process.env);
+    if (!config.enabled) {
+      console.error(`R2 restore check needs ${config.missing.join(', ')}.`);
+      process.exit(1);
+    }
+    try {
+      const result = await runLatestRestoreCheck({
+        client: createR2Client(config),
+        bucket: config.bucket,
+      });
+      process.stdout.write(result.listing.endsWith('\n') || result.listing.length === 0
+        ? result.listing
+        : `${result.listing}\n`);
+      console.log(`Restore check passed for ${result.key} (sha256 ${result.sha256}).`);
+    } catch (err) {
+      console.error(redactSecrets(err.message || 'Restore check failed.', secretsFromEnv(process.env)));
+      process.exit(err.exitCode || 1);
+    }
+    return;
+  }
   const dumpFile = process.argv[2];
   const sourceUrl = process.env.DATABASE_URL;
   if (!dumpFile || !sourceUrl) {
     console.error('Usage: DATABASE_URL=postgres://… node scripts/restore-check.js <dump-file>');
+    console.error('       node scripts/restore-check.js --latest');
     process.exit(1);
   }
   const scratchName = 'pivit_restore_' + Date.now().toString(36);
@@ -124,8 +158,9 @@ async function main() {
 
 if (require.main === module) {
   main().catch((err) => {
-    console.error(err.message || err);
-    process.exit(1);
+    const { redactSecrets, secretsFromEnv } = require('../src/r2-backup');
+    console.error(redactSecrets(err.message || String(err), secretsFromEnv(process.env)));
+    process.exit(err.exitCode || 1);
   });
 }
 
