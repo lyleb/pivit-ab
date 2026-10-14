@@ -360,6 +360,11 @@
         <p class="hint" style="margin-top:0;">A client asked you to look at a test. You decide whether to stop. Marking it seen does not stop the test or reveal a result.</p>
         <div id="review-requests-list"></div>
       </div>
+      <div class="card" id="owner-notices-card" hidden>
+        <h2>Notices</h2>
+        <p class="hint" style="margin-top:0;">Shown here when an email was not sent. Dismiss a notice once you have seen it.</p>
+        <div id="owner-notices-list"></div>
+      </div>
       <div class="page-head">
         <div>
           <h1>Experiments</h1>
@@ -1302,6 +1307,7 @@ async function loadExperimentList() {
     document.getElementById('exp-list-body').innerHTML = '';
     renderStatusPage();
     loadReviewRequests();
+    loadOwnerNotices();
     return;
   }
   msgEl.textContent = '';
@@ -1322,6 +1328,7 @@ async function loadExperimentList() {
   fillSignals(experiments);
   renderStatusPage();
   loadReviewRequests();
+  loadOwnerNotices();
 }
 
 function fillSignals(experiments) {
@@ -1348,6 +1355,38 @@ async function loadReviewRequests() {
       <button type="button" class="btn-ghost" data-review-seen="${row.id}">Seen</button>
     </div>`).join('');
 }
+
+async function loadOwnerNotices() {
+  const card = document.getElementById('owner-notices-card');
+  const list = document.getElementById('owner-notices-list');
+  if (!card || !list) return;
+  const result = await callApi('/api/notices', { headers: authHeaders() });
+  if (!result.ok || !result.data || !result.data.notices || !result.data.notices.length) {
+    card.hidden = true;
+    list.innerHTML = '';
+    return;
+  }
+  card.hidden = false;
+  list.innerHTML = result.data.notices.map((row) => `<div class="activity-row">
+      <span><strong>${UI.escapeHtml(row.title || 'Notice')}</strong> ${UI.escapeHtml(row.body || '')}<span class="hint"> · ${UI.escapeHtml(row.created_label || '')}</span></span>
+      <button type="button" class="btn-ghost" data-notice-read="${row.id}">Dismiss</button>
+    </div>`).join('');
+}
+
+document.getElementById('owner-notices-list').addEventListener('click', async (event) => {
+  const seen = event.target.closest('[data-notice-read]');
+  if (!seen) return;
+  seen.disabled = true;
+  const result = await callApi(`/api/notices/${seen.dataset.noticeRead}/read`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  if (!result.ok) {
+    seen.disabled = false;
+    return;
+  }
+  loadOwnerNotices();
+});
 
 document.getElementById('review-requests-list').addEventListener('click', async (event) => {
   const open = event.target.closest('[data-open]');
@@ -2239,6 +2278,45 @@ document.getElementById('page-detail').addEventListener('click', async (e) => {
   }
   if (action === 'refresh-results') loadResults();
   if (action === 'trend') setTrendMode(btn.dataset.mode);
+  if (action === 'conclusion-generate') {
+    btn.disabled = true;
+    const generated = await callApi(`/api/experiments/${currentDetail.id}/conclusion`, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    btn.disabled = false;
+    if (!generated.ok) {
+      const msg = document.getElementById('conclusion-msg');
+      if (msg) msg.textContent = generated.message;
+      else detailError(generated.message);
+      return;
+    }
+    await loadConclusionCard(currentDetail.id);
+    return;
+  }
+  if (action === 'conclusion-release') {
+    btn.disabled = true;
+    const released = await callApi(`/api/experiments/${currentDetail.id}/conclusion/release`, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    btn.disabled = false;
+    if (!released.ok) {
+      const msg = document.getElementById('conclusion-msg');
+      if (msg) msg.textContent = released.message;
+      else detailError(released.message);
+      return;
+    }
+    await loadConclusionCard(currentDetail.id);
+    return;
+  }
+  if (action === 'conclusion-download') {
+    startCsvDownload(`/api/experiments/${currentDetail.id}/conclusion.pdf`);
+    return;
+  }
+  if (action === 'conclusion-approval') {
+    startCsvDownload(`/api/experiments/${currentDetail.id}/approval.pdf`);
+  }
 });
 
 document.getElementById('page-detail').addEventListener('change', (e) => {
@@ -2716,6 +2794,52 @@ function renderVerdict(verdict) {
   mount.innerHTML = cards + details;
 }
 
+async function loadConclusionCard(expId) {
+  const panel = document.getElementById('plan-panel');
+  if (!panel || !currentDetail || currentDetail.id !== expId) return;
+  const existing = document.getElementById('conclusion-card');
+  if (existing) existing.remove();
+  const result = await callApi(`/api/experiments/${expId}/conclusion`, { headers: authHeaders() });
+  if (!currentDetail || currentDetail.id !== expId) return;
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.id = 'conclusion-card';
+  if (!result.ok) {
+    card.innerHTML = `<h2>Conclusion PDF</h2><p class="hint">${UI.escapeHtml(result.message)}</p>`;
+    panel.appendChild(card);
+    return;
+  }
+  const data = result.data || {};
+  const report = data.report;
+  let body = '';
+  if (!report && !data.available) {
+    body = `<p>${UI.escapeHtml(data.unavailable_reason || 'No stored result yet.')}</p>`;
+  } else if (!report) {
+    body = `<p>Generate a conclusion from the stored result. The figures are not recalculated. Clients cannot see a draft. Release it when you are happy for them to read it.</p>
+      <div class="inline-actions"><button type="button" data-action="conclusion-generate">Generate conclusion</button></div>
+      <p id="conclusion-msg" class="hint"></p>`;
+  } else if (report.status === 'draft') {
+    body = `<p>Draft. Only you can see this. Clients will not see it until you release it.</p>
+      <div class="inline-actions">
+        <button type="button" class="btn-ghost" data-action="conclusion-download">Download PDF</button>
+        <button type="button" data-action="conclusion-release">Release to client</button>
+        <button type="button" class="btn-ghost" data-action="conclusion-generate">Generate again</button>
+      </div>
+      <p id="conclusion-msg" class="hint"></p>`;
+  } else {
+    const approval = data.approval
+      ? `<p>${UI.escapeHtml(data.approval.approver_name)} approved it on ${UI.escapeHtml(data.approval.approved_label)}.</p>
+         <p><button type="button" class="btn-ghost" data-action="conclusion-approval">Download approval record</button></p>`
+      : '<p class="hint">Released. The client can download it and approve it with a click.</p>';
+    const when = report.released_label ? ` on ${UI.escapeHtml(report.released_label)}` : '';
+    body = `<p>Released${when}. Clients can download it.</p>
+      ${approval}
+      <div class="inline-actions"><button type="button" class="btn-ghost" data-action="conclusion-download">Download PDF</button></div>`;
+  }
+  card.innerHTML = `<h2>Conclusion PDF</h2>${body}`;
+  panel.appendChild(card);
+}
+
 async function loadOwnerSnapshotNote(expId) {
   const result = await callApi(`/api/experiments/${expId}/snapshot-note`, { headers: authHeaders() });
   if (!currentDetail || currentDetail.id !== expId) return;
@@ -2788,6 +2912,7 @@ async function loadResults() {
   if (reading && (reading.mode === 'verdict' || reading.mode === 'data_problem')) {
     const verdictResult = await callApi(withTestQuery(`/api/results/${expId}/verdict`), { headers: authHeaders() });
     if (verdictResult.ok) renderVerdict(verdictResult.data);
+    await loadConclusionCard(expId);
   }
   if (UI.resultsGated(status, visitors)) {
     const testVisitors = result.data.test_traffic ? Number(result.data.test_traffic.visitors) || 0 : 0;

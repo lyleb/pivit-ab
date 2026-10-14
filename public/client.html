@@ -430,6 +430,7 @@ function renderConcluded(detail) {
             <tbody>${rows}</tbody>
           </table>
         </div>
+        ${conclusionBox(detail)}
         <div class="panel">
           <h2>Review</h2>
           ${reviewBox(detail.review, 'concluded')}
@@ -442,6 +443,50 @@ function renderConcluded(detail) {
         </div>
       </div>
     </div>`;
+}
+
+function conclusionBox(detail) {
+  const conclusion = detail && detail.conclusion;
+  if (!conclusion || !conclusion.released) return '';
+  const id = detail.experiment.id;
+  const approval = conclusion.approval;
+  const approved = approval
+    ? `<p>You approved this on ${UI.escapeHtml(approval.approved_label || '')}.</p>
+       <p><a href="/api/client/experiments/${UI.escapeHtml(id)}/approval.pdf">Download the approval record (PDF)</a></p>`
+    : `<p>Approve this conclusion. Your name and the time are recorded.</p>
+       <button type="button" id="approve-btn">Approve</button>
+       <p id="approve-msg" class="muted"></p>`;
+  return `<div class="panel">
+      <h2>Conclusion</h2>
+      <p>The person who runs your tests has released this conclusion.</p>
+      <p><a href="/api/client/experiments/${UI.escapeHtml(id)}/conclusion.pdf">Download the conclusion (PDF)</a></p>
+      ${approved}
+    </div>`;
+}
+
+function bindApprove(experimentId) {
+  const button = document.getElementById('approve-btn');
+  if (!button) return;
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    const msg = document.getElementById('approve-msg');
+    if (msg) msg.textContent = 'Recording…';
+    const result = await callApi(`/api/client/experiments/${experimentId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!result.ok) {
+      button.disabled = false;
+      if (msg) msg.textContent = result.message;
+      return;
+    }
+    const when = (result.data && result.data.approved_label) || '';
+    const done = document.createElement('div');
+    done.innerHTML = `<p>You approved this on ${UI.escapeHtml(when)}.</p>
+      <p><a href="/api/client/experiments/${UI.escapeHtml(experimentId)}/approval.pdf">Download the approval record (PDF)</a></p>`;
+    button.replaceWith(done);
+    if (msg) msg.remove();
+  });
 }
 
 function bindReview(experimentId) {
@@ -489,6 +534,7 @@ async function openTest(id) {
   if (detail.mode === 'concluded') {
     mount.innerHTML = renderConcluded(detail);
     bindReview(id);
+    bindApprove(id);
     return;
   }
   if (detail.mode === 'draft') {
