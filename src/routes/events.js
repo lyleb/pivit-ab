@@ -20,14 +20,27 @@ function warnDrop(experimentId, host, reason) {
 }
 
 // POST /api/event
-// body: { experiment_id, variant_id, visitor_id, event_type, goal_id?, is_test? }
+// body: { experiment_id, variant_id, visitor_id, event_type, goal_id?, is_test?, change_applied? }
 //
 // is_test is optional. Omit it for a real visitor (the same body as before).
 // Send is_test: true, header X-Pivit-Test: 1, or ?pivit_qa=1 to mark the row.
 // A visitor id starting with v_pt is always test traffic. The snippet sends
 // the JSON field, not the header: sendBeacon cannot set headers.
+//
+// change_applied is optional and only stored on a view. true means each
+// selector was on the page and the change ran. false means it was not.
+// Omit it when the variant has nothing to apply. Clicks and conversions
+// ignore the field. It uses this same request, so it does not add a beacon
+// or a separate rate-limit bucket. Test traffic is stored and left out of
+// the health percentage unless the owner includes it.
+
+function storedChangeApplied(eventType, value) {
+  if (eventType !== 'view') return null;
+  if (value === true || value === false) return value;
+  return null;
+}
 router.post('/', async (req, res) => {
-  const { experiment_id, variant_id, visitor_id, event_type, goal_id } = req.body;
+  const { experiment_id, variant_id, visitor_id, event_type, goal_id, change_applied } = req.body;
 
   if (!experiment_id || !variant_id || !visitor_id || !event_type) {
     return res.status(400).json({ error: 'experiment_id, variant_id, visitor_id, event_type are required' });
@@ -100,9 +113,17 @@ router.post('/', async (req, res) => {
 
     const isTest = requestIsTestTraffic(req);
     await db.query(
-      `INSERT INTO events (experiment_id, variant_id, visitor_id, event_type, goal_id, is_test)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [experiment_id, variant_id, visitor_id, event_type, goal_id ?? null, isTest]
+      `INSERT INTO events (experiment_id, variant_id, visitor_id, event_type, goal_id, is_test, change_applied)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        experiment_id,
+        variant_id,
+        visitor_id,
+        event_type,
+        goal_id ?? null,
+        isTest,
+        storedChangeApplied(event_type, change_applied),
+      ]
     );
     // 204 keeps the beacon call cheap — no body needed on the client.
     res.status(204).end();

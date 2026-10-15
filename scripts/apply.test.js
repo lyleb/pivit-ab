@@ -357,4 +357,32 @@ function styleTags(doc) {
   assert.ok(css.indexOf('color:red !important') === -1);
 }
 
+// A view is applied only when every element selector is on the page.
+// Stylesheet-only changes do not count. A miss on one change fails the set.
+{
+  const doc = createDocument();
+  addBadge(doc, 'NEW');
+  const applier = applierFor(doc);
+  const hit = applier.applyAll([{ selector: 'span.badge', type: 'text', value: 'Sale' }], 'hit');
+  assert.strictEqual(hit.ok, true);
+  assert.strictEqual(hit.checked, 1);
+  const miss = applier.applyAll([{ selector: 'span.missing', type: 'text', value: 'Sale' }], 'miss');
+  assert.strictEqual(miss.ok, false);
+  const none = applier.applyAll([], 'none');
+  assert.strictEqual(none.ok, null);
+  const cssOnly = applier.applyAll([{ type: 'stylesheet', selector: '', value: '.x{color:red}' }], 'css');
+  assert.strictEqual(cssOnly.ok, null);
+  const styled = applier.applyAll([{ selector: 'span.badge', type: 'hide' }], 'hide');
+  assert.strictEqual(styled.ok, true);
+  const hiddenMiss = applier.applyAll([{ selector: 'span.missing', type: 'hide' }], 'hidemiss');
+  assert.strictEqual(hiddenMiss.ok, false);
+  const mixed = applier.applyAll([
+    { selector: 'span.badge', type: 'text', value: 'A' },
+    { selector: 'span.missing', type: 'text', value: 'B' },
+  ], 'mix2');
+  assert.strictEqual(mixed.ok, false);
+  assert.strictEqual(mixed.checked, 2);
+  assert.strictEqual(mixed.applied, 1);
+}
+
 console.log('apply.test.js ok');

@@ -35,6 +35,7 @@
 
   const Z = 2147483647; // max safe z-index — stays above whatever the host page uses
   const COLORS = { indigo: '#5635FB', indigoDark: '#4527d6', mint: '#02DEB5', ink: '#131723', danger: '#d64545', border: '#e6e7f0' };
+  const SELECTOR_MISSING = "This selector isn't on the current page.";
   let experimentId = '';
 
   let allChanges = [];       // the full working set — both already-saved and new-this-session
@@ -277,7 +278,7 @@
 
   // --- UI: a single floating root element, all children styled inline to stay
   // insulated from whatever CSS the host page already has. ---
-  let root, toolbar, statusEl, countEl, actionPopup, panelEl, changesListEl, goalsListEl, customCssBtn;
+  let root, toolbar, statusEl, countEl, actionPopup, panelEl, changesListEl, goalsListEl, customCssBtn, selectorWarnEl;
   let editorApplier = null;
   let scopePanelEl = null;
   let similarHits = [];
@@ -417,6 +418,16 @@
       toolbar.appendChild(live);
     }
 
+    selectorWarnEl = document.createElement('div');
+    styleReset(selectorWarnEl);
+    selectorWarnEl.id = 'pivit-selector-warning';
+    selectorWarnEl.setAttribute('role', 'status');
+    Object.assign(selectorWarnEl.style, {
+      display: 'none', background: '#fff6e8', color: '#8a5a00', borderRadius: '8px', padding: '8px 10px',
+      fontSize: '12px', lineHeight: '1.4', marginBottom: '10px',
+    });
+    toolbar.appendChild(selectorWarnEl);
+
     statusEl = document.createElement('div');
     styleReset(statusEl);
     statusEl.style.color = '#6b6f83';
@@ -552,6 +563,16 @@
       desc.textContent = describeChange(change);
       row.appendChild(desc);
 
+      if (change && selectorMissing(change.selector)) {
+        const warn = document.createElement('div');
+        styleReset(warn);
+        Object.assign(warn.style, {
+          color: '#8a5a00', fontSize: '12px', lineHeight: '1.4', marginBottom: '6px',
+        });
+        warn.textContent = SELECTOR_MISSING;
+        row.appendChild(warn);
+      }
+
       const btnRow = document.createElement('div');
       styleReset(btnRow);
       btnRow.style.display = 'flex';
@@ -657,8 +678,24 @@
   function refreshToolbarState() {
     countEl.textContent = isDirty() ? '● Unsaved changes' : '✓ All changes saved';
     if (customCssBtn) customCssBtn.textContent = variantStylesheetIndex() === -1 ? 'Custom CSS' : 'Edit custom CSS';
+    refreshSelectorWarning();
     renderChangesList();
     renderGoalsList();
+  }
+
+  function selectorMissing(selector) {
+    const sel = String(selector || '').trim();
+    if (!sel) return false;
+    const found = matchesFor(sel);
+    if (!found.valid) return true;
+    return found.nodes.length === 0;
+  }
+
+  function refreshSelectorWarning() {
+    if (!selectorWarnEl) return;
+    const missing = (allChanges || []).some((change) => change && selectorMissing(change.selector));
+    selectorWarnEl.style.display = missing ? 'block' : 'none';
+    selectorWarnEl.textContent = missing ? SELECTOR_MISSING : '';
   }
 
   async function openPreview(width, height) {
@@ -864,6 +901,7 @@
         count.textContent = 'Not a valid selector';
         count.style.color = COLORS.danger;
         note.textContent = 'That selector isn\'t valid. Check the brackets and colons, then try again.';
+        note.style.color = COLORS.danger;
         applyAllBtn.disabled = true;
         applyAllBtn.style.opacity = '0.45';
         return;
@@ -873,10 +911,20 @@
       count.style.color = COLORS.indigo;
       applyAllBtn.disabled = false;
       applyAllBtn.style.opacity = '1';
-      if (found.nodes.length === 0) note.textContent = 'Nothing matches yet. You can still use it if those elements load later.';
-      else if (found.nodes.length > 200) note.textContent = 'Highlighting the first 200. Narrow the selector if some of them should stay as they are.';
-      else if (found.nodes.length > 25) note.textContent = 'That\'s a lot of elements. Narrow the selector if some of them should stay as they are.';
-      else note.textContent = 'Highlighted on the page.';
+      if (found.nodes.length === 0) {
+        note.textContent = SELECTOR_MISSING + ' You can still use it if those elements load later.';
+        note.style.color = '#8a5a00';
+      }
+      else if (found.nodes.length > 200) {
+        note.textContent = 'Highlighting the first 200. Narrow the selector if some of them should stay as they are.';
+        note.style.color = '#6b6f83';
+      } else if (found.nodes.length > 25) {
+        note.textContent = 'That\'s a lot of elements. Narrow the selector if some of them should stay as they are.';
+        note.style.color = '#6b6f83';
+      } else {
+        note.textContent = 'Highlighted on the page.';
+        note.style.color = '#6b6f83';
+      }
     }
 
     const row = document.createElement('div');
@@ -974,6 +1022,16 @@
     });
     cap.textContent = selector;
     actionPopup.appendChild(cap);
+
+    if (selectorMissing(selector)) {
+      const warn = document.createElement('div');
+      styleReset(warn);
+      Object.assign(warn.style, {
+        color: '#8a5a00', fontSize: '12px', lineHeight: '1.4', padding: '0 8px 8px',
+      });
+      warn.textContent = SELECTOR_MISSING;
+      actionPopup.appendChild(warn);
+    }
 
     const actions = [
       ['✎ Edit element', () => openEditElementPanel(el, selector)],

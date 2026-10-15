@@ -259,6 +259,18 @@
     return `<h2>Health</h2><div class="health-grid">${cards}</div>`;
   }
 
+  // Shown in results when the health panel is hidden (a paused or archived test).
+  // Running tests already show the same sentences on the health card.
+  function renderChangeApplied(rows) {
+    const lines = (rows || []).filter((row) => row && row.rate != null && row.text);
+    if (!lines.length) return '';
+    const body = lines.map((row) => {
+      const klass = row.state === 'amber' ? 'warn-text' : 'hint';
+      return `<p class="${klass}">${escapeHtml(row.text)}</p>`;
+    }).join('');
+    return `<div class="card"><h2>Changes</h2>${body}</div>`;
+  }
+
   function formatCreated(iso) {
     const date = new Date(iso);
     if (Number.isNaN(date.getTime())) return '';
@@ -361,6 +373,7 @@
     canAddVariant,
     variantCapMessage,
     renderHealth,
+    renderChangeApplied,
     formatCreated,
     displayOrigin,
     snippetTag,

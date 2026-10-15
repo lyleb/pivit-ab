@@ -19,6 +19,13 @@
  * No custom header is sent — sendBeacon cannot set one. Visitor ids starting
  * with v_pt are test traffic even without the flag.
  *
+ * Change applied: a view beacon may include change_applied true or false.
+ * True means every element selector was on the page and the change ran.
+ * The field is left off when the variant has no element change to check,
+ * and it is left off clicks and conversions. It rides on the view beacon,
+ * so it does not add a request. Test visits still send it; the health
+ * percentage leaves those visits out.
+ *
  * Preview mode: the dashboard opens ?ab_preview=<variant_id>&ab_preview_token=<token>.
  * The token is signed and expires. It can show a draft, paused or disabled
  * variant and never logs a view or conversion. An archived test is not shown:
@@ -100,7 +107,7 @@
   let qaOn = false;
   const ASSIGNMENT_PREFIX = '_ab_assign_';
   // Bump when editor.js changes so a cached copy cannot keep the old variant.
-  const EDITOR_VERSION = '20261015';
+  const EDITOR_VERSION = '20261015b';
 
   // The first query value is the leftover. The last ab_edit or ab_preview is
   // the link the owner just opened.
@@ -257,14 +264,15 @@
   // structural types are applied to matches now and to elements added later.
   let pageApplier = null;
   function applyVariantChanges(variant) {
-    if (!variant) return;
+    if (!variant) return null;
     if (!pageApplier) pageApplier = api.createApplier(document);
-    pageApplier.applyAll(variant.changes || [], variant.id || 'variant');
+    return pageApplier.applyAll(variant.changes || [], variant.id || 'variant');
   }
 
-  function sendEvent(experimentId, variantId, visitorId, eventType, goalId) {
+  function sendEvent(experimentId, variantId, visitorId, eventType, goalId, changeApplied) {
     // is_test is a JSON field. sendBeacon cannot set X-Pivit-Test, and the
     // field is omitted for real visitors so their body stays the same.
+    // change_applied is only set for a view that had element changes to check.
     const fields = {
       experiment_id: experimentId,
       variant_id: variantId,
@@ -272,6 +280,9 @@
       event_type: eventType,
       goal_id: goalId || null,
     };
+    if (eventType === 'view' && (changeApplied === true || changeApplied === false)) {
+      fields.change_applied = changeApplied;
+    }
     if (SITE_KEY) fields.site = SITE_KEY;
     const body = JSON.stringify(api.eventBody(fields, qaOn));
     // sendBeacon is fire-and-forget and survives page navigation, ideal for tracking calls.
@@ -481,8 +492,9 @@
         try { already = localStorage.getItem(ASSIGNMENT_PREFIX + experiment.id); } catch (e) { already = null; }
         const variant = pickVariant(experiment, visitorId);
         if (!already) enrolledThisView[experiment.id] = 1;
-        applyVariantChanges(variant);
-        sendEvent(experiment.id, variant.id, visitorId, 'view');
+        const outcome = applyVariantChanges(variant);
+        const changeApplied = outcome && (outcome.ok === true || outcome.ok === false) ? outcome.ok : undefined;
+        sendEvent(experiment.id, variant.id, visitorId, 'view', null, changeApplied);
         wireConversionTracking(experiment.id, variant.id, visitorId, goalsFor(experiment, variant));
       });
 
@@ -719,6 +731,9 @@
       event_type: fields.event_type,
       goal_id: fields.goal_id || null,
     };
+    if (fields.event_type === 'view' && (fields.change_applied === true || fields.change_applied === false)) {
+      body.change_applied = fields.change_applied;
+    }
     const id = fields.visitor_id;
     if (flagged || (typeof id === 'string' && id.indexOf('v_pt') === 0)) body.is_test = true;
     if (fields.site && /^site_[a-f0-9]{16,80}$/i.test(fields.site)) body.site = fields.site;
@@ -1069,9 +1084,19 @@
       } catch (err) {
         if (isPositionalSelector(change.selector)) throw err;
         console.warn('[ab] selector failed:', change.selector, err);
-        return;
+        return 0;
       }
       list.forEach((el) => applyToElement(el, change, key, track));
+      return list.length;
+    }
+
+    function matchCount(selector) {
+      try {
+        const list = doc.querySelectorAll(selector);
+        return list ? list.length : 0;
+      } catch (err) {
+        return 0;
+      }
     }
 
     function processNode(node) {
@@ -1119,34 +1144,45 @@
     }
 
     function applyOne(change, key) {
-      if (!change || seen.has(key)) return;
+      if (!change || seen.has(key)) return { checked: false, applied: false };
       seen.add(key);
       if (change.type === 'stylesheet') {
         // Free-form CSS, including the variant's custom CSS block. Injected
         // only because this variant is active — other variants never reach here.
+        // No element lookup, so it is not part of the change-applied check.
         inject(change.value || '', key);
-        return;
+        return { checked: false, applied: false };
       }
       const css = cssForChange(change);
       if (css) {
         inject(css, key);
-        return;
+        return { checked: true, applied: matchCount(change.selector) > 0 };
       }
       if (!change.selector) {
         if (change.type && change.type !== 'stylesheet') console.warn('[ab] unknown change type:', change.type);
-        return;
+        return { checked: false, applied: false };
       }
       const track = shouldWatch(change);
-      applyDomQuery(change, key, track);
+      const found = applyDomQuery(change, key, track);
       if (track) {
         watched.push({ change, key });
         ensureObserver();
       }
+      return { checked: true, applied: found > 0 };
     }
 
     function applyAll(changes, prefix) {
       const p = prefix || 'c';
-      (changes || []).forEach((change, i) => applyOne(change, p + ':' + i));
+      let checked = 0;
+      let hit = 0;
+      (changes || []).forEach((change, i) => {
+        const result = applyOne(change, p + ':' + i);
+        if (result && result.checked) {
+          checked += 1;
+          if (result.applied) hit += 1;
+        }
+      });
+      return { checked, applied: hit, ok: checked > 0 ? hit === checked : null };
     }
 
     function disconnect() {

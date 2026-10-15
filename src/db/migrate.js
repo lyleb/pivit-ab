@@ -16,6 +16,7 @@ const { applySessions } = require('./sessions');
 const { applyRateLimits } = require('./rate-limits');
 const { applyFirstRun } = require('./first-run');
 const { applyConclusion } = require('./conclusion');
+const { applyChangeApplied } = require('./change-applied');
 
 const LOCK_KEY = 814021;
 
@@ -43,6 +44,8 @@ const VERSIONS = [
   { version: '009', name: 'first-run', run: applyFirstRun },
   // Conclusion PDFs and click-to-approve records stay out of schema.sql too.
   { version: '010', name: 'conclusion', run: applyConclusion },
+  // Whether a view's element changes were on the page. Stays out of schema.sql.
+  { version: '011', name: 'change-applied', run: applyChangeApplied },
 ];
 
 async function ensureMigrationsTable(queryable) {

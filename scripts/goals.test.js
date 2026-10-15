@@ -237,7 +237,9 @@ const quiet = health.buildHealth({
   syntheticVisitors: 0,
 });
 assert.strictEqual(quiet.show, true);
-assert.deepStrictEqual(quiet.checks.map((check) => check.state), ['green', 'green', 'green', 'green']);
+assert.deepStrictEqual(quiet.checks.map((check) => check.state), ['green', 'green', 'green', 'green', 'green']);
+assert.strictEqual(quiet.checks[4].title, 'Changes');
+assert.strictEqual(quiet.checks[4].detail, 'No element changes to check.');
 
 const early = health.buildHealth({
   status: 'running',
@@ -271,7 +273,7 @@ const broken = health.buildHealth({
   today: '2026-10-08',
   syntheticVisitors: 0,
 });
-assert.deepStrictEqual(broken.checks.map((check) => check.state), ['red', 'red', 'red', 'green']);
+assert.deepStrictEqual(broken.checks.map((check) => check.state), ['red', 'red', 'red', 'green', 'green']);
 assert.strictEqual(health.buildHealth({ status: 'paused' }).show, false);
 
 // Drop counter fails open.

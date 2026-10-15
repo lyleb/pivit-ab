@@ -134,18 +134,97 @@ function syntheticCheck(count, excluded, removed) {
   };
 }
 
-function buildHealth({ status, srm, totalVisitors, scope, goalCount, drops, today, syntheticVisitors, testExcluded, removedVisitors } = {}) {
+// Under this, the health card warns. 90% and above is treated as applied.
+const CHANGE_APPLIED_WARN_BELOW = 90;
+
+function changeList(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+      return [];
+    }
+  }
+  return [];
+}
+
+// Stylesheet-only changes inject CSS and do not look up an element.
+// Everything else with a selector is what the snippet reports.
+function tracksElementChange(changes) {
+  return changeList(changes).some((change) => {
+    if (!change || change.type === 'stylesheet') return false;
+    return String(change.selector || '').trim() !== '';
+  });
+}
+
+function changeAppliedLine(row) {
+  const name = String((row && (row.variant_name || row.name)) || 'Variant');
+  const reported = Number(row && row.reported_views) || 0;
+  const applied = Math.min(Number(row && row.applied_views) || 0, reported);
+  const base = {
+    variant_id: row && row.variant_id,
+    variant_name: name,
+    reported_views: reported,
+    applied_views: applied,
+  };
+  if (reported <= 0) {
+    const seen = Number(row && row.views) || 0;
+    return Object.assign(base, {
+      rate: null,
+      state: 'amber',
+      text: seen > 0
+        ? `${name}: these views have not reported whether the change was applied.`
+        : `${name}: not enough views yet to check whether the change was applied.`,
+    });
+  }
+  const rate = Math.round((applied / reported) * 100);
+  const low = rate < CHANGE_APPLIED_WARN_BELOW;
+  const phrase = `Change applied on ${rate}% of views`;
+  return Object.assign(base, {
+    rate,
+    state: low ? 'amber' : 'green',
+    text: low
+      ? `${name}: ${phrase}. The selector was missing on many of these views.`
+      : `${name}: ${phrase}.`,
+  });
+}
+
+function summariseChangeApplied(rows) {
+  return (rows || []).filter((row) => tracksElementChange(row && row.changes)).map((row) => changeAppliedLine(row));
+}
+
+function changesCard(lines) {
+  if (!lines || !lines.length) {
+    return {
+      state: 'green',
+      title: 'Changes',
+      detail: 'No element changes to check.',
+    };
+  }
+  return {
+    state: lines.some((line) => line.state === 'amber') ? 'amber' : 'green',
+    title: 'Changes',
+    detail: lines.map((line) => line.text).join('\n'),
+  };
+}
+
+function buildHealth({ status, srm, totalVisitors, scope, goalCount, drops, today, syntheticVisitors, testExcluded, removedVisitors, changeApplied } = {}) {
   const heldOut = testExcluded !== false;
+  const changeLines = summariseChangeApplied(changeApplied);
   const checks = [
     sampleRatioCheck(srm, totalVisitors),
     goalsCheck({ scope, goalCount }),
     dropsCheck(drops, today),
     syntheticCheck(syntheticVisitors, heldOut, removedVisitors),
+    changesCard(changeLines),
   ];
   return {
     show: status === 'running',
     status: status || '',
     checks,
+    change_applied: changeLines,
     test_traffic: {
       visitors: Number(syntheticVisitors) || 0,
       excluded: heldOut,
@@ -156,9 +235,13 @@ function buildHealth({ status, srm, totalVisitors, scope, goalCount, drops, toda
 
 module.exports = {
   MIN_SPLIT_VISITORS,
+  CHANGE_APPLIED_WARN_BELOW,
   sampleRatioCheck,
   goalsCheck,
   dropsCheck,
   syntheticCheck,
+  tracksElementChange,
+  changeAppliedLine,
+  summariseChangeApplied,
   buildHealth,
 };
