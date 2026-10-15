@@ -24,7 +24,9 @@ function staticChecks() {
   assert.strictEqual(landingTarget({ role: 'client' }), '/client.html');
 
   const off = landingHtml();
+  const hearBack = "You'll hear back by email, with an invite code if it's a good fit.";
   assert.ok(off.includes('Request access: <a href="mailto:info@pivitlab.com">email info@pivitlab.com</a>'));
+  assert.ok(off.includes(hearBack));
   assert.ok(!off.includes('id="req-form"'));
   assert.ok(off.includes('A/B testing without the enterprise baggage'));
   assert.ok(!/Pivitlab|PivitLab|PIVITLAB/.test(off.replace(/pivitlab-logo|og-pivitlab|pivitlab-icon/g, '')));
@@ -35,7 +37,13 @@ function staticChecks() {
   assert.ok(on.includes('id="req-form"'));
   assert.ok(on.includes('name="pivit_hp"'));
   assert.ok(on.includes('href="/privacy.html"'));
+  assert.ok(on.includes(hearBack));
   assert.ok(!on.includes('Request access: <a href="mailto:info@pivitlab.com">email info@pivitlab.com</a>'));
+  const source = read('src/pages/landing.html');
+  const offBlock = source.slice(source.indexOf('<!--ACCESS_OFF-->'), source.indexOf('<!--ACCESS_ON-->'));
+  const onBlock = source.slice(source.indexOf('<!--ACCESS_ON-->'), source.indexOf('<!--ACCESS_END-->'));
+  assert.ok(offBlock.includes(hearBack));
+  assert.ok(onBlock.includes(hearBack));
   process.env.ACCESS_REQUESTS_ENABLED = 'yes';
   assert.strictEqual(accessRequestsEnabled(), true);
   process.env.ACCESS_REQUESTS_ENABLED = 'off';

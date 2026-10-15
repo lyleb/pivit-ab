@@ -27,12 +27,8 @@
     background: rgba(86,53,251,0.16); color: #c4b6ff; font-size: 0.75em; font-weight: 700;
     letter-spacing: 0.04em; text-transform: uppercase;
   }
-  button.mode-switch {
-    display: block; width: 100%; text-align: center; margin-top: 18px; padding: 8px 0;
-    background: none; color: var(--text-muted); border: none; cursor: pointer;
-    font-weight: 600; font-size: 0.85em; text-decoration: underline; min-height: 44px;
-  }
-  button.mode-switch:hover { background: none; color: var(--indigo); }
+  .client-hint { text-align: center; margin: 0 0 14px; }
+  .journey-link { text-align: center; margin: 16px 0 0; }
   .forgot-link {
     display: block; text-align: center; margin-top: 14px; font-size: 0.82em;
     color: var(--text-muted); cursor: pointer; text-decoration: underline;
@@ -44,6 +40,22 @@
   }
   #client-form, #email-form { display: none; }
   .login-card a { color: var(--mint-dark); }
+  .login-card a.invite-action {
+    display: flex; align-items: center; justify-content: center; width: 100%;
+    box-sizing: border-box; min-height: 44px; margin-top: 12px; padding: 10px 14px;
+    border-radius: 8px; border: 1px solid #3a4054; background: transparent;
+    color: var(--ink); font-weight: 600; font-size: 0.92em; line-height: 1.35;
+    text-align: center; text-decoration: none;
+  }
+  .login-card a.invite-action:hover { border-color: var(--indigo); background: rgba(86,53,251,0.12); color: #fff; }
+  .login-card a.invite-action:focus-visible { outline: 2px solid var(--indigo); outline-offset: 2px; }
+  .login-card .journey-link a {
+    color: var(--text-muted); font-size: 0.82em; font-weight: 500;
+    text-decoration: underline; text-underline-offset: 3px;
+    display: inline-block; padding: 10px 8px; min-height: 44px; line-height: 1.4;
+  }
+  .login-card .journey-link a:hover { color: var(--mint-dark); }
+  .login-card .journey-link a:focus-visible { outline: 2px solid var(--indigo); outline-offset: 2px; }
   @media (max-width: 640px) {
     .login-card { width: 100%; padding: 28px 20px; }
   }
@@ -60,10 +72,11 @@
     <label for="email">Work email</label>
     <input id="email" type="email" autocomplete="email" placeholder="you@company.com" required>
     <button id="email-btn" type="submit">Email me a sign-in link</button>
-    <p class="hint" style="text-align:center;margin-top:14px;">Got an invite code from pivitlab? <a href="/signup.html">Create your account</a></p>
+    <a class="invite-action" href="/signup.html">Got an invite code from pivitlab?<br>Create your account</a>
   </form>
 
   <form id="client-form">
+    <p class="hint client-hint">Use the username and password your agency gave you.</p>
     <label for="username">Username</label>
     <input id="username" type="text" placeholder="Your username" required>
     <label for="client-password">Password</label>
@@ -75,8 +88,8 @@
 
   <div id="turnstile-slot"></div>
   <p id="login-error" class="error-msg"></p>
-  <button type="button" class="mode-switch" id="show-email">Email sign-in</button>
-  <button type="button" class="mode-switch" id="show-client">Client login</button>
+  <p class="journey-link" id="show-client"><a href="/login.html?role=client">Viewing results for a company? Client login →</a></p>
+  <p class="journey-link" id="show-email" hidden><a href="/login.html">Email sign-in</a></p>
 </div>
 
 <script src="/turnstile-widget.js"></script>
@@ -180,8 +193,14 @@ document.getElementById('client-form').addEventListener('submit', (e) => {
   }, btn);
 });
 
-document.getElementById('show-email').addEventListener('click', () => applyMode('email', true));
-document.getElementById('show-client').addEventListener('click', () => applyMode('client', true));
+document.getElementById('show-email').addEventListener('click', (event) => {
+  event.preventDefault();
+  applyMode('email', true);
+});
+document.getElementById('show-client').addEventListener('click', (event) => {
+  event.preventDefault();
+  applyMode('client', true);
+});
 const requested = new URLSearchParams(location.search).get('role');
 applyMode(requested === 'client' ? 'client' : 'email', false);
 </script>

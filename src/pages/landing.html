@@ -199,6 +199,8 @@ section.alt{background:linear-gradient(180deg,#0f1219 0%,#0c0e14 100%)}
 .form-error{min-height:1.2em;margin:12px 0 0;color:var(--danger);font-size:.88rem;font-weight:600;text-align:center}
 .mailto-fallback{font-size:1.05rem;text-align:center;margin:8px 0}
 .mailto-fallback a{font-weight:700}
+.form-promise{margin:0 0 18px;color:#c3c6d4;font-size:.98rem;line-height:1.5;text-align:center}
+.mailto-fallback + .form-promise{margin:16px 0 4px}
 .thanks{display:none;text-align:center;padding:24px 0}
 .thanks .tick{width:52px;height:52px;border-radius:50%;margin:0 auto 16px;background:rgba(2,222,181,.14);border:1px solid rgba(2,184,149,.5);display:grid;place-items:center;color:var(--mint);font-size:1.4rem}
 .thanks h3{font-size:1.3rem;margin-bottom:8px}
@@ -497,7 +499,7 @@ footer nav{display:flex;gap:22px;flex-wrap:wrap}
       </details>
       <details>
         <summary>Why is it invite-only?</summary>
-        <p>We're in private beta and want to work closely with each new customer. Request access below and we'll be in touch with an invite code if pivitlab is a good fit for your site.</p>
+        <p>We're in private beta and want to work closely with each new customer. Request access below. You'll hear back by email, with an invite code if it's a good fit.</p>
       </details>
     </div>
   </div>
@@ -511,17 +513,19 @@ footer nav{display:flex;gap:22px;flex-wrap:wrap}
       <p class="lede">Tell us a little about you and we'll get back to you personally.</p>
       <ol>
         <li>Send us your name, email and website.</li>
-        <li>We'll take a look at your site and reply by email, with an invite code if it's a good fit.</li>
+        <li>We'll take a look at your site. You'll hear back by email, with an invite code if it's a good fit.</li>
         <li>Create your account with the code, sign in by email and set up your first test.</li>
       </ol>
     </div>
 <!--ACCESS_OFF-->
     <div class="form-card">
       <p class="mailto-fallback">Request access: <a href="mailto:info@pivitlab.com">email info@pivitlab.com</a></p>
+      <p class="form-promise">You'll hear back by email, with an invite code if it's a good fit.</p>
     </div>
 <!--ACCESS_ON-->
     <div class="form-card">
       <form id="req-form" novalidate>
+        <p class="form-promise">You'll hear back by email, with an invite code if it's a good fit.</p>
         <div class="field">
           <label for="r-name">Your name</label>
           <input id="r-name" name="name" type="text" autocomplete="name" placeholder="Sam Taylor" required maxlength="80">
@@ -546,7 +550,7 @@ footer nav{display:flex;gap:22px;flex-wrap:wrap}
       <div class="thanks" id="thanks" role="status">
         <div class="tick">✓</div>
         <h3>Thanks, we've got it.</h3>
-        <p class="muted">We'll reply by email, usually within a couple of working days.</p>
+        <p class="muted">You'll hear back by email, with an invite code if it's a good fit. That usually takes a couple of working days.</p>
       </div>
       <script src="/turnstile-widget.js"></script>
       <script>
