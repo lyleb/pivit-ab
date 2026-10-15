@@ -331,6 +331,95 @@
     return 'Contains. The test runs on any page whose address includes this text.';
   }
 
+  // Preview page vs the test's URL rule. Matching is matchPageUrl — the same
+  // function the server uses for exact, starts-with and regex targeting — so
+  // the dashboard does not grow a second matcher. Contains stays that
+  // function's substring check.
+  function previewRulePhrase(matchType) {
+    return {
+      contains: 'contains',
+      exact: 'exact',
+      starts_with: 'starts with',
+      regex: 'regular expression',
+    }[matchType] || 'contains';
+  }
+
+  function previewUrlWarning(pattern, href, matchType) {
+    const page = String(href == null ? '' : href).trim();
+    const pat = String(pattern == null ? '' : pattern).trim();
+    if (!page || !pat) return '';
+    const type = matchType || 'contains';
+    if (matchPageUrl(pat, page, type)) return '';
+    const phrase = previewRulePhrase(type);
+    return "This page doesn't match the test's URL rule (" + phrase + " '" + pat + "'), so visitors here won't see the test.";
+  }
+
+  function normaliseOrigin(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+      const withScheme = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw.replace(/^\/+/, '');
+      return new URL(withScheme).origin;
+    } catch (err) {
+      return '';
+    }
+  }
+
+  // Site domain first (allowed hosts), then an origin passed in, then the
+  // origin of an absolute pattern. A path-only rule has no origin of its own.
+  function previewSiteOrigin(pattern, options) {
+    const opts = options || {};
+    const hosts = Array.isArray(opts.allowedHosts) ? opts.allowedHosts : [];
+    for (let i = 0; i < hosts.length; i += 1) {
+      const origin = normaliseOrigin(hosts[i]);
+      if (origin) return origin;
+    }
+    const given = normaliseOrigin(opts.origin);
+    if (given) return given;
+    const pat = String(pattern || '').trim();
+    if (/^https?:\/\//i.test(pat)) return normaliseOrigin(pat);
+    return '';
+  }
+
+  function originPlusPattern(origin, pattern) {
+    if (!origin) return '';
+    const pat = String(pattern || '').trim();
+    if (!pat) return '';
+    if (/^https?:\/\//i.test(pat)) {
+      try {
+        const u = new URL(pat);
+        if (u.origin === origin) return pat;
+        return origin + u.pathname + u.search + u.hash;
+      } catch (err) {
+        return '';
+      }
+    }
+    if (pat.charAt(0) === '/') return origin + pat;
+    return origin + '/' + pat;
+  }
+
+  function siteHomepage(origin) {
+    return origin ? origin + '/' : '';
+  }
+
+  // Default preview address for a rule.
+  // Exact uses the pattern itself. Starts-with and contains use the site
+  // origin plus the pattern when that address matches the rule. Anything
+  // else, including a join that does not match, uses the site homepage.
+  function defaultPreviewPage(options) {
+    const opts = options || {};
+    const pattern = String(opts.pattern == null ? '' : opts.pattern).trim();
+    if (!pattern) return '';
+    const type = opts.matchType || 'contains';
+    if (type === 'exact') return pattern;
+    const origin = previewSiteOrigin(pattern, opts);
+    if (type === 'starts_with' || type === 'contains') {
+      const candidate = originPlusPattern(origin, pattern);
+      if (candidate && matchPageUrl(pattern, candidate, type)) return candidate;
+    }
+    return siteHomepage(origin);
+  }
+
   function testUrlGoal(match, pattern, sample) {
     const type = match || 'contains';
     if (!pattern || !String(pattern).trim()) {
@@ -364,5 +453,7 @@
     resolvePageMatch: resolvePageMatch,
     pageMatchLabel: pageMatchLabel,
     pageMatchHint: pageMatchHint,
+    previewUrlWarning: previewUrlWarning,
+    defaultPreviewPage: defaultPreviewPage,
   };
 });

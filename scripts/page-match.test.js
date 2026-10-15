@@ -87,10 +87,124 @@ const schema = fs.readFileSync(path.join(__dirname, '../src/db/schema.sql'), 'ut
 assert.ok(schema.includes("url_match_type TEXT NOT NULL DEFAULT 'contains'"));
 assert.ok(!/UPDATE\s+experiments[\s\S]{0,500}url_match_type\s*=\s*'exact'/i.test(schema));
 
+// Preview checks the page against the same matcher targeting uses.
+const previewExample = "This page doesn't match the test's URL rule (contains '/pricing'), so visitors here won't see the test.";
+assert.strictEqual(urlMatch.previewUrlWarning('/pricing', 'https://example.com/about', 'contains'), previewExample);
+assert.strictEqual(urlMatch.previewUrlWarning('/pricing', 'https://example.com/pricing', 'contains'), '');
+assert.strictEqual(urlMatch.previewUrlWarning('/pricing', 'https://example.com/pricing/extra', 'contains'), '');
+
+function assertPreviewCheck(type, pattern, page, shouldMatch) {
+  const matched = urlMatch.matchPageUrl(pattern, page, type);
+  const message = urlMatch.previewUrlWarning(pattern, page, type);
+  assert.strictEqual(matched, shouldMatch, `${type} ${pattern} ${page}`);
+  if (shouldMatch) {
+    assert.strictEqual(message, '');
+    return;
+  }
+  assert.ok(message.includes("doesn't match the test's URL rule"));
+  assert.ok(message.includes(`'${pattern}'`));
+  assert.ok(message.endsWith("so visitors here won't see the test."));
+}
+
+assertPreviewCheck('contains', '/pricing', 'https://shop.example/pricing', true);
+assertPreviewCheck('contains', '/pricing', 'https://shop.example/about', false);
+assertPreviewCheck('exact', 'https://shop.example/pricing', 'https://shop.example/pricing?utm=1', true);
+assertPreviewCheck('exact', 'https://shop.example/pricing', 'https://shop.example/pricing/extra', false);
+assertPreviewCheck('exact', '/pricing', 'https://shop.example/pricing', true);
+assertPreviewCheck('exact', '/pricing', 'https://shop.example/about', false);
+assertPreviewCheck('starts_with', '/pricing', 'https://shop.example/pricing/pro', true);
+assertPreviewCheck('starts_with', '/pricing', 'https://shop.example/about', false);
+assertPreviewCheck('starts_with', 'https://shop.example/pricing', 'https://shop.example/pricing/pro', true);
+assertPreviewCheck('starts_with', 'https://shop.example/pricing', 'https://shop.example/blog', false);
+assertPreviewCheck('regex', '/pri[c]ing', 'https://shop.example/pricing', true);
+assertPreviewCheck('regex', '/pri[c]ing', 'https://shop.example/about', false);
+assert.strictEqual(urlMatch.previewUrlWarning('/pricing', '', 'contains'), '');
+assert.strictEqual(urlMatch.previewUrlWarning('', 'https://shop.example/pricing', 'contains'), '');
+
+const shopHost = { allowedHosts: ['shop.example'] };
+assert.strictEqual(urlMatch.defaultPreviewPage({
+  pattern: 'https://shop.example/pricing',
+  matchType: 'exact',
+  ...shopHost,
+}), 'https://shop.example/pricing');
+assert.strictEqual(urlMatch.defaultPreviewPage({
+  pattern: '/pricing',
+  matchType: 'exact',
+  ...shopHost,
+}), '/pricing');
+assert.strictEqual(urlMatch.defaultPreviewPage({
+  pattern: '/pricing',
+  matchType: 'starts_with',
+  origin: 'https://shop.example',
+}), 'https://shop.example/pricing');
+assert.strictEqual(urlMatch.matchPageUrl('/pricing', 'https://shop.example/pricing', 'starts_with'), true);
+assert.strictEqual(urlMatch.defaultPreviewPage({
+  pattern: '/pricing',
+  matchType: 'contains',
+  ...shopHost,
+}), 'https://shop.example/pricing');
+assert.strictEqual(urlMatch.defaultPreviewPage({
+  pattern: 'pricing',
+  matchType: 'contains',
+  ...shopHost,
+}), 'https://shop.example/pricing');
+// Origin plus the pattern does not match a starts-with rule of "pricing",
+// so the preview falls back to the site homepage.
+assert.strictEqual(urlMatch.defaultPreviewPage({
+  pattern: 'pricing',
+  matchType: 'starts_with',
+  ...shopHost,
+}), 'https://shop.example/');
+assert.strictEqual(urlMatch.matchPageUrl('pricing', 'https://shop.example/pricing', 'starts_with'), false);
+assert.strictEqual(urlMatch.defaultPreviewPage({
+  pattern: 'https://other.test/pricing',
+  matchType: 'contains',
+  ...shopHost,
+}), 'https://shop.example/');
+assert.strictEqual(urlMatch.defaultPreviewPage({
+  pattern: '/pri[c]ing',
+  matchType: 'regex',
+  ...shopHost,
+}), 'https://shop.example/');
+assert.strictEqual(urlMatch.defaultPreviewPage({
+  pattern: 'https://shop.example/pricing',
+  matchType: 'contains',
+}), 'https://shop.example/pricing');
+assert.strictEqual(urlMatch.defaultPreviewPage({
+  pattern: '/pricing',
+  matchType: 'contains',
+}), '');
+assert.ok(urlMatch.matchPageUrl(
+  '/pricing',
+  urlMatch.defaultPreviewPage({ pattern: '/pricing', matchType: 'contains', ...shopHost }),
+  'contains'
+));
+
+const matcherSource = fs.readFileSync(path.join(__dirname, '../public/url-match.js'), 'utf8');
+const warningSource = matcherSource.slice(
+  matcherSource.indexOf('function previewUrlWarning'),
+  matcherSource.indexOf('function normaliseOrigin')
+);
+const defaultSource = matcherSource.slice(
+  matcherSource.indexOf('function defaultPreviewPage'),
+  matcherSource.indexOf('function testUrlGoal')
+);
+assert.ok(warningSource.includes('matchPageUrl('));
+assert.ok(defaultSource.includes('matchPageUrl('));
+assert.strictEqual(matcherSource.split('function matchPageUrl').length, 2);
+
 const admin = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
 assert.ok(admin.includes('id="wizard-match"'));
 assert.ok(admin.includes('id="settings-match"'));
 assert.ok(admin.includes('id="wizard-match-hint"'));
+assert.ok(admin.includes('id="manage-url-warning"'));
+assert.ok(admin.includes('id="detail-url-warning"'));
+assert.ok(admin.includes('id="wizard-url-warning"'));
+assert.ok(admin.includes('Use a matching page'));
+assert.ok(admin.includes('previewUrlWarning'));
+assert.ok(admin.includes('defaultPreviewPage'));
+assert.ok(admin.includes('PivitUrl.matchPageUrl'));
+assert.ok(admin.includes('class="preview-url-warning"'));
 assert.ok(admin.includes('Test traffic results'));
 assert.ok(admin.includes('Export test traffic CSV'));
 

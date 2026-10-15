@@ -207,6 +207,16 @@
   }
   details .accordion-body { padding: 14px; }
   .warn-text { color: var(--warn); font-weight: 650; white-space: pre-line; }
+  .preview-url-warning {
+    border: 1px solid #8a6a2f;
+    background: var(--warn-bg);
+    color: var(--warn);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin: 10px 0 14px;
+  }
+  .preview-url-warning p { margin: 0; color: var(--warn); }
+  .preview-url-warning .btn-ghost { margin-top: 10px; }
   .empty { padding: 28px 8px; color: var(--text-muted); }
   @media (max-width: 860px) {
     .app-shell { flex-direction: column; }
@@ -466,6 +476,10 @@
           <p class="hint" style="margin-top:0;">Control is created for you. Add the challenger, set the split, then make edits on the live page.</p>
           <label for="wizard-page-url">Page URL for preview and edits</label>
           <input id="wizard-page-url" placeholder="https://example.com/about" spellcheck="false">
+          <div id="wizard-url-warning" class="preview-url-warning" role="status" aria-live="polite" hidden>
+            <p id="wizard-url-warning-text"></p>
+            <button type="button" class="btn-ghost" id="wizard-url-use-match">Use a matching page</button>
+          </div>
           <div id="wizard-variants"></div>
           <p id="wizard-split-note" class="hint"></p>
           <button type="button" class="btn-ghost" id="wizard-add-variant" style="margin-top:10px;">+ Add variant</button>
@@ -525,6 +539,10 @@
         <select id="manage-exp-id"><option value="">— select an experiment —</option></select>
         <label for="manage-page-url">Page URL to preview on</label>
         <input id="manage-page-url" placeholder="https://example.com/about" spellcheck="false">
+        <div id="manage-url-warning" class="preview-url-warning" role="status" aria-live="polite" hidden>
+          <p id="manage-url-warning-text"></p>
+          <button type="button" class="btn-ghost" id="manage-url-use-match">Use a matching page</button>
+        </div>
         <div style="margin-top:14px;"><button type="button" onclick="loadManageVariants()">Load variants</button></div>
         <p id="manage-msg" class="hint"></p>
         <div id="manage-variants-list"></div>
@@ -1007,7 +1025,11 @@ async function applyRoute() {
     if (token !== routeToken) return;
     renderWizard();
   }
-  if (page === 'page-preview') setTitle('pivitlab — Preview');
+  if (page === 'page-preview') {
+    setTitle('pivitlab — Preview');
+    const selected = manageExperiment();
+    if (selected) applyManagePreviewDefault(selected);
+  }
   if (page === 'page-status') setTitle('pivitlab — Start & pause');
   if (token !== routeToken) return;
 }
@@ -1298,6 +1320,10 @@ async function loadExperimentList() {
   experimentsCache = experiments;
   experimentsLoaded = true;
   populateExperimentSelects(experiments);
+  if (document.getElementById('page-preview').classList.contains('active')) {
+    const selected = manageExperiment();
+    if (selected) applyManagePreviewDefault(selected);
+  }
   await refreshFirstRun();
   if (gen !== listGen) return;
   if (experiments.length === 0) {
@@ -1487,11 +1513,38 @@ async function deleteExperiment(expId, btn) {
 
 function pageUrlKey(id) { return `pivit_page_url_${id}`; }
 
+function previewRule(source) {
+  const hosts = source && (source.allowedHosts || source.allowed_hosts);
+  return {
+    pattern: (source && (source.pattern || source.url_match)) || '',
+    matchType: (source && (source.matchType || source.url_match_type)) || 'contains',
+    allowedHosts: Array.isArray(hosts) ? hosts : [],
+    origin: (source && source.origin) || '',
+  };
+}
+
+function showPreviewUrlWarning(box, textEl, button, rule, pageUrl) {
+  if (!box || !textEl || !window.PivitUrl) return;
+  const message = PivitUrl.previewUrlWarning(rule.pattern, pageUrl, rule.matchType);
+  const suggested = PivitUrl.defaultPreviewPage(rule);
+  const canUse = !!(suggested && PivitUrl.matchPageUrl(rule.pattern, suggested, rule.matchType));
+  textEl.textContent = message;
+  box.hidden = !message;
+  if (button) {
+    button.hidden = !message || !canUse;
+    button.dataset.page = canUse ? suggested : '';
+  }
+}
+
 function storedPageUrl(exp) {
   try {
     const stored = sessionStorage.getItem(pageUrlKey(exp.id));
     if (stored) return stored;
   } catch (e) {}
+  if (window.PivitUrl) {
+    const suggested = PivitUrl.defaultPreviewPage(previewRule(exp));
+    if (suggested) return suggested;
+  }
   if (/^https?:\/\//i.test(exp.url_match || '')) return exp.url_match;
   return '';
 }
@@ -1582,6 +1635,10 @@ function renderDetail() {
     </div>
     <div id="health-panel" hidden></div>
     <p id="detail-error" class="error-msg" hidden></p>
+    <div id="detail-url-warning" class="preview-url-warning" role="status" aria-live="polite" hidden>
+      <p id="detail-url-warning-text"></p>
+      <button type="button" class="btn-ghost" data-action="use-matching-page">Use a matching page</button>
+    </div>
     <div class="tabs" role="tablist">
       ${['overview', 'variants', 'goals', 'results', 'settings'].map((tab) =>
         `<button type="button" role="tab" data-action="tab" data-tab="${tab}" aria-selected="false">${tab[0].toUpperCase()}${tab.slice(1)}</button>`
@@ -1618,6 +1675,10 @@ function renderDetail() {
       <div class="card">
         <label for="detail-page-url">Page URL for preview and edits</label>
         <input id="detail-page-url" value="${UI.escapeHtml(pageUrl)}" placeholder="https://example.com/about" spellcheck="false">
+        <div id="detail-field-url-warning" class="preview-url-warning" role="status" aria-live="polite" hidden>
+          <p id="detail-field-url-warning-text"></p>
+          <button type="button" class="btn-ghost" data-action="use-matching-page">Use a matching page</button>
+        </div>
         <p id="variant-warnings" class="hint"></p>
         <p id="variant-cap-note" class="hint"></p>
         <div id="detail-variants"></div>
@@ -1773,8 +1834,47 @@ function renderDetail() {
   document.querySelectorAll('.picker-bookmarklet').forEach((a) => { a.href = pickerHref; });
   const pageInput = document.getElementById('detail-page-url');
   if (pageInput) {
-    pageInput.addEventListener('input', () => rememberPageUrl(exp.id, pageInput.value.trim()));
+    pageInput.addEventListener('input', () => {
+      rememberPageUrl(exp.id, pageInput.value.trim());
+      refreshDetailPreviewWarning();
+    });
   }
+  refreshDetailPreviewWarning();
+}
+
+function detailPreviewPage() {
+  const input = document.getElementById('detail-page-url');
+  if (input) return input.value.trim();
+  return currentDetail ? storedPageUrl(currentDetail) : '';
+}
+
+function refreshDetailPreviewWarning() {
+  if (!currentDetail || !window.PivitUrl) return;
+  const rule = previewRule(currentDetail);
+  const pageUrl = detailPreviewPage();
+  const message = PivitUrl.previewUrlWarning(rule.pattern, pageUrl, rule.matchType);
+  const onVariants = currentTab === 'variants';
+  const header = document.getElementById('detail-url-warning');
+  const field = document.getElementById('detail-field-url-warning');
+  showPreviewUrlWarning(header, document.getElementById('detail-url-warning-text'), header && header.querySelector('button'), rule, pageUrl);
+  showPreviewUrlWarning(field, document.getElementById('detail-field-url-warning-text'), field && field.querySelector('button'), rule, pageUrl);
+  if (header) header.hidden = !message || onVariants;
+  if (field) field.hidden = !message || !onVariants;
+}
+
+function applyMatchingPreviewPage() {
+  if (!currentDetail || !window.PivitUrl) return;
+  const suggested = PivitUrl.defaultPreviewPage(previewRule(currentDetail));
+  if (!suggested || !PivitUrl.matchPageUrl(currentDetail.url_match, suggested, currentDetail.url_match_type || 'contains')) return;
+  const input = document.getElementById('detail-page-url');
+  if (input) input.value = suggested;
+  rememberPageUrl(currentDetail.id, suggested);
+  const manage = document.getElementById('manage-page-url');
+  if (manage && document.getElementById('manage-exp-id').value === currentDetail.id) {
+    manage.value = suggested;
+    refreshManagePreviewWarning();
+  }
+  refreshDetailPreviewWarning();
 }
 
 function showDetailTab(tab) {
@@ -1794,6 +1894,7 @@ function showDetailTab(tab) {
   if (currentTab === 'results') loadResults();
   if (currentTab === 'goals') loadPopularGoals('detail-popular-goals', 'all');
   if (currentTab === 'variants') renderVariantWarnings();
+  refreshDetailPreviewWarning();
 }
 
 function detailError(message, test) {
@@ -2133,6 +2234,10 @@ document.getElementById('page-detail').addEventListener('click', async (e) => {
   if (action === 'tab') {
     const tab = btn.dataset.tab;
     go(`#experiment/${currentDetail.id}/${tab}`);
+    return;
+  }
+  if (action === 'use-matching-page') {
+    applyMatchingPreviewPage();
     return;
   }
   if (action === 'preview') {
@@ -3396,8 +3501,15 @@ async function renderWizard() {
   if (saved) saved.hidden = !(wizard.step === 5 && wizard.planSaved);
 
   if (wizard.step === 2) {
-    document.getElementById('wizard-page-url').value = wizard.pageUrl || (/^https?:\/\//i.test(wizard.url) ? wizard.url : '');
+    const pageField = document.getElementById('wizard-page-url');
+    if (!wizard.pageUrl) {
+      const suggested = window.PivitUrl ? PivitUrl.defaultPreviewPage(wizardPreviewRule()) : '';
+      pageField.value = suggested || (/^https?:\/\//i.test(wizard.url) ? wizard.url : '');
+    } else {
+      pageField.value = wizard.pageUrl;
+    }
     renderWizardVariants();
+    refreshWizardPreviewWarning();
   }
   if (wizard.step === 3) {
     const list = document.getElementById('wizard-goals-list');
@@ -3833,9 +3945,46 @@ document.getElementById('wizard-variants').addEventListener('click', async (e) =
     renderWizardVariants();
   }
 });
+function wizardAllowedHosts() {
+  return String(wizard.hosts || '').split(/[\s,]+/).map((part) => part.trim()).filter(Boolean);
+}
+
+function wizardPreviewRule() {
+  return previewRule({
+    pattern: wizard.url,
+    matchType: wizard.match || 'contains',
+    allowedHosts: wizardAllowedHosts(),
+  });
+}
+
+function refreshWizardPreviewWarning() {
+  const input = document.getElementById('wizard-page-url');
+  if (!input) return;
+  showPreviewUrlWarning(
+    document.getElementById('wizard-url-warning'),
+    document.getElementById('wizard-url-warning-text'),
+    document.getElementById('wizard-url-use-match'),
+    wizardPreviewRule(),
+    input.value.trim()
+  );
+}
+
+document.getElementById('wizard-url-use-match').addEventListener('click', () => {
+  if (!window.PivitUrl) return;
+  const suggested = PivitUrl.defaultPreviewPage(wizardPreviewRule());
+  const input = document.getElementById('wizard-page-url');
+  if (!suggested || !input) return;
+  if (!PivitUrl.matchPageUrl(wizard.url, suggested, wizard.match || 'contains')) return;
+  input.value = suggested;
+  wizard.pageUrl = suggested;
+  saveWizard();
+  refreshWizardPreviewWarning();
+});
+
 document.getElementById('wizard-page-url').addEventListener('input', (e) => {
   wizard.pageUrl = e.target.value.trim();
   saveWizard();
+  refreshWizardPreviewWarning();
 });
 ['wizard-name', 'wizard-url', 'wizard-client'].forEach((id) => {
   document.getElementById(id).addEventListener('input', readWizardBasics);
@@ -4017,7 +4166,70 @@ document.body.addEventListener('click', (e) => {
 // --- Preview page ---
 
 document.getElementById('manage-exp-id').addEventListener('change', (e) => {
-  if (e.target.value) loadManageVariants();
+  if (e.target.value) {
+    const selected = manageExperiment();
+    if (selected) applyManagePreviewDefault(selected);
+    loadManageVariants();
+  } else {
+    managePreviewExpId = '';
+    const box = document.getElementById('manage-url-warning');
+    if (box) box.hidden = true;
+  }
+});
+
+let managePreviewExpId = '';
+
+function manageExperiment() {
+  const id = (document.getElementById('manage-exp-id').value || '').trim();
+  if (!id) return null;
+  return experimentsCache.find((row) => row.id === id) || null;
+}
+
+function refreshManagePreviewWarning(exp) {
+  const ruleSource = exp || manageExperiment();
+  const input = document.getElementById('manage-page-url');
+  if (!ruleSource || !input) {
+    const box = document.getElementById('manage-url-warning');
+    if (box) box.hidden = true;
+    return;
+  }
+  showPreviewUrlWarning(
+    document.getElementById('manage-url-warning'),
+    document.getElementById('manage-url-warning-text'),
+    document.getElementById('manage-url-use-match'),
+    previewRule(ruleSource),
+    input.value.trim()
+  );
+}
+
+function applyManagePreviewDefault(exp) {
+  const input = document.getElementById('manage-page-url');
+  if (!exp || !input || !window.PivitUrl) return;
+  const rule = previewRule(exp);
+  const current = input.value.trim();
+  const switched = managePreviewExpId !== exp.id;
+  const currentMatches = current && PivitUrl.matchPageUrl(rule.pattern, current, rule.matchType);
+  if (!current || (switched && !currentMatches)) {
+    const suggested = PivitUrl.defaultPreviewPage(rule);
+    if (suggested) input.value = suggested;
+  }
+  managePreviewExpId = exp.id;
+  refreshManagePreviewWarning(exp);
+}
+
+document.getElementById('manage-page-url').addEventListener('input', () => {
+  refreshManagePreviewWarning();
+});
+
+document.getElementById('manage-url-use-match').addEventListener('click', () => {
+  const exp = manageExperiment();
+  const input = document.getElementById('manage-page-url');
+  if (!exp || !input || !window.PivitUrl) return;
+  const rule = previewRule(exp);
+  const suggested = PivitUrl.defaultPreviewPage(rule);
+  if (!suggested || !PivitUrl.matchPageUrl(rule.pattern, suggested, rule.matchType)) return;
+  input.value = suggested;
+  refreshManagePreviewWarning(exp);
 });
 
 const EDITING_SIGNPOST_KEY = 'pivit_signpost_dismissed_editing';
@@ -4072,6 +4284,7 @@ async function loadManageVariants() {
   if (!expId) { msgEl.className = 'error-msg'; msgEl.textContent = 'Select an experiment above first.'; return; }
   const result = await callApi(`/api/experiments/${expId}`, { headers: authHeaders() });
   if (!result.ok) { msgEl.className = 'error-msg'; msgEl.textContent = `Error: ${result.message}`; return; }
+  applyManagePreviewDefault(result.data);
   const pageUrl = document.getElementById('manage-page-url').value.trim();
   const variants = result.data.variants || [];
   currentManageVariants = variants;
