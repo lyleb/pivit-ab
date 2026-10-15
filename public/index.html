@@ -1700,6 +1700,7 @@ function renderDetail() {
     </div>
 
     <div data-tab-panel="results" hidden>
+      <div id="change-applied-panel"></div>
       <div id="plan-panel"></div>
       <div class="card" id="test-traffic-card">
         <h2>Test traffic</h2>
@@ -2078,22 +2079,27 @@ function renderVariantWarnings() {
 
 async function loadHealth() {
   const panel = document.getElementById('health-panel');
+  const applied = document.getElementById('change-applied-panel');
   if (!panel || !currentDetail) return;
-  if (currentDetail.status !== 'running') {
+  const expId = currentDetail.id;
+  const running = currentDetail.status === 'running';
+  if (!running) {
     panel.hidden = true;
     panel.innerHTML = '';
-    return;
   }
-  const expId = currentDetail.id;
   const result = await callApi(withTestQuery(`/api/experiments/${expId}/health`), { headers: authHeaders() });
   if (!currentDetail || currentDetail.id !== expId || !document.getElementById('health-panel')) return;
-  if (!result.ok || !result.data.show) {
+  if (!result.ok || !result.data.show || !running) {
     panel.hidden = true;
     panel.innerHTML = '';
-    return;
+  } else {
+    panel.hidden = false;
+    panel.innerHTML = UI.renderHealth(result.data);
   }
-  panel.hidden = false;
-  panel.innerHTML = UI.renderHealth(result.data);
+  if (applied) {
+    const rows = result.ok && result.data ? result.data.change_applied : [];
+    applied.innerHTML = running ? '' : UI.renderChangeApplied(rows);
+  }
 }
 
 function renderGoalBlocks() {

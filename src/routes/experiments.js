@@ -475,6 +475,18 @@ router.get('/:id/health', async (req, res) => {
       [id, start]
     );
     const testTraffic = await summariseTestTraffic(id);
+    const { rows: changeRows } = await db.query(
+      `SELECT v.id AS variant_id, v.name AS variant_name, v.changes,
+          COUNT(e.id) FILTER (WHERE e.event_type = 'view')::int AS views,
+          COUNT(e.id) FILTER (WHERE e.event_type = 'view' AND e.change_applied IS NOT NULL)::int AS reported_views,
+          COUNT(e.id) FILTER (WHERE e.event_type = 'view' AND e.change_applied IS TRUE)::int AS applied_views
+       FROM variants v
+       LEFT JOIN events e ON e.variant_id = v.id AND ${visibleEventSql('e', 2)}
+       WHERE v.experiment_id = $1
+       GROUP BY v.id
+       ORDER BY v.created_at`,
+      [id, includeTest]
+    );
 
     const goalCount = exp.goals_scope === 'divergent'
       ? null
@@ -496,6 +508,7 @@ router.get('/:id/health', async (req, res) => {
       syntheticVisitors: testTraffic.visitors,
       testExcluded: !includeTest,
       removedVisitors: testTraffic.removed_visitors,
+      changeApplied: changeRows,
     }));
   } catch (err) {
     console.error(err);

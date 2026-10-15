@@ -77,7 +77,9 @@ assert.ok(editorSrc.includes('pivit-expired-link'));
 assert.ok(snippetSrc.includes('pivit-expired-link'));
 assert.ok(snippetSrc.includes("data.code === 'archived'"));
 assert.ok(snippetSrc.includes('preview_expired'));
-assert.ok(snippetSrc.includes("const EDITOR_VERSION = '20261015'"));
+assert.ok(snippetSrc.includes("const EDITOR_VERSION = '20261015b'"));
+assert.ok(editorSrc.includes("This selector isn't on the current page."));
+assert.ok(editorSrc.includes('pivit-selector-warning'));
 assert.ok(snippetSrc.includes('editor.js?v='));
 assert.ok(!editorSrc.includes('Pivit editor'));
 
@@ -277,6 +279,7 @@ function findLink(node) {
   assert.strictEqual(running.document.getElementById('pivit-editor-variant').textContent, 'Checkout Social proof');
   assert.strictEqual(running.document.getElementById('pivit-editor-status').textContent, 'Running');
   assert.strictEqual(running.document.getElementById('pivit-editor-live').textContent, runningEditWarning());
+  assert.strictEqual(running.document.getElementById('pivit-selector-warning').textContent, '');
   assert.ok(running.document.getElementById('pivit-pick-btn'));
   assert.strictEqual(running.document.getElementById('pivit-expired-link'), null);
   assert.deepStrictEqual(running.writes, ['Live headline']);
@@ -389,6 +392,29 @@ function findLink(node) {
   assert.deepStrictEqual(previewBlocked.writes, []);
   assert.strictEqual(previewBlocked.h1.textContent, 'Original');
   assert.strictEqual(previewBlocked.head.children.length, 0);
+
+  const missingSelector = harness({
+    href: `https://cantsaythat.co.uk/checkout?ab_edit=${variantId}&token=edit-token`,
+    currentScript: editorScript(),
+    respond: () => jsonResponse(true, {
+      id: variantId,
+      experiment_id: expId,
+      experiment_name: 'Checkout',
+      name: 'Headline',
+      experiment_status: 'draft',
+      experiment_status_label: 'Draft',
+      edit_warning: '',
+      changes: [{ selector: '.not-on-this-page', type: 'text', value: 'New headline' }],
+      goals: [],
+    }),
+  });
+  vm.runInNewContext(editorSrc, missingSelector.sandbox, { filename: 'editor.js' });
+  await flush();
+  assert.strictEqual(
+    missingSelector.document.getElementById('pivit-selector-warning').textContent,
+    "This selector isn't on the current page."
+  );
+  assert.ok(textOf(missingSelector.document.body).includes("This selector isn't on the current page."));
 
   console.log('editor archive tests passed');
 })().catch((err) => {
