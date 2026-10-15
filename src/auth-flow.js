@@ -22,6 +22,7 @@ const IP_LIMIT = 20;
 const HOUR_MS = 60 * 60 * 1000;
 const CODE_TRIES = 5;
 const LINK_SENT = "If that address can be used, we've sent a link.";
+const INVITE_INVALID = "That invite code from pivitlab isn't valid. It may have expired, or it may already have been used.";
 const INVITE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
 
 function appOrigin() {
@@ -216,7 +217,7 @@ async function requestSignup({ email, website, inviteCode, req }) {
 
   const invite = await loadInvite(inviteCode);
   if (!inviteUsable(invite)) {
-    return { ok: false, status: 400, error: 'That invite code is not valid.' };
+    return { ok: false, status: 400, error: INVITE_INVALID };
   }
 
   const recent = await latestOpenToken(email);
@@ -341,7 +342,7 @@ async function finishSignup(client, tokenRow, ip) {
   );
   const invite = inviteRows.rows[0];
   if (!inviteUsable(invite)) {
-    return { ok: false, status: 400, error: 'That invite code is not valid.' };
+    return { ok: false, status: 400, error: INVITE_INVALID };
   }
   const existing = await client.query(`SELECT id FROM users WHERE email = $1`, [tokenRow.email]);
   if (existing.rows[0]) return finishSignin(client, tokenRow.email, ip);
@@ -568,6 +569,7 @@ async function revokeInvite(id, userId) {
 module.exports = {
   TERMS_VERSION,
   LINK_SENT,
+  INVITE_INVALID,
   TOKEN_TTL_MS,
   normaliseEmail,
   customerHost,

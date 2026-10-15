@@ -1,7 +1,8 @@
 // Access requests from the public landing page. Stored next to invite
-// codes. Each new row emails an alert. The form stays off until
-// ACCESS_REQUESTS_ENABLED is set, because the privacy page is still a
-// placeholder.
+// codes. Each new row emails an alert through Postmark. If that send does
+// not go out, the owner home page gets a notice instead. The form stays
+// off until ACCESS_REQUESTS_ENABLED is set, because the privacy page is
+// still a placeholder.
 
 const db = require('./db');
 const { normaliseEmail, customerHost, createInvite, requestIp } = require('./auth-flow');
@@ -10,6 +11,7 @@ const { hit, LIMITED_MESSAGE } = require('./rate-limit');
 const { sendEmail, replyToAddress } = require('./mailer');
 const { configuredAppOrigin } = require('./app-origin');
 const { accessRequestsEnabled } = require('./access-flag');
+const { legacyAccount } = require('./tenant');
 
 const EMAIL_LIMIT = 5;
 const IP_LIMIT = 10;
@@ -92,17 +94,48 @@ async function submitAccessRequest(req) {
     [name, email, website, ip]
   );
   const row = rows[0];
+  const delivered = await deliverAccessAlert(row);
+  return { ok: true, request: row, channel: delivered };
+}
+
+async function storeAccessNotice(row) {
+  const legacy = await legacyAccount();
+  if (!legacy) {
+    console.error('[access] no account to store the notice');
+    return false;
+  }
+  const title = 'New access request';
+  const body = `${row.name} (${row.email}) asked for access for ${row.website}. The email was not sent. Create an invite code on the home page.`;
+  await db.query(
+    `INSERT INTO owner_notices (account_id, kind, title, body)
+     VALUES ($1, 'access_request', $2, $3)`,
+    [legacy.id, title, body]
+  );
+  return true;
+}
+
+// Postmark when it accepts the message. Otherwise the request stays stored
+// and the owner home page shows a notice.
+async function deliverAccessAlert(row) {
+  let sent = false;
   try {
     const mailed = await sendEmail({
       to: notifyAddress(),
       subject: 'New pivitlab access request',
       text: alertText(row),
     });
-    if (mailed && mailed.error) console.error('[access] notification email was not sent');
+    sent = !!(mailed && mailed.sent);
+    if (!sent && mailed && mailed.error) console.error('[access] notification email was not sent');
   } catch (err) {
     console.error('[access] notification email failed', err);
   }
-  return { ok: true, request: row };
+  if (sent) return 'email';
+  try {
+    await storeAccessNotice(row);
+  } catch (err) {
+    console.error('[access] could not store the notice', err);
+  }
+  return 'notice';
 }
 
 async function listAccessRequests() {

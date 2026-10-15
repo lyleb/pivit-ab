@@ -121,7 +121,7 @@ async function main() {
   const { takeLastLoggedEmail } = require('../src/mailer');
   const { csrfMiddleware } = require('../src/csrf');
   const sessionMiddleware = require('../src/session');
-  const { LINK_SENT } = require('../src/auth-flow');
+  const { LINK_SENT, INVITE_INVALID } = require('../src/auth-flow');
 
   const app = express();
   app.use(express.json());
@@ -285,7 +285,9 @@ async function main() {
       invite_code: doomed.json.code,
     }, {});
     assert.strictEqual(rejected.status, 400);
-    assert.strictEqual(rejected.json.error, 'That invite code is not valid.');
+    assert.strictEqual(rejected.json.error, INVITE_INVALID);
+    assert.ok(INVITE_INVALID.includes('pivitlab'));
+    assert.ok(!/Pivit/.test(INVITE_INVALID));
     assert.strictEqual(takeLastLoggedEmail(), null);
 
     const missing = await request(server, 'POST', '/api/auth/email', { email: 'nobody@example.co.uk' }, {});

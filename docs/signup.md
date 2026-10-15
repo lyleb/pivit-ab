@@ -1,6 +1,6 @@
 # Sign-up and sign-in (Sprint 1b)
 
-Invite-only. A customer enters a work email and a website, then signs in from a link or a 6-digit code. There is no customer password. The owner password (`ADMIN_API_KEY`) still works, on the unlisted page `/owner`. That page is not linked from sign-in, is noindexed, and is left out of `robots.txt`. The public sign-in page is email sign-in and client login. The session cookie is `pivit.sid` (in production, `__Host-pivit.sid`). Do not rotate `SESSION_SECRET`.
+Invite-only. A customer enters a work email and a website, then signs in from a link or a 6-digit code. There is no customer password. The owner signs in day to day the same way, by email at info@heclr.com. The owner password (`ADMIN_API_KEY`) stays as a fallback, on the unlisted page `/owner`. That page is not linked from sign-in, is noindexed, and is left out of `robots.txt`. The public sign-in page is email sign-in and client login. The session cookie is `pivit.sid` (in production, `__Host-pivit.sid`). Do not rotate `SESSION_SECRET`.
 
 Account #1 stays **Heclr**. The superadmin is **info@heclr.com**. The first email sign-in sets `verified_at`.
 
@@ -57,6 +57,6 @@ The landing page at `/` is public. Logged-in owners and customers are redirected
 
 The request form (name, work email, website) is off until `ACCESS_REQUESTS_ENABLED` is set. Until then the page says to email info@pivitlab.com, and `POST /api/access-requests` returns 404 and stores nothing.
 
-When the form is on, a request is stored in `access_requests` (migration 004, next to invite codes) and an email is sent to `ACCESS_REQUEST_EMAIL`, or to `EMAIL_REPLY_TO` when that is unset. The message still goes out through Postmark. If the email fails, the row is kept. A honeypot field and a rate limit (5 per email address and 10 per IP, each hour) sit in front of it. The sign-in page, the sign-up page, the owner page and this form can show a Cloudflare Turnstile widget. It stays off unless both `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` are set. With either one missing, those pages do not load the Turnstile script and the check is skipped.
+When the form is on, a request is stored in `access_requests` (migration 004, next to invite codes) and an email is sent through Postmark to `ACCESS_REQUEST_EMAIL`, or to `EMAIL_REPLY_TO` when that is unset. If Postmark does not accept the message, the row is kept and a notice is added on the owner home page. A honeypot field and a rate limit (5 per email address and 10 per IP, each hour) sit in front of it. The sign-in page, the sign-up page, the owner page and this form can show a Cloudflare Turnstile widget. It stays off unless both `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` are set. With either one missing, those pages do not load the Turnstile script and the check is skipped.
 
 The superadmin invite card on the dashboard lists the requests. **Create invite code** makes one code for that person, with their name, email and website in the note, and shows the code once. A second click does not make another code. Do not turn the form on until `/privacy.html` has Lyle's wording. That page is a placeholder.
