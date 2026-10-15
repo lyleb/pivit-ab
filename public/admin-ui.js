@@ -209,7 +209,7 @@
     return 'Support view: see another customer\'s account read-only. Every view is logged.';
   }
 
-  const OWNER_PASSWORD_BANNER = 'You signed in with the owner password. Once email sign-in is set up, use that instead.';
+  const OWNER_PASSWORD_BANNER = 'You signed in with the owner password. Day to day, sign in by email at info@heclr.com. This password is only the fallback.';
 
   function showOwnerPasswordBanner(emergency, dismissed) {
     return emergency === true && dismissed !== true;

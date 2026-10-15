@@ -278,6 +278,12 @@ async function dbChecks() {
     assert.strictEqual(row.rows[0].email, 'sam@example.co.uk');
     assert.strictEqual(row.rows[0].website, 'example.co.uk');
     assert.strictEqual(row.rows[0].invite_id, null);
+    const loggedNotice = await db.query(
+      `SELECT title, body FROM owner_notices WHERE kind = 'access_request' AND body LIKE '%sam@example.co.uk%'`
+    );
+    assert.strictEqual(loggedNotice.rows.length, 1);
+    assert.strictEqual(loggedNotice.rows[0].title, 'New access request');
+    assert.ok(loggedNotice.rows[0].body.includes('The email was not sent'));
 
     process.env.ACCESS_REQUEST_EMAIL = 'lyle@example.com';
     const second = await request(server, 'POST', '/api/access-requests', {
@@ -356,6 +362,53 @@ async function dbChecks() {
 
     const missing = await request(server, 'POST', '/api/access-requests/not-a-uuid/invite', {}, owner, origin);
     assert.strictEqual(missing.status, 404);
+
+    const originalFetch = global.fetch;
+    try {
+      process.env.POSTMARK_SERVER_TOKEN = 'test-token';
+      let posted = null;
+      global.fetch = async (url, options) => {
+        posted = { url, body: JSON.parse(options.body) };
+        return { ok: true, json: async () => ({ MessageID: 'access-1' }) };
+      };
+      const sent = await request(server, 'POST', '/api/access-requests', {
+        name: 'Sent Case',
+        email: 'sent@example.co.uk',
+        website: 'sent.example',
+      }, {}, Object.assign({ 'X-Forwarded-For': '203.0.113.40' }, origin));
+      assert.strictEqual(sent.status, 201, sent.text);
+      assert.strictEqual(posted.body.To, 'info@heclr.com');
+      assert.strictEqual(posted.body.From, 'no-reply@pivitlab.com');
+      assert.ok(posted.body.Subject.includes('access request'));
+      const sentNotice = await db.query(
+        `SELECT COUNT(*)::int AS n FROM owner_notices WHERE body LIKE '%sent@example.co.uk%'`
+      );
+      assert.strictEqual(sentNotice.rows[0].n, 0);
+
+      global.fetch = async () => ({
+        ok: false,
+        status: 422,
+        json: async () => ({ ErrorCode: 300, Message: 'rejected' }),
+      });
+      const failed = await request(server, 'POST', '/api/access-requests', {
+        name: 'Fail Case',
+        email: 'fail@example.co.uk',
+        website: 'fail.example',
+      }, {}, Object.assign({ 'X-Forwarded-For': '203.0.113.41' }, origin));
+      assert.strictEqual(failed.status, 201, failed.text);
+      const failNotice = await db.query(
+        `SELECT title, body FROM owner_notices WHERE kind = 'access_request' AND body LIKE '%fail@example.co.uk%'`
+      );
+      assert.strictEqual(failNotice.rows.length, 1);
+      assert.ok(failNotice.rows[0].body.includes('The email was not sent'));
+      const kept = await db.query(
+        `SELECT email FROM access_requests WHERE email = 'fail@example.co.uk'`
+      );
+      assert.strictEqual(kept.rows.length, 1);
+    } finally {
+      global.fetch = originalFetch;
+      delete process.env.POSTMARK_SERVER_TOKEN;
+    }
 
     const client = await db.pool.connect();
     try {

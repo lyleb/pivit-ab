@@ -143,7 +143,10 @@ assert.strictEqual(ui.showOwnerPasswordBanner(true, false), true);
 assert.strictEqual(ui.showOwnerPasswordBanner(true, true), false);
 assert.strictEqual(ui.showOwnerPasswordBanner(false, false), false);
 assert.ok(ui.OWNER_PASSWORD_BANNER.includes('owner password'));
+assert.ok(ui.OWNER_PASSWORD_BANNER.includes('info@heclr.com'));
+assert.ok(ui.OWNER_PASSWORD_BANNER.includes('fallback'));
 assert.ok(!ui.OWNER_PASSWORD_BANNER.includes('emergency'));
+assert.ok(!ui.OWNER_PASSWORD_BANNER.includes('Once email sign-in is set up'));
 
 assert.strictEqual(ui.shortVariantLabel('variant-b'), 'B');
 assert.strictEqual(ui.shortVariantLabel('Control'), 'Control');

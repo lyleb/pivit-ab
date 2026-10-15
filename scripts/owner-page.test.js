@@ -26,6 +26,8 @@ assert.ok(login.includes('/api/auth/client-login'));
 assert.ok(!login.includes('/api/auth/login'));
 
 const ownerHtml = fs.readFileSync(path.join(__dirname, '../src/pages/owner.html'), 'utf8');
+assert.ok(ownerHtml.includes('Fallback password. Day to day, sign in by email at info@heclr.com.'));
+assert.ok(!ownerHtml.includes('Once email sign-in is set up'));
 assert.ok(ownerHtml.includes('noindex, nofollow'));
 assert.ok(ownerHtml.includes("fetch('/api/auth/login'"));
 assert.ok(ROBOTS_TXT.includes('Disallow: /owner'));
