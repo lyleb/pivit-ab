@@ -21,7 +21,8 @@
  *
  * Preview mode: the dashboard opens ?ab_preview=<variant_id>&ab_preview_token=<token>.
  * The token is signed and expires. It can show a draft, paused or disabled
- * variant and never logs a view or conversion. A preview link without a valid
+ * variant and never logs a view or conversion. An archived test is not shown:
+ * the page gets an expired notice and the editor is not loaded. A preview link without a valid
  * token is ignored, so drafts are not served to anyone who guesses the URL.
  * If the URL still has an older ab_edit or ab_preview (a leftover from the
  * previous test), the last one wins, and preview applies only that experiment.
@@ -99,7 +100,7 @@
   let qaOn = false;
   const ASSIGNMENT_PREFIX = '_ab_assign_';
   // Bump when editor.js changes so a cached copy cannot keep the old variant.
-  const EDITOR_VERSION = '20261007';
+  const EDITOR_VERSION = '20261015';
 
   // The first query value is the leftover. The last ab_edit or ab_preview is
   // the link the owner just opened.
@@ -123,6 +124,62 @@
 
   function revealPage() {
     document.documentElement.classList.remove('ab-hide');
+  }
+
+  // An archived test's edit or preview link does not open the editor and does
+  // not apply the variant. The notice names the test and links to it.
+  function showExpiredNotice(data) {
+    if (document.getElementById('pivit-expired-link')) return;
+    const payload = data || {};
+    const test = payload.test || {};
+    const variant = payload.variant || {};
+    const banner = document.createElement('div');
+    banner.id = 'pivit-expired-link';
+    banner.setAttribute('role', 'status');
+    banner.style.position = 'fixed';
+    banner.style.top = '0';
+    banner.style.left = '0';
+    banner.style.right = '0';
+    banner.style.zIndex = '2147483647';
+    banner.style.background = '#fff8e8';
+    banner.style.color = '#3f3420';
+    banner.style.padding = '16px 20px';
+    banner.style.fontFamily = '-apple-system, "Segoe UI", Roboto, sans-serif';
+    banner.style.fontSize = '14px';
+    banner.style.lineHeight = '1.45';
+    banner.style.boxShadow = '0 2px 10px rgba(19,23,35,0.12)';
+
+    const title = document.createElement('div');
+    title.style.fontWeight = '700';
+    title.style.marginBottom = '6px';
+    title.textContent = payload.message || payload.error || 'This link has expired.';
+    banner.appendChild(title);
+
+    function line(label, value) {
+      if (!value) return;
+      const row = document.createElement('div');
+      row.appendChild(document.createTextNode(label + ': '));
+      const strong = document.createElement('strong');
+      strong.textContent = value;
+      row.appendChild(strong);
+      banner.appendChild(row);
+    }
+    line('Test', test.name);
+    line('Variant', variant.name);
+    line('Status', test.status_label || 'Archived');
+
+    const url = typeof test.url === 'string' ? test.url : '';
+    if (/^https?:\/\//i.test(url)) {
+      const link = document.createElement('a');
+      link.href = url;
+      link.textContent = test.link_label || 'Open the test in pivitlab';
+      link.style.display = 'inline-block';
+      link.style.marginTop = '8px';
+      link.style.color = '#4527d6';
+      link.style.fontWeight = '650';
+      banner.appendChild(link);
+    }
+    document.body.appendChild(banner);
   }
 
   // Checks known consent-management platforms for analytics/statistics/
@@ -329,8 +386,26 @@
     // a stray view event into real results. A later ab_preview in the same URL
     // is preview mode instead — the newest link wins.
     if (mode.type === 'edit' && mode.variantId) {
+      let blocked = null;
+      if (mode.token) {
+        try {
+          const res = await fetch(
+            `${API_BASE}/api/editor/variants/${encodeURIComponent(mode.variantId)}?token=${encodeURIComponent(mode.token)}`,
+            { cache: 'no-store' }
+          );
+          const data = await res.json().catch(() => ({}));
+          if (data && data.code === 'archived') blocked = data;
+        } catch (err) {
+          blocked = null;
+        }
+      }
       const previous = document.querySelectorAll('script[data-pivit-editor]');
       for (let i = 0; i < previous.length; i++) previous[i].remove();
+      if (blocked) {
+        showExpiredNotice(blocked);
+        revealPage();
+        return;
+      }
       const editorScript = document.createElement('script');
       editorScript.src = `${API_BASE}/snippet/editor.js?v=${EDITOR_VERSION}`;
       editorScript.async = false;
@@ -377,6 +452,11 @@
       // preview URL whose token was rejected shows the page unchanged — never
       // another experiment that happens to match the same host.
       if (wantsPreview) {
+        if (data && data.preview_expired && data.preview_expired.code === 'archived') {
+          showExpiredNotice(data.preview_expired);
+          revealPage();
+          return;
+        }
         const match = data.preview && data.preview.variant_id === mode.variantId
           ? previewVariant(data.experiments, data.preview)
           : null;

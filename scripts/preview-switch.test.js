@@ -245,7 +245,10 @@ async function runEditor(env) {
   const editEnv = harness({ href: editHref });
   editEnv.head.appendChild(stale);
   await runSnippet(editEnv);
-  assert.strictEqual(editEnv.fetches.length, 0);
+  assert.strictEqual(editEnv.fetches.length, 1);
+  assert.ok(editEnv.fetches[0].url.includes(`/api/editor/variants/${varB}`));
+  assert.ok(editEnv.fetches[0].url.includes(`token=${encodeURIComponent(tokenB)}`));
+  assert.strictEqual(editEnv.fetches[0].opts.cache, 'no-store');
   assert.strictEqual(editEnv.head.children.length, 1);
   const injected = editEnv.head.children[0];
   assert.strictEqual(injected.getAttribute('data-variant-id'), varB);

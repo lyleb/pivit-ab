@@ -29,6 +29,12 @@ const { publicScope, ownedExperiment, placeOnSite } = require('../tenant');
 const { matchPageUrl, resolvePageMatch } = require('../../public/url-match');
 const { noteSnippetSeen, noteInstallCheck, noteQaPreview, installCheckPayload } = require('../site-verify');
 const { normaliseStatusChange } = require('../experiment-status');
+const {
+  archivedBody,
+  archivedEditMessage,
+  archivedPreviewMessage,
+  expiredPreviewMessage,
+} = require('../editor-context');
 const router = express.Router();
 
 function publicScopeSql(accountParam, siteParam) {
@@ -127,9 +133,11 @@ router.get('/', async (req, res) => {
     const visible = applyHostScope(keepPageMatches(experiments, url), req);
 
     let previewExperiment = null;
+    let previewExpired = null;
     if (previewAuth.ok) {
       const { rows: previewRows } = await db.query(
-        `SELECT e.id, e.name, e.url_match, e.url_match_type, e.allowed_hosts, e.status, e.goals, e.account_id, e.site_id
+        `SELECT e.id, e.name, e.url_match, e.url_match_type, e.allowed_hosts, e.status, e.goals, e.account_id, e.site_id,
+                v.id AS variant_id, v.name AS variant_name
          FROM variants v
          JOIN experiments e ON e.id = v.experiment_id
          WHERE v.id = $1
@@ -143,9 +151,18 @@ router.get('/', async (req, res) => {
         }
       }
       const matchedPreview = keepPageMatches(previewRows, url);
-      if (matchedPreview[0]) {
-        const already = visible.find((exp) => exp.id === matchedPreview[0].id);
-        previewExperiment = already || applyHostScope(matchedPreview, req)[0] || null;
+      const hosted = matchedPreview[0] ? (applyHostScope(matchedPreview, req)[0] || null) : null;
+      if (hosted && hosted.status === 'archived') {
+        // A signed link for an archived test must not serve the variant.
+        previewExpired = archivedBody(req, {
+          id: hosted.id,
+          name: hosted.name,
+          variantId: hosted.variant_id,
+          variantName: hosted.variant_name,
+        }, expiredPreviewMessage(hosted.name));
+      } else if (hosted) {
+        const already = visible.find((exp) => exp.id === hosted.id);
+        previewExperiment = already || hosted;
       }
     }
 
@@ -153,7 +170,10 @@ router.get('/', async (req, res) => {
     if (previewExperiment && !experimentIds.includes(previewExperiment.id)) {
       experimentIds.push(previewExperiment.id);
     }
-    if (experimentIds.length === 0) return res.json({ experiments: [] });
+    if (experimentIds.length === 0) {
+      if (previewExpired) return res.json({ experiments: [], preview_expired: previewExpired });
+      return res.json({ experiments: [] });
+    }
 
     const { rows: variants } = await db.query(
       `SELECT id, experiment_id, name, traffic_split, changes, goals, enabled
@@ -168,6 +188,9 @@ router.get('/', async (req, res) => {
       previewVariantId: previewAuth.ok ? previewAuth.variantId : null,
     });
 
+    if (previewExpired) {
+      return res.json({ experiments: payload.experiments, preview_expired: previewExpired });
+    }
     if (payload.preview) return res.json({ experiments: payload.experiments, preview: payload.preview });
     res.json({ experiments: payload.experiments });
   } catch (err) {
@@ -735,13 +758,21 @@ router.post('/:id/variants/:variantId/preview-link', async (req, res) => {
     if (!page_url) return res.status(400).json({ error: 'page_url is required' });
 
     const { rows } = await db.query(
-      `SELECT v.id, e.account_id, e.site_id
+      `SELECT v.id, v.name AS variant_name, e.account_id, e.site_id, e.status, e.name AS experiment_name, e.id AS experiment_id
        FROM variants v
        JOIN experiments e ON e.id = v.experiment_id
        WHERE v.id = $1 AND v.experiment_id = $2 AND e.account_id = $3`,
       [req.params.variantId, req.params.id, req.account.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id on that experiment' });
+    if (rows[0].status === 'archived') {
+      return res.status(409).json(archivedBody(req, {
+        id: rows[0].experiment_id,
+        name: rows[0].experiment_name,
+        variantId: rows[0].id,
+        variantName: rows[0].variant_name,
+      }, archivedPreviewMessage(rows[0].experiment_name)));
+    }
 
     const token = createPreviewToken(req.params.variantId, undefined, undefined, {
       accountId: rows[0].account_id,
@@ -767,13 +798,21 @@ router.post('/:id/variants/:variantId/edit-link', async (req, res) => {
     if (!page_url) return res.status(400).json({ error: 'page_url is required' });
 
     const { rows } = await db.query(
-      `SELECT v.id, e.account_id, e.site_id
+      `SELECT v.id, v.name AS variant_name, e.account_id, e.site_id, e.status, e.name AS experiment_name, e.id AS experiment_id
        FROM variants v
        JOIN experiments e ON e.id = v.experiment_id
        WHERE v.id = $1 AND v.experiment_id = $2 AND e.account_id = $3`,
       [req.params.variantId, req.params.id, req.account.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id on that experiment' });
+    if (rows[0].status === 'archived') {
+      return res.status(409).json(archivedBody(req, {
+        id: rows[0].experiment_id,
+        name: rows[0].experiment_name,
+        variantId: rows[0].id,
+        variantName: rows[0].variant_name,
+      }, archivedEditMessage(rows[0].experiment_name)));
+    }
 
     const token = createEditToken(req.params.variantId, undefined, {
       accountId: rows[0].account_id,

@@ -42,6 +42,9 @@
   let savedSnapshot = '';    // canonical form of what's actually saved on the server, for the dirty check
   let experimentName = '';
   let variantName = '';
+  let experimentStatus = '';
+  let experimentStatusLabel = '';
+  let editWarning = '';
   let goalsScope = 'shared';
   let pickingActive = false;
   let hoveredEl = null;
@@ -154,10 +157,20 @@
   function editorFetch(url, options) {
     return fetch(url, Object.assign({ cache: 'no-store' }, options || {}));
   }
+  async function readBody(res) {
+    return res.json().catch(() => ({}));
+  }
+  function errorFromResponse(body, status) {
+    const err = new Error((body && (body.error || body.message)) || `HTTP ${status}`);
+    err.body = body || {};
+    err.status = status;
+    return err;
+  }
   async function fetchVariant() {
     const res = await editorFetch(`${API_BASE}/api/editor/variants/${VARIANT_ID}?token=${encodeURIComponent(TOKEN)}`);
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
-    return res.json();
+    const body = await readBody(res);
+    if (!res.ok) throw errorFromResponse(body, res.status);
+    return body;
   }
   async function saveWorkingSet(changes, goals) {
     const res = await editorFetch(`${API_BASE}/api/editor/variants/${VARIANT_ID}?token=${encodeURIComponent(TOKEN)}`, {
@@ -165,8 +178,9 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ changes, goals }),
     });
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
-    return res.json();
+    const body = await readBody(res);
+    if (!res.ok) throw errorFromResponse(body, res.status);
+    return body;
   }
 
   // --- Working-set persistence across a reload ---
@@ -283,6 +297,78 @@
     el.style.margin = '0';
   }
 
+  // Archived edit and preview links stop here: no picking, no save, no changes
+  // applied. The notice names the test this variant belongs to.
+  function showExpiredNotice(data) {
+    if (document.getElementById('pivit-expired-link')) return;
+    const payload = data || {};
+    const test = payload.test || {};
+    const variant = payload.variant || {};
+    const banner = document.createElement('div');
+    styleReset(banner);
+    banner.id = 'pivit-expired-link';
+    banner.setAttribute('role', 'status');
+    Object.assign(banner.style, {
+      position: 'fixed', top: '0', left: '0', right: '0', zIndex: String(Z),
+      background: '#fff8e8', color: '#3f3420', padding: '16px 20px', fontSize: '14px',
+      lineHeight: '1.45', boxShadow: '0 2px 10px rgba(19,23,35,0.12)',
+    });
+    const title = document.createElement('div');
+    styleReset(title);
+    title.style.fontWeight = '700';
+    title.style.marginBottom = '6px';
+    title.textContent = payload.message || payload.error || 'This link has expired.';
+    banner.appendChild(title);
+    function line(label, value) {
+      if (!value) return;
+      const row = document.createElement('div');
+      styleReset(row);
+      row.appendChild(document.createTextNode(label + ': '));
+      const strong = document.createElement('strong');
+      styleReset(strong);
+      strong.textContent = value;
+      row.appendChild(strong);
+      banner.appendChild(row);
+    }
+    line('Test', test.name);
+    line('Variant', variant.name);
+    line('Status', test.status_label || 'Archived');
+    const url = typeof test.url === 'string' ? test.url : '';
+    if (/^https?:\/\//i.test(url)) {
+      const link = document.createElement('a');
+      styleReset(link);
+      link.href = url;
+      link.textContent = test.link_label || 'Open the test in pivitlab';
+      link.style.display = 'inline-block';
+      link.style.marginTop = '8px';
+      link.style.color = COLORS.indigoDark;
+      link.style.fontWeight = '650';
+      banner.appendChild(link);
+    }
+    document.body.appendChild(banner);
+  }
+
+  function identityRow(parent, label, value, id, colour) {
+    const row = document.createElement('div');
+    styleReset(row);
+    row.style.fontSize = '12px';
+    row.style.marginBottom = '2px';
+    const lab = document.createElement('span');
+    styleReset(lab);
+    lab.style.color = '#6b6f83';
+    lab.textContent = label + ' ';
+    const val = document.createElement('span');
+    styleReset(val);
+    val.id = id;
+    val.textContent = value || '—';
+    val.style.fontWeight = '700';
+    val.style.color = colour || COLORS.ink;
+    val.style.wordBreak = 'break-word';
+    row.appendChild(lab);
+    row.appendChild(val);
+    parent.appendChild(row);
+  }
+
   function buildToolbar() {
     root = document.createElement('div');
     styleReset(root);
@@ -307,6 +393,29 @@
     title.style.marginBottom = '2px';
     title.textContent = 'pivitlab editor';
     toolbar.appendChild(title);
+
+    const identity = document.createElement('div');
+    styleReset(identity);
+    identity.id = 'pivit-editor-identity';
+    identity.style.marginBottom = '10px';
+    const statusColor = { draft: '#6b6f83', running: '#0b7a62', paused: '#8a5a00', archived: '#8a2d2d' };
+    identityRow(identity, 'Test', experimentName, 'pivit-editor-test');
+    identityRow(identity, 'Variant', variantName, 'pivit-editor-variant');
+    identityRow(identity, 'Status', experimentStatusLabel || experimentStatus, 'pivit-editor-status', statusColor[experimentStatus]);
+    toolbar.appendChild(identity);
+
+    if (editWarning) {
+      const live = document.createElement('div');
+      styleReset(live);
+      live.id = 'pivit-editor-live';
+      live.setAttribute('role', 'note');
+      Object.assign(live.style, {
+        background: '#f4f1ff', color: '#3d2e86', borderRadius: '8px', padding: '8px 10px',
+        fontSize: '12px', lineHeight: '1.4', marginBottom: '10px',
+      });
+      live.textContent = editWarning;
+      toolbar.appendChild(live);
+    }
 
     statusEl = document.createElement('div');
     styleReset(statusEl);
@@ -557,6 +666,11 @@
       const res = await editorFetch(`${API_BASE}/api/editor/variants/${encodeURIComponent(VARIANT_ID)}/preview-token?token=${encodeURIComponent(TOKEN)}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.preview_token) {
+        if (data && data.code === 'archived') {
+          showExpiredNotice(data);
+          if (root && root.parentNode) root.parentNode.removeChild(root);
+          return;
+        }
         window.alert('This edit link has expired. Generate a new one from the pivitlab dashboard, then preview again.');
         return;
       }
@@ -1216,8 +1330,13 @@
       clearPersistedWorkingSet();
       refreshToolbarState();
       statusEl.textContent = 'Saved ✓';
-      setTimeout(() => { statusEl.textContent = `${experimentName} — ${variantName}`; }, 2000);
+      setTimeout(() => { if (statusEl && statusEl.textContent === 'Saved ✓') statusEl.textContent = ''; }, 2000);
     } catch (err) {
+      if (err.body && err.body.code === 'archived') {
+        showExpiredNotice(err.body);
+        if (root && root.parentNode) root.parentNode.removeChild(root);
+        return;
+      }
       statusEl.textContent = `Save failed: ${err.message}`;
     }
   }
@@ -1233,7 +1352,22 @@
       experimentId = String(variant.experiment_id || '');
       experimentName = variant.experiment_name || '';
       variantName = variant.name || '';
+      experimentStatus = variant.experiment_status || '';
+      experimentStatusLabel = variant.experiment_status_label || experimentStatus;
+      editWarning = variant.edit_warning || '';
       goalsScope = variant.goals_scope || 'shared';
+      if (experimentStatus === 'archived') {
+        showExpiredNotice({
+          message: variant.message || variant.error,
+          error: variant.error,
+          test: variant.test || {
+            name: experimentName,
+            status_label: experimentStatusLabel || 'Archived',
+          },
+          variant: variant.variant || { name: variantName },
+        });
+        return;
+      }
       const serverChanges = Array.isArray(variant.changes) ? variant.changes : [];
       const serverGoals = Array.isArray(variant.goals) ? variant.goals : [];
       savedSnapshot = canon({ changes: serverChanges, goals: serverGoals });
@@ -1252,9 +1386,12 @@
       else allChanges.forEach(applyChange);
 
       buildToolbar();
-      statusEl.textContent = `${experimentName} — ${variantName}`;
       refreshToolbarState();
     } catch (err) {
+      if (err.body && err.body.code === 'archived') {
+        showExpiredNotice(err.body);
+        return;
+      }
       const banner = document.createElement('div');
       styleReset(banner);
       Object.assign(banner.style, {
