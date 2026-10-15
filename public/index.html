@@ -697,7 +697,7 @@ async function callApi(path, options = {}) {
     let detail;
     if (data && (data.error || data.detail)) detail = data.detail ? `${data.error} — ${data.detail}` : data.error;
     else detail = raw || `HTTP ${res.status}`;
-    return { ok: false, message: `${res.status}: ${detail}` };
+    return { ok: false, message: `${res.status}: ${detail}`, data };
   }
   return { ok: true, data };
 }
@@ -1796,11 +1796,38 @@ function showDetailTab(tab) {
   if (currentTab === 'variants') renderVariantWarnings();
 }
 
-function detailError(message) {
+function detailError(message, test) {
   const el = document.getElementById('detail-error');
-  if (!el) { if (message) alert(message); return; }
+  const url = test && typeof test.url === 'string' ? test.url : '';
+  const linkText = test && test.link_label ? test.link_label : 'Open the test in pivitlab';
+  if (!el) {
+    if (message) alert(url ? `${message}\n\n${linkText}\n${url}` : message);
+    return;
+  }
+  while (el.firstChild) el.removeChild(el.firstChild);
   el.hidden = !message;
-  el.textContent = message || '';
+  if (!message) return;
+  el.appendChild(document.createTextNode(message));
+  if (/^https?:\/\//i.test(url)) {
+    el.appendChild(document.createTextNode(' '));
+    const link = document.createElement('a');
+    link.href = url;
+    link.textContent = linkText;
+    el.appendChild(link);
+  }
+}
+
+function reportArchived(result) {
+  const data = result && result.data && result.data.code === 'archived' ? result.data : null;
+  const message = data && data.error ? data.error : (result && result.message) || 'This test is archived.';
+  const onDetail = document.getElementById('page-detail') && document.getElementById('page-detail').classList.contains('active');
+  if (onDetail) {
+    detailError(message, data && data.test);
+    return;
+  }
+  const test = data && data.test;
+  if (test && test.url) alert(`${message}\n\n${test.link_label || 'Open the test in pivitlab'}\n${test.url}`);
+  else alert(message);
 }
 
 function requirePageUrl() {
@@ -1836,7 +1863,8 @@ async function openPreviewLink(expId, variantId, pageUrl) {
     body: JSON.stringify({ page_url: pageUrl }),
   });
   if (!result.ok) {
-    if (document.getElementById('page-detail').classList.contains('active')) detailError(result.message);
+    if (result.data && result.data.code === 'archived') reportArchived(result);
+    else if (document.getElementById('page-detail').classList.contains('active')) detailError(result.message);
     else alert(result.message);
     return;
   }
@@ -4021,13 +4049,17 @@ document.addEventListener('click', (e) => {
 async function makeEdits(expId, variantId, btn, pageUrl) {
   const url = (pageUrl || (document.getElementById('manage-page-url') || {}).value || '').trim();
   if (!url) { alert('Enter a page URL first.'); return false; }
-  showEditingSignpost(btn);
   if (btn) btn.disabled = true;
   const result = await callApi(`/api/experiments/${expId}/variants/${variantId}/edit-link`, {
     method: 'POST', headers: authHeaders(), body: JSON.stringify({ page_url: url }),
   });
   if (btn) btn.disabled = false;
-  if (!result.ok) { alert(`Error: ${result.message}`); return false; }
+  if (!result.ok) {
+    if (result.data && result.data.code === 'archived') reportArchived(result);
+    else alert(`Error: ${result.message}`);
+    return false;
+  }
+  showEditingSignpost(btn);
   window.open(result.data.edit_url, '_blank');
   return true;
 }

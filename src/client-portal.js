@@ -81,7 +81,7 @@ async function detailForClient(clientId, accountId, experimentId, now = new Date
   const page = experimentPageUrl(experiment);
   const withPreview = variants.rows.map((variant) => {
     let preview_url = null;
-    if (page) {
+    if (page && experiment.status !== 'archived') {
       const token = createPreviewToken(variant.id, CLIENT_PREVIEW_TTL_MS, Date.now(), {
         accountId: experiment.account_id,
         siteId: experiment.site_id,

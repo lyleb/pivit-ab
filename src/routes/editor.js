@@ -4,6 +4,13 @@ const { inspectEditToken } = require('../edit-token');
 const { createPreviewToken } = require('../preview-access');
 const { recordGoalUsage } = require('./goals');
 const { validateGoals, persistGoals } = require('../goals');
+const {
+  archivedBody,
+  archivedEditMessage,
+  archivedPreviewMessage,
+  editorFields,
+  expiredEditMessage,
+} = require('../editor-context');
 const router = express.Router();
 
 // The editor reads one variant at a time. A cached GET would keep showing the
@@ -30,27 +37,58 @@ function claimsMatch(claims, accountId) {
   return !claims || !claims.accountId || claims.accountId === accountId;
 }
 
+const VARIANT_SQL = `
+  SELECT v.*, e.name AS experiment_name, e.status AS experiment_status,
+         e.site_id AS experiment_site_id,
+         e.url_match, e.goals AS experiment_goals, e.goals_scope
+  FROM variants v
+  JOIN experiments e ON e.id = v.experiment_id
+  WHERE v.id = $1
+`;
+
+function archivedFromRow(req, row, message) {
+  return archivedBody(req, {
+    id: row.experiment_id,
+    name: row.experiment_name,
+    variantId: row.id,
+    variantName: row.name,
+  }, message);
+}
+
+// 404 when the variant is gone, 401 when the token is for another account,
+// 409 when the test is archived. The 409 body names the test and links to it,
+// and it does not include the variant's changes.
+function rejectEditorRow(req, res, row, archivedMessage) {
+  if (!row) {
+    res.status(404).json({ error: 'no variant found with that id' });
+    return true;
+  }
+  if (!claimsMatch(req.editClaims, row.account_id)) {
+    res.status(401).json({ error: 'invalid or expired edit link — generate a new one from the dashboard' });
+    return true;
+  }
+  if (row.experiment_status === 'archived') {
+    res.status(409).json(archivedFromRow(req, row, archivedMessage(row.experiment_name)));
+    return true;
+  }
+  return false;
+}
+
 // GET /api/editor/variants/:variantId?token=...
 // Returns the variant plus its parent experiment's basic info, so the in-page
 // editor has context (name, existing changes) without needing a session.
 router.get('/variants/:variantId', requireValidEditToken, async (req, res) => {
   try {
-    const { rows } = await db.query(
-      `SELECT v.*, e.name AS experiment_name, e.url_match, e.goals AS experiment_goals, e.goals_scope
-       FROM variants v JOIN experiments e ON e.id = v.experiment_id
-       WHERE v.id = $1`,
-      [req.params.variantId]
-    );
-    if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id' });
-    if (!claimsMatch(req.editClaims, rows[0].account_id)) {
-      return res.status(401).json({ error: 'invalid or expired edit link — generate a new one from the dashboard' });
-    }
+    const { rows } = await db.query(VARIANT_SQL, [req.params.variantId]);
     const row = rows[0];
+    if (rejectEditorRow(req, res, row, expiredEditMessage)) return;
     // Shared goals are the ones every variant is measured on. The editor
     // still receives them as `goals` so a save writes the same list back.
     if (row.goals_scope !== 'divergent' && Array.isArray(row.experiment_goals) && row.experiment_goals.length) {
       row.goals = row.experiment_goals;
     }
+    Object.assign(row, editorFields(row.experiment_status));
+    delete row.experiment_site_id;
     res.json(row);
   } catch (err) {
     console.error(err);
@@ -64,21 +102,13 @@ router.get('/variants/:variantId', requireValidEditToken, async (req, res) => {
 // carry the more powerful edit token in the URL.
 router.get('/variants/:variantId/preview-token', requireValidEditToken, async (req, res) => {
   try {
-    const { rows } = await db.query(
-      `SELECT e.account_id, e.site_id
-       FROM variants v
-       JOIN experiments e ON e.id = v.experiment_id
-       WHERE v.id = $1`,
-      [req.params.variantId]
-    );
-    if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id' });
-    if (!claimsMatch(req.editClaims, rows[0].account_id)) {
-      return res.status(401).json({ error: 'invalid or expired edit link — generate a new one from the dashboard' });
-    }
+    const { rows } = await db.query(VARIANT_SQL, [req.params.variantId]);
+    const row = rows[0];
+    if (rejectEditorRow(req, res, row, archivedPreviewMessage)) return;
     res.json({
       preview_token: createPreviewToken(req.params.variantId, undefined, undefined, {
-        accountId: rows[0].account_id,
-        siteId: rows[0].site_id,
+        accountId: row.account_id,
+        siteId: row.experiment_site_id,
       }),
     });
   } catch (err) {
@@ -105,6 +135,20 @@ router.patch('/variants/:variantId', requireValidEditToken, async (req, res) => 
     }
 
     await client.query('BEGIN');
+    const locked = await client.query(`${VARIANT_SQL} FOR UPDATE OF e`, [req.params.variantId]);
+    const current = locked.rows[0];
+    if (!current) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'no variant found with that id' });
+    }
+    if (!claimsMatch(req.editClaims, current.account_id)) {
+      await client.query('ROLLBACK');
+      return res.status(401).json({ error: 'invalid or expired edit link — generate a new one from the dashboard' });
+    }
+    if (current.experiment_status === 'archived') {
+      await client.query('ROLLBACK');
+      return res.status(409).json(archivedFromRow(req, current, archivedEditMessage(current.experiment_name)));
+    }
     const { rows } = await client.query(
       `UPDATE variants
        SET changes = COALESCE($1::jsonb, changes)
@@ -117,10 +161,6 @@ router.patch('/variants/:variantId', requireValidEditToken, async (req, res) => 
     if (rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'no variant found with that id' });
-    }
-    if (!claimsMatch(req.editClaims, rows[0].account_id)) {
-      await client.query('ROLLBACK');
-      return res.status(401).json({ error: 'invalid or expired edit link — generate a new one from the dashboard' });
     }
     if (goals !== undefined) {
       const saved = await persistGoals(client.query.bind(client), {
