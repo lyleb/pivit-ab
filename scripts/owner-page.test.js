@@ -20,8 +20,9 @@ for (const file of fs.readdirSync(publicDir)) {
 
 const login = fs.readFileSync(path.join(publicDir, 'login.html'), 'utf8');
 assert.ok(login.includes('Email me a sign-in link'));
-assert.ok(login.includes('Client login'));
+assert.ok(login.includes('Viewing results for a company? Client login →'));
 assert.ok(login.includes('Got an invite code from pivitlab?'));
+assert.ok(login.includes("requested === 'client'"));
 assert.ok(login.includes('/api/auth/client-login'));
 assert.ok(!login.includes('/api/auth/login'));
 

@@ -17,7 +17,8 @@
   <div class="brand">
     <span class="brand-logo" role="img" aria-label="pivitlab"></span>
     <h1>Check your email</h1>
-    <p class="hint" id="sent-to">We've sent a sign-in link. It expires in 15 minutes.</p>
+    <p class="hint" id="sent-to">If that address can be used, we've sent a link. It expires in 15 minutes.</p>
+    <p class="hint" id="sent-hint" style="margin-top:10px;">No email? You need a pivitlab account first. Ask for an invite, or use the address you signed up with.</p>
   </div>
   <form id="code-form">
     <label for="code">6-digit code</label>
@@ -33,7 +34,15 @@ const params = new URLSearchParams(location.search);
 const email = (params.get('email') || '').trim();
 const purpose = params.get('purpose') === 'signup' ? 'signup' : 'signin';
 const sent = document.getElementById('sent-to');
-if (email) sent.textContent = `We've sent a link to ${email}. It expires in 15 minutes.`;
+const sentHint = document.getElementById('sent-hint');
+// Sign-in keeps the static sentence for every address. Do not rewrite it
+// from the address, or from whether an account exists.
+if (purpose === 'signup') {
+  sent.textContent = email
+    ? `We've sent a link to ${email}. It expires in 15 minutes.`
+    : "We've sent a sign-in link. It expires in 15 minutes.";
+  sentHint.hidden = true;
+}
 
 const resendBtn = document.getElementById('resend');
 let left = 60;
