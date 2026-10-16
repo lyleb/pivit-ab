@@ -25,6 +25,7 @@ const {
   findForbiddenKey,
 } = require('./headlines');
 const { goalName, concludedPayload, blindPublic } = require('./portal-view');
+const { isDemo } = require('./demo-test');
 
 async function busiestUntestedPage(accountId, experimentId) {
   const { rows } = await db.query(
@@ -34,6 +35,7 @@ async function busiestUntestedPage(accountId, experimentId) {
      JOIN events ev ON ev.experiment_id = e.id
      WHERE e.account_id = $1
        AND e.id <> $2
+       AND e.test_type <> 'demo'
        AND ev.event_type = 'view'
        AND ev.excluded_at IS NULL
        AND ev.is_test = false
@@ -42,6 +44,7 @@ async function busiestUntestedPage(accountId, experimentId) {
          SELECT 1 FROM experiments running
          WHERE running.account_id = e.account_id
            AND running.url_match = e.url_match
+           AND running.test_type <> 'demo'
            AND running.status IN ('running', 'paused')
        )
      GROUP BY e.url_match
@@ -58,8 +61,9 @@ async function busiestUntestedPage(accountId, experimentId) {
   };
 }
 
-async function rateAndSnippet(experimentId, now, startedAt) {
+async function rateAndSnippet(experimentId, now, startedAt, testOnly) {
   const since = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const trafficSql = testOnly ? 'is_test = true' : 'is_test = false';
   const elapsed = startedAt
     ? Math.max(0, (now.getTime() - new Date(startedAt).getTime()) / (24 * 60 * 60 * 1000))
     : 14;
@@ -71,7 +75,7 @@ async function rateAndSnippet(experimentId, now, startedAt) {
        WHERE experiment_id = $1
          AND event_type = 'view'
          AND excluded_at IS NULL
-         AND is_test = false
+         AND ${trafficSql}
          AND created_at >= $2`,
       [experimentId, since]
     ),
@@ -81,7 +85,7 @@ async function rateAndSnippet(experimentId, now, startedAt) {
        WHERE experiment_id = $1
          AND event_type = 'view'
          AND excluded_at IS NULL
-         AND is_test = false`,
+         AND ${trafficSql}`,
       [experimentId]
     ),
   ]);
@@ -99,7 +103,17 @@ async function rateAndSnippet(experimentId, now, startedAt) {
 }
 
 async function snapshotExperiment(experiment, now, date, options) {
-  if (!options.force) {
+  const opts = options || {};
+  const demo = isDemo(experiment);
+  if (opts.allowReplace) {
+    const stored = await db.query(
+      `SELECT detail #> '{public,concluded}' AS concluded
+       FROM status_snapshots
+       WHERE experiment_id = $1 AND snapshot_date = $2::date`,
+      [experiment.id, date]
+    );
+    if (stored.rows[0] && stored.rows[0].concluded) return 'skipped';
+  } else if (!opts.force) {
     const existing = await db.query(
       `SELECT 1 FROM status_snapshots WHERE experiment_id = $1 AND snapshot_date = $2::date`,
       [experiment.id, date]
@@ -108,10 +122,11 @@ async function snapshotExperiment(experiment, now, date, options) {
   }
 
   const plan = experiment.plan || {};
+  const countOptions = demo ? { testOnly: true } : undefined;
   const [{ variantData }, splits, traffic] = await Promise.all([
-    getPrimaryVariantData(experiment.id),
-    visitorRows(experiment.id, false),
-    rateAndSnippet(experiment.id, now, experiment.started_at),
+    getPrimaryVariantData(experiment.id, countOptions),
+    visitorRows(experiment.id, false, undefined, countOptions || {}),
+    rateAndSnippet(experiment.id, now, experiment.started_at, demo),
   ]);
   const counts = new Map(variantData.map((row) => [row.variant_id, row]));
   const variants = splits.map((row) => {
@@ -223,7 +238,9 @@ async function snapshotExperiment(experiment, now, date, options) {
     detailPublic.headline_code = 'ready';
     detailPublic.headline = 'Result ready';
     detailPublic.icon = 'tick';
-    detailPublic.recommendation = 'The planned sample and the minimum runtime are both in. This is the result.';
+    detailPublic.recommendation = demo
+      ? 'The planned sample is in. The 14-day minimum runtime is skipped because this is a demo test.'
+      : 'The planned sample and the minimum runtime are both in. This is the result.';
   } else {
     const leaked = findForbiddenKey(detailPublic, false);
     if (leaked) throw new Error(`refusing to store a blind snapshot that contains ${leaked}`);
@@ -245,22 +262,40 @@ async function snapshotExperiment(experiment, now, date, options) {
   };
 
   const projected = assessment.projectedEnd ? londonDateISO(assessment.projectedEnd) : null;
-  const written = await db.query(
-    `INSERT INTO status_snapshots
-       (experiment_id, account_id, snapshot_date, headline_code, progress_pct_band, projected_end, futility_band, detail)
-     VALUES ($1, $2, $3::date, $4, $5, $6::date, $7, $8::jsonb)
-     ON CONFLICT (experiment_id, snapshot_date) DO NOTHING`,
-    [
-      experiment.id,
-      experiment.account_id,
-      date,
-      detailPublic.headline_code,
-      assessment.progressPctBand,
-      projected,
-      assessment.band,
-      JSON.stringify({ public: detailPublic, private: detailPrivate }),
-    ]
-  );
+  const payload = JSON.stringify({ public: detailPublic, private: detailPrivate });
+  const params = [
+    experiment.id,
+    experiment.account_id,
+    date,
+    detailPublic.headline_code,
+    assessment.progressPctBand,
+    projected,
+    assessment.band,
+    payload,
+  ];
+  // A demo may replace today's blind row once the sample is in. A stored
+  // conclusion is not overwritten. Live tests still insert once per day.
+  const written = opts.allowReplace
+    ? await db.query(
+      `INSERT INTO status_snapshots
+         (experiment_id, account_id, snapshot_date, headline_code, progress_pct_band, projected_end, futility_band, detail)
+       VALUES ($1, $2, $3::date, $4, $5, $6::date, $7, $8::jsonb)
+       ON CONFLICT (experiment_id, snapshot_date) DO UPDATE
+         SET headline_code = EXCLUDED.headline_code,
+             progress_pct_band = EXCLUDED.progress_pct_band,
+             projected_end = EXCLUDED.projected_end,
+             futility_band = EXCLUDED.futility_band,
+             detail = EXCLUDED.detail
+       WHERE status_snapshots.detail #> '{public,concluded}' IS NULL`,
+      params
+    )
+    : await db.query(
+      `INSERT INTO status_snapshots
+         (experiment_id, account_id, snapshot_date, headline_code, progress_pct_band, projected_end, futility_band, detail)
+       VALUES ($1, $2, $3::date, $4, $5, $6::date, $7, $8::jsonb)
+       ON CONFLICT (experiment_id, snapshot_date) DO NOTHING`,
+      params
+    );
   return written.rowCount ? 'written' : 'skipped';
 }
 
@@ -273,7 +308,7 @@ async function runDailySnapshots(now = new Date(), options = {}) {
   const date = londonDateISO(when);
   const { rows } = await db.query(
     `SELECT id, account_id, name, status, url_match, url_match_type, allowed_hosts,
-            goals, goals_scope, plan, started_at, peeked_at, hypothesis, client_id, site_id
+            goals, goals_scope, plan, started_at, peeked_at, hypothesis, client_id, site_id, test_type
      FROM experiments
      WHERE status IN ('running', 'paused', 'archived')
        AND plan IS NOT NULL
@@ -284,7 +319,9 @@ async function runDailySnapshots(now = new Date(), options = {}) {
   let failed = 0;
   for (const experiment of rows) {
     try {
-      const outcome = await snapshotExperiment(experiment, when, date, options);
+      const outcome = await snapshotExperiment(experiment, when, date, Object.assign({}, options, {
+        allowReplace: isDemo(experiment),
+      }));
       if (outcome === 'written') written += 1;
       else skipped += 1;
     } catch (err) {

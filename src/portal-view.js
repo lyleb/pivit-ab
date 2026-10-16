@@ -132,6 +132,7 @@ function listItem(experiment, snapshot, now) {
     variant_count: Number(experiment.variant_count) || 0,
     goal: goal,
     subtitle: subtitleParts.filter(Boolean).join(' · '),
+    demo: experiment.test_type === 'demo',
     pill: pill.text,
     tone: pill.tone,
     days_elapsed: pub && pub.days_elapsed != null ? pub.days_elapsed : days,
@@ -341,6 +342,7 @@ function detailPayload({ experiment, snapshot, variants, review, now }) {
       hypothesis: experiment.hypothesis || '',
       url_match: experiment.url_match || '',
       url_match_type: experiment.url_match_type || 'contains',
+      demo: experiment.test_type === 'demo',
       page_line: pageLine(experiment),
       goal: goalName(experiment),
       variants: (variants || []).map((variant) => ({

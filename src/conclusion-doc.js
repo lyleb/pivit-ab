@@ -63,6 +63,7 @@ function freezeConclusion(experiment, snapshot, generatedOn) {
     page_line: pageLine(experiment),
     goal: goalName(experiment),
     peeked: !!(experiment && experiment.peeked_at),
+    demo: !!(experiment && experiment.test_type === 'demo'),
     generated_on: generatedOn,
     snapshot_date: snapshot.snapshot_date || '',
     concluded: JSON.parse(JSON.stringify(concluded)),
@@ -75,6 +76,16 @@ function conclusionLines(content) {
   push(items, 'pivitlab', 14, true, 0);
   push(items, 'Conclusion', 20, true, 14);
   push(items, content.experiment_name || 'Test', 13, true, 6);
+  if (content.demo) {
+    push(items, 'Demo', 12, true, 8);
+    push(
+      items,
+      'Demo test. Test traffic only. Real visitors are not included. The 14-day minimum runtime is skipped, which is only allowed for a demo test.',
+      10,
+      false,
+      4
+    );
+  }
   const finished = stored.finished_label ? `, finished ${stored.finished_label}` : '';
   push(
     items,
@@ -160,10 +171,10 @@ function conclusionLines(content) {
 }
 
 function conclusionPdf(content) {
-  return renderDocument(conclusionLines(content));
+  return renderDocument(conclusionLines(content), { watermark: content && content.demo ? 'Demo' : '' });
 }
 
-function approvalLines({ experimentName, approverName, approvedAt, releasedAt }) {
+function approvalLines({ experimentName, approverName, approvedAt, releasedAt, demo }) {
   const items = [];
   push(items, 'pivitlab', 14, true, 0);
   push(items, 'Approval record', 20, true, 14);
@@ -175,6 +186,10 @@ function approvalLines({ experimentName, approverName, approvedAt, releasedAt })
     10
   );
   push(items, `Test: ${experimentName || 'Test'}`, 12, true, 16);
+  if (demo) {
+    push(items, 'Demo', 12, true, 8);
+    push(items, 'Demo test. This approval is for test traffic only.', 10, false, 4);
+  }
   push(items, `Approved by: ${approverName || 'Client'}`, 12, false, 8);
   push(items, `Approved on: ${longStamp(approvedAt)}`, 12, false, 6);
   if (releasedAt) push(items, `Conclusion released: ${longStamp(releasedAt)}`, 11, false, 6);
@@ -189,7 +204,7 @@ function approvalLines({ experimentName, approverName, approvedAt, releasedAt })
 }
 
 function approvalPdf(record) {
-  return renderDocument(approvalLines(record));
+  return renderDocument(approvalLines(record), { watermark: record && record.demo ? 'Demo' : '' });
 }
 
 function pdfDay(date) {

@@ -44,7 +44,7 @@ function wrapText(text, size, maxWidth) {
   return lines;
 }
 
-function renderDocument(items) {
+function renderDocument(items, options) {
   const pageWidth = 595;
   const pageHeight = 842;
   const marginX = 48;
@@ -75,6 +75,10 @@ function renderDocument(items) {
   }
   if (!pages.length || ops.length) pages.push(ops);
 
+  const watermark = options && options.watermark ? String(options.watermark) : '';
+  const mark = watermark
+    ? `q\n0.75 0.75 0.78 rg\nBT\n/F2 64 Tf\n0.7071 0.7071 -0.7071 0.7071 160 260 Tm\n(${pdfString(watermark)}) Tj\nET\nQ\n`
+    : '';
   const total = pages.length;
   const pageObjs = [];
   const kids = [];
@@ -85,7 +89,7 @@ function renderDocument(items) {
     const pageId = nextId;
     nextId += 1;
     const footer = `BT /F1 9 Tf ${marginX} 36 Td (${pdfString(`pivitlab  ·  page ${i + 1} of ${total}`)}) Tj ET`;
-    const stream = pages[i].concat(footer).join('\n');
+    const stream = mark + pages[i].concat(footer).join('\n');
     pageObjs.push({ contentId, pageId, stream });
     kids.push(`${pageId} 0 R`);
   }

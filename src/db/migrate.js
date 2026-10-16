@@ -18,6 +18,7 @@ const { applyFirstRun } = require('./first-run');
 const { applyConclusion } = require('./conclusion');
 const { applyChangeApplied } = require('./change-applied');
 const { applyElementSelector } = require('./element-selector');
+const { applyDemoTest } = require('./demo-test');
 
 const LOCK_KEY = 814021;
 
@@ -50,6 +51,9 @@ const VERSIONS = [
   // Optional CSS selector. The test runs only when that element is on the page.
   // Stays out of schema.sql.
   { version: '012', name: 'element-selector', run: applyElementSelector },
+  // Demo tests: test traffic only, a fixed sample, and no switch to live.
+  // Stays out of schema.sql.
+  { version: '013', name: 'demo-test', run: applyDemoTest },
 ];
 
 async function ensureMigrationsTable(queryable) {

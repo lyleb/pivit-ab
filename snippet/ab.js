@@ -19,6 +19,9 @@
  * No custom header is sent — sendBeacon cannot set one. Visitor ids starting
  * with v_pt are test traffic even without the flag.
  *
+ * A demo test (test_type "demo") is test traffic only. A real visitor is not
+ * bucketed: no assignment, no change, no view. pivit_qa and v_pt still run.
+ *
  * Change applied: a view beacon may include change_applied true or false.
  * True means every element selector was on the page and the change ran.
  * The field is left off when the variant has no element change to check,
@@ -88,6 +91,7 @@
   api.waitForElement = waitForElement;
   api.exposeWhenReady = exposeWhenReady;
   api.previewInfo = previewInfo;
+  api.mayBucketExperiment = mayBucketExperiment;
   api.TEST_VISITOR_PREFIX = 'v_pt';
   api.QA_STORAGE_KEY = 'pivit_qa';
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
@@ -485,6 +489,14 @@
     });
   }
 
+  // A demo test never buckets a real visitor. Test traffic is pivit_qa or a
+  // visitor id that starts with v_pt. Live tests are unchanged.
+  function mayBucketExperiment(experiment, visitorId, qaOn) {
+    if (!experiment || experiment.test_type !== 'demo') return true;
+    if (qaOn) return true;
+    return typeof visitorId === 'string' && visitorId.indexOf('v_pt') === 0;
+  }
+
   function previewInfo(experiment, variant, gate) {
     const variantName = variant && variant.name ? variant.name : '';
     const experimentName = experiment && experiment.name ? experiment.name : '';
@@ -636,6 +648,7 @@
       // Assignment and the view happen here, and only here. A waiting
       // experiment does not call this until its element is on the page.
       function enroll(experiment) {
+        if (!api.mayBucketExperiment(experiment, visitorId, qaOn)) return;
         if (!experiment.variants || experiment.variants.length === 0) return;
         let already = null;
         try { already = localStorage.getItem(ASSIGNMENT_PREFIX + experiment.id); } catch (e) { already = null; }

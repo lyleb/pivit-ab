@@ -9,6 +9,7 @@ const { outcomeGate } = require('../experiment-plan');
 const { hideOutcomeRow } = require('../reading');
 const { buildVerdict } = require('../verdict');
 const { ownedExperiment } = require('../tenant');
+const { countOptions } = require('../demo-test');
 const { csvFilename, sendCsv } = require('../csv');
 const router = express.Router();
 
@@ -25,6 +26,17 @@ async function assertOwned(req, res, experimentId) {
 
 function wantsTestTraffic(req) {
   return flagIsOn(req.query && req.query.include_test);
+}
+
+// A demo test always reads test traffic, and never mixes real visitors in
+// when include_test is set. A live test is unchanged.
+function prepared(experiment, req) {
+  const options = countOptions(experiment, wantsTestTraffic(req));
+  return {
+    options,
+    includeTest: !!options.includeTest,
+    mode: options.testOnly ? 'test' : undefined,
+  };
 }
 
 // "New" vs "returning" is defined by day, not by event count: a visitor is "new"
@@ -85,13 +97,15 @@ router.get('/:experimentId/test-traffic', async (req, res) => {
 // goals breaks the same unique count out per goal when an experiment has several.
 router.get('/:experimentId', async (req, res) => {
   const { experimentId } = req.params;
-  const includeTest = wantsTestTraffic(req);
 
   try {
-    if (!(await assertOwned(req, res, experimentId))) return;
+    const experiment = await assertOwned(req, res, experimentId);
+    if (!experiment) return;
+    const read = prepared(experiment, req);
+    const includeTest = read.includeTest;
     const [{ results, primaryKey }, breakdown, testTraffic] = await Promise.all([
-      getVariantResults(experimentId, req.query.visitor_type, { includeTest }),
-      getGoalBreakdown(experimentId, { includeTest }),
+      getVariantResults(experimentId, req.query.visitor_type, read.options),
+      getGoalBreakdown(experimentId, read.options),
       summariseTestTraffic(experimentId),
     ]);
 
@@ -122,14 +136,16 @@ router.get('/:experimentId/timeseries', async (req, res) => {
   const { experimentId } = req.params;
 
   try {
-    if (!(await assertOwned(req, res, experimentId))) return;
-    const includeTest = wantsTestTraffic(req);
+    const experiment = await assertOwned(req, res, experimentId);
+    if (!experiment) return;
+    const read = prepared(experiment, req);
+    const includeTest = read.includeTest;
     const gate = await outcomeGate(experimentId, includeTest, req.account.id);
     if (!gate.visible) {
       res.json({ experiment_id: experimentId, include_test: includeTest, series: [], blinded: true, reading: gate.reading });
       return;
     }
-    const series = await getTimeseries(experimentId, { includeTest });
+    const series = await getTimeseries(experimentId, read.options);
     res.json({ experiment_id: experimentId, include_test: includeTest, series, blinded: false, reading: gate.reading });
   } catch (err) {
     console.error(err);
@@ -143,14 +159,16 @@ router.get('/:experimentId/timeseries', async (req, res) => {
 router.get('/:experimentId/recent', async (req, res) => {
   const { experimentId } = req.params;
   try {
-    if (!(await assertOwned(req, res, experimentId))) return;
-    const includeTest = wantsTestTraffic(req);
+    const experiment = await assertOwned(req, res, experimentId);
+    if (!experiment) return;
+    const read = prepared(experiment, req);
+    const includeTest = read.includeTest;
     const gate = await outcomeGate(experimentId, includeTest, req.account.id);
     const outcomeSql = gate.visible ? '' : ` AND e.event_type = 'view'`;
     const { rows } = await db.query(
       `SELECT e.event_type, e.goal_id, e.created_at, v.name AS variant_name
        FROM events e JOIN variants v ON v.id = e.variant_id
-       WHERE e.experiment_id = $1 AND ${visibleEventSql('e', 2)}${outcomeSql}
+       WHERE e.experiment_id = $1 AND ${visibleEventSql('e', 2, read.mode)}${outcomeSql}
        ORDER BY e.created_at DESC
        LIMIT 20`,
       [experimentId, includeTest]
@@ -199,7 +217,8 @@ router.get('/:experimentId/export', async (req, res) => {
       sendCsv(res, csvFilename(experiment.name, 'test-traffic'), eventCsvRows(rows, 'traffic'));
       return;
     }
-    const includeTest = wantsTestTraffic(req);
+    const read = prepared(experiment, req);
+    const includeTest = read.includeTest;
     const gate = await outcomeGate(experimentId, includeTest, req.account.id);
     if (!gate.visible) {
       const header = ['variant_name', 'visitors', 'target_visitors', 'traffic_split_percent', 'days_elapsed', 'minimum_days'];
@@ -216,13 +235,13 @@ router.get('/:experimentId/export', async (req, res) => {
       return;
     }
     const { rows } = await db.query(
-      `${firstSeenCte()}
+      `${firstSeenCte(read.mode)}
        SELECT e.created_at, e.event_type, v.name AS variant_name, e.goal_id, e.visitor_id,
          CASE WHEN e.created_at::date = fs.first_day THEN 'new' ELSE 'returning' END AS visitor_type
        FROM events e
        JOIN variants v ON v.id = e.variant_id
        LEFT JOIN first_seen fs ON fs.visitor_id = e.visitor_id
-       WHERE e.experiment_id = $1 AND ${visibleEventSql('e', 2)}
+       WHERE e.experiment_id = $1 AND ${visibleEventSql('e', 2, read.mode)}
        ORDER BY e.created_at ASC`,
       [experimentId, includeTest]
     );
@@ -243,10 +262,12 @@ router.get('/:experimentId/export', async (req, res) => {
 router.get('/:experimentId/bayesian', async (req, res) => {
   const { experimentId } = req.params;
   try {
-    if (!(await assertOwned(req, res, experimentId))) return;
-    const includeTest = wantsTestTraffic(req);
+    const experiment = await assertOwned(req, res, experimentId);
+    if (!experiment) return;
+    const read = prepared(experiment, req);
+    const includeTest = read.includeTest;
     const gate = await outcomeGate(experimentId, includeTest, req.account.id);
-    const { variantData } = await getPrimaryVariantData(experimentId, { includeTest });
+    const { variantData } = await getPrimaryVariantData(experimentId, read.options);
     const totalVisitors = variantData.reduce((sum, v) => sum + v.visitors, 0);
     if (!gate.visible) {
       res.json({
@@ -283,8 +304,9 @@ router.get('/:experimentId/bayesian', async (req, res) => {
 router.get('/:experimentId/srm', async (req, res) => {
   const { experimentId } = req.params;
   try {
-    if (!(await assertOwned(req, res, experimentId))) return;
-    const includeTest = wantsTestTraffic(req);
+    const experiment = await assertOwned(req, res, experimentId);
+    if (!experiment) return;
+    const read = prepared(experiment, req);
     const { rows } = await db.query(
       `SELECT
          v.id AS variant_id,
@@ -292,11 +314,11 @@ router.get('/:experimentId/srm', async (req, res) => {
          v.traffic_split,
          COUNT(DISTINCT e.visitor_id) FILTER (WHERE e.event_type = 'view') AS visitors
        FROM variants v
-       LEFT JOIN events e ON e.variant_id = v.id AND ${visibleEventSql('e', 2)}
+       LEFT JOIN events e ON e.variant_id = v.id AND ${visibleEventSql('e', 2, read.mode)}
        WHERE v.experiment_id = $1 AND v.enabled = true
        GROUP BY v.id, v.name, v.traffic_split
        ORDER BY v.name`,
-      [experimentId, includeTest]
+      [experimentId, read.includeTest]
     );
 
     const variantData = rows.map((r) => ({
@@ -318,14 +340,15 @@ router.get('/:experimentId/srm', async (req, res) => {
 router.get('/:experimentId/verdict', async (req, res) => {
   const { experimentId } = req.params;
   try {
-    if (!(await assertOwned(req, res, experimentId))) return;
-    const includeTest = wantsTestTraffic(req);
-    const gate = await outcomeGate(experimentId, includeTest, req.account.id);
+    const experiment = await assertOwned(req, res, experimentId);
+    if (!experiment) return;
+    const read = prepared(experiment, req);
+    const gate = await outcomeGate(experimentId, read.includeTest, req.account.id);
     if (!gate.loaded) return res.status(404).json({ error: 'no experiment found with that id' });
     if (!gate.reading.plan_met) {
       return res.json({ ready: false, reading: gate.reading, peeked: gate.reading.peeked });
     }
-    const { variantData } = await getPrimaryVariantData(experimentId, { includeTest });
+    const { variantData } = await getPrimaryVariantData(experimentId, read.options);
     const verdict = buildVerdict({
       variants: variantData,
       plan: gate.loaded.experiment.plan,

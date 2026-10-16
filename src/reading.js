@@ -36,6 +36,10 @@ function planProgress({ plan, startedAt, now, variants }) {
   }
   const target = Number(plan.visitors_per_variant) || 0;
   const minDays = Number(plan.min_runtime_days) || 0;
+  // Only a demo plan may skip the 14-day minimum. A live plan with no
+  // minimum still has to wait: runtime_met stays false until a real minimum
+  // has passed.
+  const waived = plan.demo === true && plan.runtime_waived === true;
   const elapsed = daysElapsed(startedAt, now || new Date());
   const rows = (variants || []).map((variant) => {
     const visitors = Number(variant.visitors) || 0;
@@ -51,7 +55,7 @@ function planProgress({ plan, startedAt, now, variants }) {
   });
   const gating = rows.filter((row) => row.enabled);
   const sampleMet = target > 0 && gating.length > 0 && gating.every((row) => row.sample_met);
-  const runtimeMet = minDays > 0 && elapsed >= minDays;
+  const runtimeMet = waived || (minDays > 0 && elapsed >= minDays);
   return {
     has_plan: true,
     days_elapsed: elapsed,
@@ -114,6 +118,8 @@ function publicPlan(plan) {
     estimated_days: plan.estimated_days,
     estimated_weeks: plan.estimated_weeks,
     min_runtime_days: plan.min_runtime_days,
+    demo: plan.demo === true,
+    runtime_waived: plan.runtime_waived === true,
     comparisons: plan.comparisons,
     variant_count: plan.variant_count,
     bonferroni: !!plan.bonferroni,

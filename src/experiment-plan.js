@@ -11,6 +11,7 @@ const {
   autoPlanInput,
 } = require('./plan');
 const { planProgress, describeReading, publicPlan } = require('./reading');
+const { isDemo, demoPlan, PLAN_LOCKED_ERROR } = require('./demo-test');
 
 const TRAFFIC_DAYS = 28;
 const MIN_TRAFFIC_VISITORS = 30;
@@ -37,27 +38,31 @@ async function loadExperiment(experimentId, query = db.query.bind(db), accountId
     accountSql = ` AND account_id = $${params.length}`;
   }
   const { rows } = await query(
-    `SELECT id, name, status, url_match, allowed_hosts, goals, plan, started_at, peeked_at, created_at, client_id, account_id, site_id
+    `SELECT id, name, status, url_match, allowed_hosts, goals, plan, started_at, peeked_at, created_at, client_id, account_id, site_id, test_type
      FROM experiments WHERE id = $1${accountSql}`,
     params
   );
   return rows[0] || null;
 }
 
-async function visitorRows(experimentId, includeTest, query = db.query.bind(db)) {
+async function visitorRows(experimentId, includeTest, query = db.query.bind(db), options = {}) {
+  const testOnly = !!(options && options.testOnly);
   const { rows } = await query(
     `SELECT v.id, v.name, v.traffic_split, v.enabled, v.created_at,
        COUNT(DISTINCT e.visitor_id) FILTER (
          WHERE e.event_type = 'view'
            AND e.excluded_at IS NULL
-           AND ($2::boolean OR e.is_test = false)
+           AND (
+             ($3::boolean AND e.is_test = true)
+             OR (NOT $3::boolean AND ($2::boolean OR e.is_test = false))
+           )
        )::int AS visitors
      FROM variants v
      LEFT JOIN events e ON e.variant_id = v.id
      WHERE v.experiment_id = $1
      GROUP BY v.id
      ORDER BY v.created_at`,
-    [experimentId, !!includeTest]
+    [experimentId, !!includeTest, testOnly]
   );
   return rows.map((row) => ({
     id: row.id,
@@ -82,7 +87,10 @@ async function rateFor(experimentIds, goalId, query) {
      FROM events
      WHERE experiment_id = ANY($1::uuid[])
        AND excluded_at IS NULL
-       AND is_test = false`,
+       AND is_test = false
+       AND experiment_id NOT IN (
+         SELECT id FROM experiments WHERE test_type = 'demo'
+       )`,
     [experimentIds, goalId]
   );
   return {
@@ -105,7 +113,8 @@ async function relatedIds(experiment, query) {
        AND (
          ($2 <> '' AND url_match = $2)
          OR (cardinality($3::text[]) > 0 AND allowed_hosts && $3::text[])
-       )${accountSql}`,
+       )
+       AND test_type <> 'demo'${accountSql}`,
     params
   );
   return rows.map((row) => row.id);
@@ -131,7 +140,10 @@ async function recentWeeklyVisitors(experimentIds, query) {
        AND event_type = 'view'
        AND excluded_at IS NULL
        AND is_test = false
-       AND created_at >= now() - interval '28 days'`,
+       AND created_at >= now() - interval '28 days'
+       AND experiment_id NOT IN (
+         SELECT id FROM experiments WHERE test_type = 'demo'
+       )`,
     [experimentIds]
   );
   const visitors = Number(rows[0] && rows[0].visitors) || 0;
@@ -222,7 +234,8 @@ function srmFor(variants) {
 async function loadReading(experimentId, { includeTest = false, now = new Date(), query = db.query.bind(db), accountId } = {}) {
   const experiment = await loadExperiment(experimentId, query, accountId);
   if (!experiment) return null;
-  const variants = await visitorRows(experimentId, includeTest, query);
+  const demo = isDemo(experiment);
+  const variants = await visitorRows(experimentId, demo ? false : includeTest, query, { testOnly: demo });
   const progress = planProgress({
     plan: experiment.plan,
     startedAt: experiment.started_at,
@@ -270,6 +283,7 @@ async function outcomeGate(experimentId, includeTest, accountId) {
 async function savePlan(experimentId, input, query = db.query.bind(db), accountId) {
   const experiment = await loadExperiment(experimentId, query, accountId);
   if (!experiment) return { ok: false, status: 404, error: 'no experiment found with that id' };
+  if (isDemo(experiment)) return { ok: false, status: 400, error: PLAN_LOCKED_ERROR };
   const variants = await visitorRows(experimentId, false, query);
   const enabled = variants.filter((variant) => variant.enabled);
   const built = buildPlan(Object.assign({}, input, {
@@ -288,6 +302,16 @@ async function savePlan(experimentId, input, query = db.query.bind(db), accountI
 }
 
 async function ensurePlanOnStart(experiment, query = db.query.bind(db)) {
+  if (isDemo(experiment)) {
+    if (experiment.plan && experiment.plan.demo && experiment.plan.visitors_per_variant) return experiment.plan;
+    const plan = demoPlan({ variantCount: 2 });
+    await query(
+      `UPDATE experiments SET plan = $2::jsonb
+       WHERE id = $1 AND test_type = 'demo'`,
+      [experiment.id, JSON.stringify(plan)]
+    );
+    return plan;
+  }
   if (experiment.plan && experiment.plan.visitors_per_variant) return experiment.plan;
   const suggestion = await suggest(experiment.id, query, experiment.account_id);
   const variants = suggestion ? suggestion.variants : [];

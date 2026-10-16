@@ -30,7 +30,7 @@ function stamp(value) {
 async function loadExperiment(accountId, experimentId) {
   const { rows } = await db.query(
     `SELECT id, name, status, hypothesis, url_match, url_match_type, allowed_hosts,
-            goals, peeked_at, client_id, account_id
+            goals, peeked_at, client_id, account_id, test_type
      FROM experiments
      WHERE id = $1 AND account_id = $2`,
     [experimentId, accountId]
@@ -40,7 +40,7 @@ async function loadExperiment(accountId, experimentId) {
 
 async function loadClientExperiment(clientId, accountId, experimentId) {
   const { rows } = await db.query(
-    `SELECT id, name, client_id, account_id
+    `SELECT id, name, client_id, account_id, test_type
      FROM experiments
      WHERE id = $1 AND client_id = $2 AND account_id = $3`,
     [experimentId, clientId, accountId]
@@ -230,10 +230,13 @@ async function ownerPdf(accountId, experimentId, kind) {
       approverName: approval.approver_name,
       approvedAt: approval.approved_at,
       releasedAt: report.released_at,
+      demo: experiment.test_type === 'demo',
     });
     return { bytes, names: pdfNames(experiment.name, 'approval', approval.approved_at) };
   }
-  const bytes = conclusionPdf(report.content);
+  const content = Object.assign({}, report.content);
+  if (experiment.test_type === 'demo') content.demo = true;
+  const bytes = conclusionPdf(content);
   return { bytes, names: pdfNames(experiment.name, 'conclusion', report.created_at) };
 }
 
@@ -265,10 +268,13 @@ async function clientPdf(clientId, accountId, experimentId, kind) {
       approverName: approval.approver_name,
       approvedAt: approval.approved_at,
       releasedAt: report.released_at,
+      demo: experiment.test_type === 'demo',
     });
     return { bytes, names: pdfNames(experiment.name, 'approval', approval.approved_at) };
   }
-  const bytes = conclusionPdf(report.content);
+  const content = Object.assign({}, report.content);
+  if (experiment.test_type === 'demo') content.demo = true;
+  const bytes = conclusionPdf(content);
   return { bytes, names: pdfNames(experiment.name, 'conclusion', report.released_at || report.created_at) };
 }
 

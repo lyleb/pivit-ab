@@ -102,20 +102,26 @@ function buildPublicExperimentList({ running, variants, previewExperiment, previ
     byExperiment.get(variant.experiment_id).push(variant);
   }
 
-  const experiments = (running || []).map((exp) => ({
-    id: exp.id,
-    name: exp.name,
-    url_match: exp.url_match,
-    // Empty when the test has no element rule. Older snippets ignore this
-    // field and keep running on the URL rule alone.
-    element_selector: publicElementSelector(exp.element_selector),
-    // Empty for a test whose goals still differ per variant. The snippet
-    // then uses each variant's own list. Older snippets ignore this field.
-    goals: Array.isArray(exp.goals) ? exp.goals : [],
-    variants: (byExperiment.get(exp.id) || [])
-      .filter((variant) => variant.enabled !== false)
-      .map(publicVariant),
-  }));
+  const experiments = (running || []).map((exp) => {
+    const row = {
+      id: exp.id,
+      name: exp.name,
+      url_match: exp.url_match,
+      // Empty when the test has no element rule. Older snippets ignore this
+      // field and keep running on the URL rule alone.
+      element_selector: publicElementSelector(exp.element_selector),
+      // Empty for a test whose goals still differ per variant. The snippet
+      // then uses each variant's own list. Older snippets ignore this field.
+      goals: Array.isArray(exp.goals) ? exp.goals : [],
+      variants: (byExperiment.get(exp.id) || [])
+        .filter((variant) => variant.enabled !== false)
+        .map(publicVariant),
+    };
+    // Omitted on a live test, so an older payload stays the same shape.
+    // The snippet does not bucket a real visitor into a demo test.
+    if (exp.test_type === 'demo') row.test_type = 'demo';
+    return row;
+  });
 
   let preview = null;
   if (previewExperiment && previewVariantId) {
@@ -133,6 +139,7 @@ function buildPublicExperimentList({ running, variants, previewExperiment, previ
           goals: Array.isArray(previewExperiment.goals) ? previewExperiment.goals : [],
           variants: [],
         };
+        if (previewExperiment.test_type === 'demo') exp.test_type = 'demo';
         experiments.push(exp);
       }
       if (!exp.variants.some((variant) => variant.id === forced.id)) {

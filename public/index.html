@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>pivitlab</title>
-<link rel="stylesheet" href="/assets/pivit.css?v=6">
+<link rel="stylesheet" href="/assets/pivit.css?v=7">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="/url-match.js"></script>
 <script src="/plan.js"></script>
@@ -461,6 +461,12 @@
         <div id="wizard-step-1" class="wizard-step">
           <label for="wizard-name">Experiment name</label>
           <input id="wizard-name" placeholder="Homepage CTA copy">
+          <label for="wizard-type">Test type</label>
+          <select id="wizard-type">
+            <option value="live">Live</option>
+            <option value="demo">Demo</option>
+          </select>
+          <p class="hint" id="wizard-type-hint">Live tests count real visitors and wait at least 14 days. A demo test uses test traffic only, a fixed sample of 100 visitors per variant, and skips that wait. Skipping it is only allowed for a demo test, and a demo test cannot be switched to live.</p>
           <label for="wizard-url">Page URL</label>
           <input id="wizard-url" placeholder="https://example.com/about or /about" spellcheck="false">
           <label for="wizard-match">Match</label>
@@ -479,7 +485,7 @@
           <p class="hint">Sites this experiment may run on. Separate extra domains with a comma or a new line. www and the bare domain count as the same.</p>
           <label for="wizard-client">Client (optional)</label>
           <select id="wizard-client"><option value="">None — internal only</option></select>
-          <p id="wizard-lock-hint" class="hint" hidden>Name and URL are fixed once the draft exists. Match, the element rule, client and site domains can still be changed. Match and the element rule can also be changed later in Settings.</p>
+          <p id="wizard-lock-hint" class="hint" hidden>Name, URL and test type are fixed once the draft exists. A demo test cannot be switched to live. Match, the element rule, client and site domains can still be changed. Match and the element rule can also be changed later in Settings.</p>
         </div>
 
         <div id="wizard-step-2" class="wizard-step" hidden>
@@ -690,6 +696,7 @@ const wizard = {
   maxStep: 1,
   expId: null,
   name: '',
+  testType: 'live',
   url: '',
   match: 'contains',
   matchTouched: false,
@@ -1353,7 +1360,7 @@ async function loadExperimentList() {
   tbody.innerHTML = experiments.map((exp) => {
     const client = exp.client_name || '—';
     return `<tr>
-      <td class="card-title" data-label="Name"><button type="button" class="name-btn" data-open="${exp.id}">${UI.escapeHtml(exp.name)}</button></td>
+      <td class="card-title" data-label="Name"><button type="button" class="name-btn" data-open="${exp.id}">${UI.escapeHtml(exp.name)}</button>${UI.isDemoTest(exp) ? ' ' + UI.demoBadgeHtml() : ''}</td>
       <td class="card-status" data-label="Status"><span class="badge ${STATUS_CLASS[exp.status] || 'paused'}">${UI.escapeHtml(exp.status)}</span></td>
       <td class="mono" data-label="URL match" title="${UI.escapeHtml(exp.url_match || '')}">${UI.escapeHtml(UI.shortUrl(exp.url_match))}${matchBadge(exp)}${noDomainBadge(exp)}</td>
       <td data-label="Client">${UI.escapeHtml(client)}</td>
@@ -1613,6 +1620,7 @@ async function reloadDetail() {
 
 function renderDetail() {
   const exp = currentDetail;
+  if (UI.isDemoTest(exp)) includeTestTraffic = false;
   const variants = exp.variants || [];
   const action = UI.statusAction(exp.status);
   const client = exp.client_name || clientNameById(exp.client_id) || 'none';
@@ -1640,6 +1648,7 @@ function renderDetail() {
         <h1 style="margin:0;">${UI.escapeHtml(exp.name)}</h1>
         <div class="meta-line">
           <span class="badge ${STATUS_CLASS[exp.status] || 'paused'}">${UI.escapeHtml(exp.status)}</span>
+          ${UI.isDemoTest(exp) ? UI.demoBadgeHtml() : ''}
           <span class="mono">${UI.escapeHtml(exp.url_match || '—')}</span>
           ${exp.element_selector ? `<span class="mono" title="Only runs when this element is on the page">${UI.escapeHtml(exp.element_selector)}</span>` : ''}
           ${matchBadge(exp)}
@@ -1677,6 +1686,7 @@ function renderDetail() {
           <div class="kicker">Status</div>
           <div class="status-big">${UI.escapeHtml(exp.status[0].toUpperCase() + exp.status.slice(1))}</div>
           <p class="hint" id="overview-event-line">Created ${UI.escapeHtml(created)} · Checking activity…</p>
+          ${UI.isDemoTest(exp) ? `<p class="hint">${UI.escapeHtml(UI.demoRuntimeNote())} A demo test cannot be switched to live. Real visitors are ignored.</p>` : ''}
         </div>
         <div class="card" id="next-steps" ${next ? '' : 'hidden'}>
           <div class="kicker">Next steps</div>
@@ -1727,7 +1737,7 @@ function renderDetail() {
       <div id="plan-panel"></div>
       <div class="card" id="test-traffic-card">
         <h2>Test traffic</h2>
-        <p class="hint" style="margin-top:0;">Test traffic is left out of the table, the chart, the trend and the CSV. Include test traffic puts it back. Remove hides it until you restore it. Nothing here is deleted.</p>
+        ${UI.isDemoTest(exp) ? `<p class="hint" style="margin-top:0;">This demo test counts test traffic only. The table, the chart and the verdict are that result. Real visitors are ignored and are not bucketed. ${UI.escapeHtml(UI.demoRuntimeNote())}</p>` : `<p class="hint" style="margin-top:0;">Test traffic is left out of the table, the chart, the trend and the CSV. Include test traffic puts it back. Remove hides it until you restore it. Nothing here is deleted.</p>
         <section id="test-results-panel" aria-labelledby="test-results-title">
           <h3 id="test-results-title">Test traffic results</h3>
           <div class="test-data-banner"><strong>Test data only.</strong> Real visitors are not shown. Opening this does not count as an early look, and it is not the verdict.</div>
@@ -1739,7 +1749,7 @@ function renderDetail() {
         <label class="test-toggle" for="include-test-traffic">
           <input type="checkbox" id="include-test-traffic"${includeTestTraffic ? ' checked' : ''}>
           Include test traffic
-        </label>
+        </label>`}
         <div class="inline-actions" style="margin-top:12px;">
           <button type="button" class="btn-ghost" data-action="test-traffic" data-mode="test" data-direction="remove">Remove test traffic</button>
           <button type="button" class="btn-ghost" data-action="test-traffic" data-mode="test" data-direction="restore">Restore test traffic</button>
@@ -1839,6 +1849,7 @@ function renderDetail() {
           ${statusOptions}
         </select>
         <p class="hint">Start and pause from here, or use the button on the experiment. Archive is separate, and nothing is archived unless you choose it.</p>
+        ${UI.isDemoTest(exp) ? `<p class="hint">${UI.escapeHtml(UI.demoRuntimeNote())} A demo test cannot be switched to live.</p>` : ''}
         <div class="inline-actions" style="margin-top:16px;">
           <button type="button" data-action="save-settings">Save</button>
           <button type="button" class="btn-ghost" data-action="export">Export CSV</button>
@@ -2849,11 +2860,32 @@ function mountPlanner(prefix, expId, payload) {
   if (!seed.sentence) previewPlanner(prefix, expId);
 }
 
+function mountDemoPlan(prefix) {
+  const hostId = prefix === 'wizard' ? 'wizard-planner' : 'settings-planner';
+  const host = document.getElementById(hostId);
+  if (!host) return;
+  host.innerHTML = UI.demoPlanHtml();
+}
+
 async function loadPlanner(prefix, expId) {
   const result = await callApi(`/api/experiments/${expId}/plan`, { headers: authHeaders() });
   if (!result.ok) return null;
   if (prefix === 'wizard' && wizard.expId !== expId) return null;
   if (prefix === 'settings' && (!currentDetail || currentDetail.id !== expId)) return null;
+  if (result.data.plan && result.data.plan.demo) {
+    mountDemoPlan(prefix);
+    if (prefix === 'wizard') {
+      wizard.testType = 'demo';
+      wizard.planSaved = true;
+      const next = document.getElementById('wizard-next');
+      if (next && wizard.step === 5) next.textContent = 'Review';
+      const draftBtn = document.getElementById('wizard-save-draft');
+      if (draftBtn) draftBtn.hidden = true;
+      const saved = document.getElementById('wizard-saved');
+      if (saved && wizard.step === 5) saved.hidden = false;
+    }
+    return result.data;
+  }
   if (prefix === 'wizard') wizard.planSuggestion = result.data.suggestion || null;
   mountPlanner(prefix, expId, result.data);
   return result.data;
@@ -2906,9 +2938,12 @@ function renderProgress(reading) {
   const days = reading ? Number(reading.days_elapsed) || 0 : 0;
   const min = reading && reading.min_runtime_days ? Number(reading.min_runtime_days) : 0;
   const dayWidth = progressWidth(days, min);
-  const dayLine = min
-    ? `<div><strong>${days} of ${min} days</strong><div class="progress-track"><div class="progress-bar" style="width:${dayWidth}%"></div></div></div>`
-    : '';
+  const waived = reading && reading.plan && reading.plan.demo && reading.plan.runtime_waived;
+  const dayLine = waived
+    ? `<p class="hint">${UI.escapeHtml(UI.demoRuntimeNote())}</p>`
+    : (min
+      ? `<div><strong>${days} of ${min} days</strong><div class="progress-track"><div class="progress-bar" style="width:${dayWidth}%"></div></div></div>`
+      : '');
   return rows + dayLine;
 }
 
@@ -2919,11 +2954,14 @@ function renderPlanPanel(reading, extras) {
   const plan = reading.plan;
   if (reading.mode === 'blind') {
     const auto = plan && plan.source === 'auto' ? '<p class="hint">Automatic plan · medium change, unless you edited it. Change it in Settings.</p>' : '';
+    const hiddenCopy = plan && plan.demo
+      ? `The score stays hidden until each variant reaches the planned visitors. ${UI.escapeHtml(UI.demoRuntimeNote())}`
+      : 'The score stays hidden until each variant reaches the planned visitors and the minimum runtime has passed. Health, progress and the traffic split are above and here.';
     panel.innerHTML = `<div class="card">
       <h2>Still running</h2>
       <p class="plan-sentence">${UI.escapeHtml(plan && plan.sentence ? plan.sentence : '')}</p>
       ${auto}
-      <p class="hint">The score stays hidden until each variant reaches the planned visitors and the minimum runtime has passed. Health, progress and the traffic split are above and here.</p>
+      <p class="hint">${hiddenCopy}</p>
       ${renderProgress(reading)}
       <div class="inline-actions">
         <button type="button" class="btn-danger" data-action="reveal-early">Reveal early</button>
@@ -2949,7 +2987,8 @@ function renderPlanPanel(reading, extras) {
   }
   if (reading.mode === 'verdict' || reading.mode === 'data_problem') {
     const peeked = reading.peeked ? '<div class="peek-banner"><strong>Peeked.</strong> The verdict uses the planned sample, and it records that someone looked early.</div>' : '';
-    panel.innerHTML = `${peeked}<div id="verdict-mount"></div>`;
+    const demoNote = plan && plan.demo ? `<p class="hint">${UI.escapeHtml(UI.demoRuntimeNote())}</p>` : '';
+    panel.innerHTML = `${peeked}${demoNote}<div id="verdict-mount"></div>`;
     return;
   }
   panel.innerHTML = '';
@@ -3095,7 +3134,7 @@ async function loadResults() {
   }
   if (UI.resultsGated(status, visitors)) {
     const testVisitors = result.data.test_traffic ? Number(result.data.test_traffic.visitors) || 0 : 0;
-    const testNote = status !== 'draft' && !includeTestTraffic && testVisitors > 0
+    const testNote = status !== 'draft' && !includeTestTraffic && testVisitors > 0 && !(currentDetail && UI.isDemoTest(currentDetail))
       ? ' Test traffic is excluded. Tick Include test traffic to see it.'
       : '';
     showResultsGate((status === 'draft'
@@ -3270,7 +3309,7 @@ function withTestQuery(path, extra) {
       if (extra[key] != null && extra[key] !== '') params.set(key, extra[key]);
     });
   }
-  if (includeTestTraffic) params.set('include_test', '1');
+  if (includeTestTraffic && !(currentDetail && UI.isDemoTest(currentDetail))) params.set('include_test', '1');
   const qs = params.toString();
   return qs ? `${path}?${qs}` : path;
 }
@@ -3436,6 +3475,7 @@ function resetWizard() {
   wizard.maxStep = 1;
   wizard.expId = null;
   wizard.name = '';
+  wizard.testType = 'live';
   wizard.url = '';
   wizard.match = 'contains';
   wizard.matchTouched = false;
@@ -3461,8 +3501,20 @@ function wizardMsg(text, ok) {
   el.textContent = text || '';
 }
 
+function updateWizardTypeHint() {
+  const hint = document.getElementById('wizard-type-hint');
+  if (!hint) return;
+  if (wizard.testType === 'demo') {
+    hint.textContent = 'Demo. Test traffic only (pivit_qa, is_test and v_pt). Real visitors are ignored and are not bucketed. The planned sample is fixed at 100 visitors per variant. ' + UI.demoRuntimeNote() + ' A demo test cannot be switched to live.';
+    return;
+  }
+  hint.textContent = 'Live tests count real visitors and wait at least 14 days. A demo test uses test traffic only, a fixed sample of 100 visitors per variant, and skips that wait. Skipping it is only allowed for a demo test, and a demo test cannot be switched to live.';
+}
+
 function readWizardBasics() {
   wizard.name = document.getElementById('wizard-name').value.trim();
+  const typeEl = document.getElementById('wizard-type');
+  if (typeEl && !typeEl.disabled) wizard.testType = typeEl.value === 'demo' ? 'demo' : 'live';
   wizard.url = document.getElementById('wizard-url').value.trim();
   const matchEl = document.getElementById('wizard-match');
   if (matchEl) wizard.match = matchEl.value || 'contains';
@@ -3470,6 +3522,7 @@ function readWizardBasics() {
   if (elementEl) wizard.elementSelector = elementEl.value.trim();
   wizard.hosts = document.getElementById('wizard-hosts').value.trim();
   wizard.clientId = document.getElementById('wizard-client').value;
+  updateWizardTypeHint();
   saveWizard();
 }
 
@@ -3535,8 +3588,15 @@ async function renderWizard() {
   document.getElementById('wizard-hosts').value = wizard.hosts || '';
   fillClientSelect(document.getElementById('wizard-client'), 'None — internal only', wizard.clientId || '');
   const locked = !!wizard.expId;
+  if (wizard.testType === 'demo' && wizard.expId) wizard.planSaved = true;
   document.getElementById('wizard-name').readOnly = locked;
   document.getElementById('wizard-url').readOnly = locked;
+  const typeEl = document.getElementById('wizard-type');
+  if (typeEl) {
+    typeEl.value = wizard.testType === 'demo' ? 'demo' : 'live';
+    typeEl.disabled = locked;
+  }
+  updateWizardTypeHint();
   document.getElementById('wizard-lock-hint').hidden = !locked;
 
   const back = document.getElementById('wizard-back');
@@ -3576,7 +3636,10 @@ async function renderWizard() {
   }
   if (wizard.step === 5) {
     renderWizardSummary();
-    if (wizard.expId) loadPlanner('wizard', wizard.expId);
+    if (wizard.expId) {
+      if (wizard.testType === 'demo') mountDemoPlan('wizard');
+      loadPlanner('wizard', wizard.expId);
+    }
   }
   fillInstallSnippets();
 }
@@ -3654,10 +3717,12 @@ async function persistWizardBasics() {
         element_selector: wizard.elementSelector || '',
         client_id: wizard.clientId || null,
         allowed_hosts: wizard.hosts,
+        test_type: wizard.testType === 'demo' ? 'demo' : 'live',
       }),
     });
     if (!result.ok) { wizardMsg(result.message); return false; }
     wizard.expId = result.data.id;
+    if (result.data.test_type) wizard.testType = result.data.test_type;
     rememberSavedHosts(result.data);
     const control = result.data.control_variant;
     wizard.variants = [
@@ -3770,7 +3835,8 @@ function renderWizardSummary() {
   const variants = wizard.variants.map((v) => `${v.name} ${v.split}%`).join(' · ') || '—';
   const client = clientNameById(wizard.clientId) || 'None';
   document.getElementById('wizard-summary').innerHTML = `
-    <dt>Name</dt><dd>${UI.escapeHtml(wizard.name)}</dd>
+    <dt>Name</dt><dd>${UI.escapeHtml(wizard.name)}${wizard.testType === 'demo' ? ' ' + UI.demoBadgeHtml() : ''}</dd>
+    <dt>Test type</dt><dd>${wizard.testType === 'demo' ? 'Demo. Test traffic only. ' + UI.escapeHtml(UI.demoRuntimeNote()) : 'Live'}</dd>
     <dt>Page URL</dt><dd class="mono">${UI.escapeHtml(wizard.url)}</dd>
     <dt>Match</dt><dd>${UI.escapeHtml(window.PivitUrl ? PivitUrl.pageMatchLabel(wizard.match || 'contains') : (wizard.match || 'Contains'))}</dd>
     <dt>Where it runs</dt><dd>${UI.escapeHtml(window.PivitUrl ? PivitUrl.pageMatchHint(wizard.match || 'contains', wizard.url) : '')}</dd>
@@ -3786,6 +3852,18 @@ function renderWizardSummary() {
 async function saveWizardPlan() {
   const id = wizard.expId;
   if (!id) { wizardMsg('Save the experiment details first.'); return false; }
+  if (wizard.testType === 'demo') {
+    wizard.planSaved = true;
+    wizardMsg('');
+    const note = document.getElementById('wizard-saved');
+    if (note) note.hidden = false;
+    const next = document.getElementById('wizard-next');
+    if (next) next.textContent = 'Review';
+    const draftBtn = document.getElementById('wizard-save-draft');
+    if (draftBtn) draftBtn.hidden = true;
+    saveWizard();
+    return true;
+  }
   let saved;
   if (document.getElementById('wizard-baseline')) {
     const source = planLeftAsSuggested('wizard', wizard.planSuggestion) ? 'auto' : 'owner';
@@ -4049,7 +4127,7 @@ document.getElementById('wizard-page-url').addEventListener('input', (e) => {
   saveWizard();
   refreshWizardPreviewWarning();
 });
-['wizard-name', 'wizard-url', 'wizard-element', 'wizard-client'].forEach((id) => {
+['wizard-name', 'wizard-url', 'wizard-element', 'wizard-client', 'wizard-type'].forEach((id) => {
   document.getElementById(id).addEventListener('input', readWizardBasics);
   document.getElementById(id).addEventListener('change', readWizardBasics);
 });

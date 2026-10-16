@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>pivitlab — Your tests</title>
-<link rel="stylesheet" href="/assets/pivit.css?v=6">
+<link rel="stylesheet" href="/assets/pivit.css?v=7">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="/admin-ui.js"></script>
 <style>
@@ -296,7 +296,7 @@ function renderRow(item) {
   const action = item.group === 'finished' ? 'View result' : 'Open';
   const actionClass = item.group === 'finished' ? 'btn' : 'btn-ghost';
   return `<div class="portal-row">
-    <div><div class="t">${UI.escapeHtml(item.name)}</div><div class="s">${UI.escapeHtml(item.subtitle || '')}</div></div>
+    <div><div class="t">${UI.escapeHtml(item.name)}${item.demo ? ' ' + UI.demoBadgeHtml() : ''}</div><div class="s">${UI.escapeHtml(item.subtitle || '')}</div></div>
     <div><span class="pill ${UI.escapeHtml(item.tone || 'run')}">${UI.escapeHtml(item.pill || '')}</span>${note}</div>
     <div>${progress}</div>
     <div>${headline}</div>
@@ -370,8 +370,9 @@ function renderBlind(detail) {
     : '';
   return `
     <div class="run-badge ${tone}">${UI.escapeHtml(detail.mode === 'stopped' ? 'Finished early' : badge)}</div>
-    <h1>${UI.escapeHtml(exp.name)}</h1>
+    <h1>${UI.escapeHtml(exp.name)}${exp.demo ? ' ' + UI.demoBadgeHtml() : ''}</h1>
     <p class="muted">Results stay hidden until the planned sample is reached. That's what keeps the answer honest.</p>
+    ${exp.demo ? `<p class="note">${UI.escapeHtml(UI.demoRuntimeNote())} This demo test counts test traffic only.</p>` : ''}
     ${stopped}
     <div class="detail-grid">
       <div>
@@ -399,7 +400,8 @@ function renderConcluded(detail) {
   const snap = detail.snapshot;
   const result = snap && snap.concluded;
   if (!result) {
-    return `<h1>${UI.escapeHtml(exp.name)}</h1>
+    return `<h1>${UI.escapeHtml(exp.name)}${exp.demo ? ' ' + UI.demoBadgeHtml() : ''}</h1>
+      ${exp.demo ? `<p class="note">${UI.escapeHtml(UI.demoRuntimeNote())}</p>` : ''}
       <div class="panel"><p>The daily update has not stored a result yet. This page does not calculate one when you open it.</p></div>`;
   }
   const klass = result.label === 'Win' ? 'win-panel' : (result.label === 'Loss' ? 'loss-panel' : 'flat-panel');
@@ -417,7 +419,8 @@ function renderConcluded(detail) {
   const meta = `Finished ${UI.escapeHtml(result.finished_label || '')} · ${num(result.visitors)} visitors · ${num(result.days)} days`;
   return `
     <div class="run-badge done">${UI.escapeHtml(meta)}</div>
-    <h1>${UI.escapeHtml(exp.name)}</h1>
+    <h1>${UI.escapeHtml(exp.name)}${exp.demo ? ' ' + UI.demoBadgeHtml() : ''}</h1>
+    ${exp.demo ? `<p class="note">${UI.escapeHtml(UI.demoRuntimeNote())} This result uses test traffic only.</p>` : ''}
     <div class="detail-grid">
       <div>
         <div class="panel ${klass}">
@@ -538,10 +541,10 @@ async function openTest(id) {
     return;
   }
   if (detail.mode === 'draft') {
-    mount.innerHTML = `<h1>${UI.escapeHtml(detail.experiment.name)}</h1><p>This test hasn't started yet. Results appear once it's running.</p>`;
+    mount.innerHTML = `<h1>${UI.escapeHtml(detail.experiment.name)}${detail.experiment.demo ? ' ' + UI.demoBadgeHtml() : ''}</h1><p>This test hasn't started yet. Results appear once it's running.</p>${detail.experiment.demo ? `<p class="note">${UI.escapeHtml(UI.demoRuntimeNote())}</p>` : ''}`;
     return;
   }
-  mount.innerHTML = `<h1>${UI.escapeHtml(detail.experiment.name)}</h1>`;
+  mount.innerHTML = `<h1>${UI.escapeHtml(detail.experiment.name)}${detail.experiment.demo ? ' ' + UI.demoBadgeHtml() : ''}</h1>`;
   document.getElementById('live-section').hidden = false;
   loadLiveResults({ id, name: detail.experiment.name, status: detail.experiment.status, created_at: detail.experiment.created_at });
 }
@@ -631,7 +634,8 @@ async function loadLiveResults(exp) {
     : `${num(visitors)} visitors`;
   if (reading.mode === 'data_problem' || reading.mode === 'verdict') {
     const peeked = reading.peeked ? '<div class="peek-banner"><strong>Peeked.</strong> Someone looked before the plan was reached. The verdict still uses the planned sample.</div>' : '';
-    note.innerHTML = peeked + renderClientVerdict(result.data.verdict);
+    const demoNote = reading.plan && reading.plan.demo ? `<p class="note">${UI.escapeHtml(UI.demoRuntimeNote())}</p>` : '';
+    note.innerHTML = peeked + demoNote + renderClientVerdict(result.data.verdict);
   } else if (reading.mode === 'peeked') {
     note.innerHTML = '<div class="peek-banner"><strong>Peeked.</strong> Someone looked before the plan was reached. This is not the verdict.</div>' + renderClientProgress(reading);
   } else if (reading.mode === 'unplanned') {
