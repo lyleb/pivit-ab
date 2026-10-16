@@ -27,6 +27,7 @@ const {
 } = require('../host-scope');
 const { publicScope, ownedExperiment, placeOnSite } = require('../tenant');
 const { matchPageUrl, resolvePageMatch } = require('../../public/url-match');
+const { normaliseElementSelector } = require('../element-selector');
 const { noteSnippetSeen, noteInstallCheck, noteQaPreview, installCheckPayload } = require('../site-verify');
 const { normaliseStatusChange } = require('../experiment-status');
 const {
@@ -124,7 +125,7 @@ router.get('/', async (req, res) => {
     if (!scope) return res.json({ experiments: [] });
 
     const { rows: experiments } = await db.query(
-      `SELECT id, name, url_match, url_match_type, allowed_hosts, goals FROM experiments
+      `SELECT id, name, url_match, url_match_type, element_selector, allowed_hosts, goals FROM experiments
        WHERE ${sqlPageMatch(1)} AND status = 'running'
          AND (${publicScopeSql(2, 3)})`,
       [url, scope.accountId, scope.siteId]
@@ -136,7 +137,7 @@ router.get('/', async (req, res) => {
     let previewExpired = null;
     if (previewAuth.ok) {
       const { rows: previewRows } = await db.query(
-        `SELECT e.id, e.name, e.url_match, e.url_match_type, e.allowed_hosts, e.status, e.goals, e.account_id, e.site_id,
+        `SELECT e.id, e.name, e.url_match, e.url_match_type, e.element_selector, e.allowed_hosts, e.status, e.goals, e.account_id, e.site_id,
                 v.id AS variant_id, v.name AS variant_name
          FROM variants v
          JOIN experiments e ON e.id = v.experiment_id
@@ -528,6 +529,8 @@ router.post('/', async (req, res) => {
   if (!name || !url_match) return res.status(400).json({ error: 'name and url_match are required' });
   const pageMatch = resolvePageMatch(url_match, req.body.url_match_type);
   if (!pageMatch.ok) return res.status(400).json({ error: pageMatch.error });
+  const element = normaliseElementSelector(req.body.element_selector);
+  if (!element.ok) return res.status(400).json({ error: element.error });
 
   let hosts = [];
   if (allowed_hosts !== undefined) {
@@ -552,9 +555,9 @@ router.post('/', async (req, res) => {
     const placed = await placeOnSite(client.query.bind(client), accountId, null, hosts);
 
     const { rows: expRows } = await client.query(
-      `INSERT INTO experiments (name, url_match, url_match_type, client_id, allowed_hosts, goals, goals_scope, goals_migrated, account_id, site_id, needs_site)
-       VALUES ($1, $2, $3, $4, $5::text[], '[]'::jsonb, 'shared', true, $6, $7, $8) RETURNING *`,
-      [name, url_match, pageMatch.type, client_id || null, hosts, accountId, placed.siteId, placed.needsSite]
+      `INSERT INTO experiments (name, url_match, url_match_type, element_selector, client_id, allowed_hosts, goals, goals_scope, goals_migrated, account_id, site_id, needs_site)
+       VALUES ($1, $2, $3, $4, $5, $6::text[], '[]'::jsonb, 'shared', true, $7, $8, $9) RETURNING *`,
+      [name, url_match, pageMatch.type, element.selector, client_id || null, hosts, accountId, placed.siteId, placed.needsSite]
     );
     const experiment = expRows[0];
 
@@ -895,6 +898,32 @@ router.delete('/:id', async (req, res) => {
     }
     await db.query(`DELETE FROM experiments WHERE id = $1 AND account_id = $2`, [id, req.account.id]);
     res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
+// PATCH /api/experiments/:id/element-selector  { element_selector }
+// Owner-only. An empty string clears the rule. Omitting the field does not
+// clear it, so saving other settings cannot wipe a selector by accident.
+router.patch('/:id/element-selector', async (req, res) => {
+  try {
+    const experiment = await ownedExperiment(req.account.id, req.params.id);
+    if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (!req.body || !Object.prototype.hasOwnProperty.call(req.body, 'element_selector')) {
+      return res.status(400).json({ error: 'element_selector is required' });
+    }
+    const element = normaliseElementSelector(req.body.element_selector);
+    if (!element.ok) return res.status(400).json({ error: element.error });
+    const { rows } = await db.query(
+      `UPDATE experiments SET element_selector = $1
+       WHERE id = $2 AND account_id = $3
+       RETURNING id, element_selector`,
+      [element.selector, req.params.id, req.account.id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
+    res.json(rows[0]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });

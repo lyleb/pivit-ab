@@ -73,7 +73,7 @@ async function main() {
     );
 
     const applied = await migrate();
-    assert.deepStrictEqual(applied, ['005', '006', '007', '008', '009', '010', '011']);
+    assert.deepStrictEqual(applied, ['005', '006', '007', '008', '009', '010', '011', '012']);
 
     const column = await db.query(
       `SELECT data_type, is_nullable

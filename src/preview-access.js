@@ -75,6 +75,11 @@ function authorisePreview({ preview, previewVariant, previewToken, now } = {}) {
   return result;
 }
 
+function publicElementSelector(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim();
+}
+
 function publicVariant(variant) {
   return {
     id: variant.id,
@@ -101,6 +106,9 @@ function buildPublicExperimentList({ running, variants, previewExperiment, previ
     id: exp.id,
     name: exp.name,
     url_match: exp.url_match,
+    // Empty when the test has no element rule. Older snippets ignore this
+    // field and keep running on the URL rule alone.
+    element_selector: publicElementSelector(exp.element_selector),
     // Empty for a test whose goals still differ per variant. The snippet
     // then uses each variant's own list. Older snippets ignore this field.
     goals: Array.isArray(exp.goals) ? exp.goals : [],
@@ -121,6 +129,7 @@ function buildPublicExperimentList({ running, variants, previewExperiment, previ
           id: previewExperiment.id,
           name: previewExperiment.name,
           url_match: previewExperiment.url_match,
+          element_selector: publicElementSelector(previewExperiment.element_selector),
           goals: Array.isArray(previewExperiment.goals) ? previewExperiment.goals : [],
           variants: [],
         };
