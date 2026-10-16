@@ -19,6 +19,7 @@ const { applyConclusion } = require('./conclusion');
 const { applyChangeApplied } = require('./change-applied');
 const { applyElementSelector } = require('./element-selector');
 const { applyDemoTest } = require('./demo-test');
+const { applyAuditBackfill } = require('./audit-backfill');
 
 const LOCK_KEY = 814021;
 
@@ -54,6 +55,9 @@ const VERSIONS = [
   // Demo tests: test traffic only, a fixed sample, and no switch to live.
   // Stays out of schema.sql.
   { version: '013', name: 'demo-test', run: applyDemoTest },
+  // Copy leftover test_traffic_audit rows into audit_log. The old table stays.
+  // Stays out of schema.sql.
+  { version: '014', name: 'audit-backfill', run: applyAuditBackfill },
 ];
 
 async function ensureMigrationsTable(queryable) {
