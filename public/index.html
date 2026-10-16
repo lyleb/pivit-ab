@@ -548,7 +548,7 @@
       <div class="page-head">
         <div>
           <h1>Preview &amp; manage</h1>
-          <p class="hint" style="margin:4px 0 0;">Open a variant on the live page, or jump into the experiment to edit splits and goals.</p>
+          <p class="hint" style="margin:4px 0 0;">Open a variant in device frames. JavaScript runs in each frame, the same way it does on the live page. You can also jump into the experiment to edit splits and goals.</p>
         </div>
       </div>
       <section class="card">
@@ -2013,7 +2013,20 @@ async function openPreviewLink(expId, variantId, pageUrl) {
     else alert(result.message);
     return;
   }
-  window.open(result.data.preview_url, '_blank');
+  window.open(devicePreviewUrl(result.data.preview_url), '_blank');
+}
+
+// Desktop opens the device shell. Tablet and mobile are in that shell, and
+// each one loads the page again so the variant's JavaScript runs.
+function devicePreviewUrl(previewUrl) {
+  try {
+    const url = new URL(previewUrl);
+    url.searchParams.set('pivit_device', 'desktop');
+    return url.toString();
+  } catch (err) {
+    const sep = String(previewUrl).includes('?') ? '&' : '?';
+    return `${previewUrl}${sep}pivit_device=desktop`;
+  }
 }
 
 async function loadOverview() {

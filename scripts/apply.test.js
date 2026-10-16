@@ -385,4 +385,28 @@ function styleTags(doc) {
   assert.strictEqual(mixed.applied, 1);
 }
 
+// A JS-tab change runs once on a load, including beside a stylesheet.
+// The same applier does not run it again. A new applier is a fresh load
+// (switching device or refreshing the frame) and runs it again.
+{
+  const doc = createDocument();
+  const applier = applierFor(doc);
+  const js = {
+    selector: 'body',
+    type: 'js',
+    value: 'el.setAttribute("data-offer", String(Number(el.getAttribute("data-offer") || 0) + 1))',
+  };
+  const css = { type: 'stylesheet', selector: '', value: '#offer-banner{background:#5635FB;color:#fff}' };
+  applier.applyAll([css, js], 'banner');
+  applier.applyAll([css, js], 'banner');
+  assert.strictEqual(doc.body.getAttribute('data-offer'), '1');
+  const cssText = styleTags(doc).map((tag) => tag.textContent).join('\n');
+  assert.ok(cssText.indexOf('#offer-banner{background:#5635FB;color:#fff}') !== -1);
+  assert.strictEqual(styleTags(doc).length, 1);
+  // A replaced frame is a new document, so the once-per-load mark is gone.
+  const next = createDocument();
+  applierFor(next).applyAll([css, js], 'banner');
+  assert.strictEqual(next.body.getAttribute('data-offer'), '1');
+}
+
 console.log('apply.test.js ok');

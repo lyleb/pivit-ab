@@ -73,6 +73,12 @@ app.use('/snippet/editor.js', (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   next();
 });
+// device-preview.js is only loaded for a device preview. no-store stops a
+// cached shell from framing the page without running the variant's JavaScript.
+app.use('/snippet/device-preview.js', (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 
 // Leave the HTML crawlable so Google can read the landing page, and the
 // noindex on every other page. Disallow: / would stop that. /api, /snippet
