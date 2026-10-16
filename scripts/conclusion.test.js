@@ -94,6 +94,9 @@ assert.ok(pdf.includes('23.5%'));
 assert.ok(pdf.includes('credible'));
 assert.ok(pdf.includes('recalculate'));
 assert.ok(pdf.includes('13 October 2026'));
+assert.ok(pdf.includes('Built by Heclr'));
+assert.ok(pdf.includes('/Subtype /Image'));
+assert.ok(pdf.includes('/ImLogo'));
 
 const approval = approvalPdf({
   experimentName: 'Shop tags',
@@ -109,5 +112,6 @@ assert.ok(approval.includes('North Shop'));
 assert.ok(approval.includes('click to approve'));
 assert.ok(approval.includes('not a paper signature'));
 assert.ok(approval.includes('UK time'));
+assert.ok(approval.includes('Built by Heclr'));
 
 console.log('conclusion tests passed');

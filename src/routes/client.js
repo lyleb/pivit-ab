@@ -7,6 +7,7 @@ const { getVariantResults, getGoalBreakdown, getTimeseries, getPrimaryVariantDat
 const { outcomeGate } = require('../experiment-plan');
 const { hideOutcomeRow } = require('../reading');
 const { buildVerdict } = require('../verdict');
+const { isDemo } = require('../demo-test');
 const { listForClient, detailForClient, owned } = require('../client-portal');
 const { requestReview } = require('../review-request');
 const { formatLondonDay, londonDateISO } = require('../clock');
@@ -26,7 +27,7 @@ router.use(requireAuth(['client']));
 // experiment just by guessing/changing an id in the URL.
 async function assertOwnsExperiment(clientId, experimentId, accountId) {
   const { rows } = await db.query(
-    `SELECT id, name, status, url_match FROM experiments
+    `SELECT id, name, status, url_match, test_type FROM experiments
      WHERE id = $1 AND client_id = $2 AND account_id = $3`,
     [experimentId, clientId, accountId]
   );
@@ -150,15 +151,16 @@ router.get('/results/:experimentId', async (req, res) => {
     const experiment = await assertOwnsExperiment(req.session.clientId, req.params.experimentId, req.account.id);
     if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
 
+    const options = isDemo(experiment) ? { testOnly: true } : undefined;
     const [{ results, primaryKey }, breakdown, gate] = await Promise.all([
-      getVariantResults(req.params.experimentId),
-      getGoalBreakdown(req.params.experimentId),
+      getVariantResults(req.params.experimentId, undefined, options),
+      getGoalBreakdown(req.params.experimentId, options),
       outcomeGate(req.params.experimentId, false, req.account.id),
     ]);
     const visible = gate.visible;
     let verdict = null;
     if (visible && gate.reading && gate.reading.plan_met) {
-      const { variantData } = await getPrimaryVariantData(req.params.experimentId);
+      const { variantData } = await getPrimaryVariantData(req.params.experimentId, options);
       verdict = buildVerdict({
         variants: variantData,
         plan: gate.loaded.experiment.plan,
@@ -187,9 +189,10 @@ router.get('/results/:experimentId/timeseries', async (req, res) => {
     const experiment = await assertOwnsExperiment(req.session.clientId, req.params.experimentId, req.account.id);
     if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
 
+    const options = isDemo(experiment) ? { testOnly: true } : undefined;
     const gate = await outcomeGate(req.params.experimentId, false, req.account.id);
     if (!gate.visible) return res.json({ series: [], blinded: true, reading: gate.reading });
-    const series = await getTimeseries(req.params.experimentId);
+    const series = await getTimeseries(req.params.experimentId, options);
     res.json({ series, blinded: false, reading: gate.reading });
   } catch (err) {
     res.status(500).json(publicServerError(err));
@@ -204,8 +207,9 @@ router.get('/results/:experimentId/bayesian', async (req, res) => {
     const experiment = await assertOwnsExperiment(req.session.clientId, req.params.experimentId, req.account.id);
     if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
 
+    const options = isDemo(experiment) ? { testOnly: true } : undefined;
     const gate = await outcomeGate(req.params.experimentId, false, req.account.id);
-    const { variantData } = await getPrimaryVariantData(req.params.experimentId);
+    const { variantData } = await getPrimaryVariantData(req.params.experimentId, options);
     if (!gate.visible) {
       return res.json({ low_sample_warning: false, stats: [], blinded: true, reading: gate.reading });
     }

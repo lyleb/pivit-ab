@@ -41,18 +41,19 @@ async function checklistFacts(accountId) {
   const { rows } = await db.query(
     `SELECT
        (SELECT checklist_dismissed_at IS NOT NULL FROM accounts WHERE id = $1) AS dismissed,
-       (SELECT COUNT(*)::int FROM experiments WHERE account_id = $1) AS experiments,
+       (SELECT COUNT(*)::int FROM experiments WHERE account_id = $1 AND test_type <> 'demo') AS experiments,
        EXISTS (
          SELECT 1 FROM sites WHERE account_id = $1 AND qa_seen_at IS NOT NULL
        ) AS qa_seen,
        EXISTS (
          SELECT 1 FROM events e
          JOIN experiments x ON x.id = e.experiment_id
-         WHERE x.account_id = $1 AND e.is_test
+         WHERE x.account_id = $1 AND x.test_type <> 'demo' AND e.is_test
        ) AS test_events,
        EXISTS (
          SELECT 1 FROM experiments
          WHERE account_id = $1
+           AND test_type <> 'demo'
            AND (started_at IS NOT NULL OR status IN ('running', 'paused'))
        ) AS started`,
     [accountId]

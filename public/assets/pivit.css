@@ -127,6 +127,14 @@ button:disabled { background: #3a3e50; color: #9aa0b4; cursor: not-allowed; }
   margin-left: 6px;
   vertical-align: middle;
 }
+.badge.demo {
+  background: rgba(86, 53, 251, 0.22);
+  color: #c4b6ff;
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: 6px;
+  vertical-align: middle;
+}
 
 .banner {
   display: flex;

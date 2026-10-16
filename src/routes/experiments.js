@@ -10,7 +10,7 @@ const {
 } = require('../goals');
 const { detectSRM } = require('../srm');
 const { buildHealth } = require('../health');
-const { flagIsOn, summariseTestTraffic, requestHasQaFlag } = require('../test-traffic');
+const { flagIsOn, summariseTestTraffic, requestHasQaFlag, requestIsTestTraffic } = require('../test-traffic');
 const { ensurePlanOnStart, recordReveal, loadReading, readingPayload, srmFor } = require('../experiment-plan');
 const { planProgress, describeReading, listSignal } = require('../reading');
 const { visibleEventSql } = require('../metrics');
@@ -28,6 +28,8 @@ const {
 const { publicScope, ownedExperiment, placeOnSite } = require('../tenant');
 const { matchPageUrl, resolvePageMatch } = require('../../public/url-match');
 const { normaliseElementSelector } = require('../element-selector');
+const { isDemo, normaliseTestType, typeChangeError, demoPlan, countOptions } = require('../demo-test');
+const { refreshDemoPlan } = require('../demo-sample');
 const { noteSnippetSeen, noteInstallCheck, noteQaPreview, installCheckPayload } = require('../site-verify');
 const { normaliseStatusChange } = require('../experiment-status');
 const {
@@ -125,19 +127,21 @@ router.get('/', async (req, res) => {
     if (!scope) return res.json({ experiments: [] });
 
     const { rows: experiments } = await db.query(
-      `SELECT id, name, url_match, url_match_type, element_selector, allowed_hosts, goals FROM experiments
+      `SELECT id, name, url_match, url_match_type, element_selector, test_type, allowed_hosts, goals FROM experiments
        WHERE ${sqlPageMatch(1)} AND status = 'running'
          AND (${publicScopeSql(2, 3)})`,
       [url, scope.accountId, scope.siteId]
     );
 
-    const visible = applyHostScope(keepPageMatches(experiments, url), req);
+    const testCaller = requestIsTestTraffic(req);
+    let visible = applyHostScope(keepPageMatches(experiments, url), req);
+    if (!testCaller) visible = visible.filter((exp) => exp.test_type !== 'demo');
 
     let previewExperiment = null;
     let previewExpired = null;
     if (previewAuth.ok) {
       const { rows: previewRows } = await db.query(
-        `SELECT e.id, e.name, e.url_match, e.url_match_type, e.element_selector, e.allowed_hosts, e.status, e.goals, e.account_id, e.site_id,
+        `SELECT e.id, e.name, e.url_match, e.url_match_type, e.element_selector, e.test_type, e.allowed_hosts, e.status, e.goals, e.account_id, e.site_id,
                 v.id AS variant_id, v.name AS variant_name
          FROM variants v
          JOIN experiments e ON e.id = v.experiment_id
@@ -216,10 +220,11 @@ router.get('/by-ids', async (req, res) => {
     const scope = await openPublicScope(req);
     if (!scope) return res.json({ experiments: [] });
     const { rows: experiments } = await db.query(
-      `SELECT id, name, allowed_hosts, goals FROM experiments
+      `SELECT id, name, allowed_hosts, goals, test_type FROM experiments
        WHERE id = ANY($1::uuid[])
-         AND (${publicScopeSql(2, 3)})`,
-      [idList, scope.accountId, scope.siteId]
+         AND (${publicScopeSql(2, 3)})
+         AND ($4::boolean OR test_type <> 'demo')`,
+      [idList, scope.accountId, scope.siteId, requestIsTestTraffic(req)]
     );
     const visible = applyHostScope(experiments, req);
     if (visible.length === 0) return res.json({ experiments: [] });
@@ -326,12 +331,15 @@ router.get('/all', async (req, res) => {
       const counted = await db.query(
         `SELECT v.experiment_id, v.id, v.name, v.traffic_split, v.enabled,
            COUNT(DISTINCT e.visitor_id) FILTER (
-             WHERE e.event_type = 'view' AND e.excluded_at IS NULL AND e.is_test = false
+             WHERE e.event_type = 'view'
+               AND e.excluded_at IS NULL
+               AND e.is_test = (x.test_type = 'demo')
            )::int AS visitors
          FROM variants v
+         JOIN experiments x ON x.id = v.experiment_id
          LEFT JOIN events e ON e.variant_id = v.id
          WHERE v.experiment_id = ANY($1::uuid[])
-         GROUP BY v.experiment_id, v.id`,
+         GROUP BY v.experiment_id, v.id, x.test_type`,
         [ids]
       );
       variantRows = counted.rows;
@@ -444,17 +452,19 @@ router.get('/:id', async (req, res) => {
 router.get('/:id/health', async (req, res) => {
   try {
     const { id } = req.params;
-    const includeTest = flagIsOn(req.query.include_test);
     const owned = await ownedExperiment(req.account.id, id);
     if (!owned) return res.status(404).json({ error: 'no experiment found with that id' });
     const expRows = [owned];
     const exp = expRows[0];
+    const options = countOptions(exp, flagIsOn(req.query.include_test));
+    const includeTest = !!options.includeTest;
+    const mode = options.testOnly ? 'test' : undefined;
 
     const { rows: splitRows } = await db.query(
       `SELECT v.name AS variant_name, v.traffic_split,
          COUNT(DISTINCT e.visitor_id) FILTER (WHERE e.event_type = 'view') AS visitors
        FROM variants v
-       LEFT JOIN events e ON e.variant_id = v.id AND ${visibleEventSql('e', 2)}
+       LEFT JOIN events e ON e.variant_id = v.id AND ${visibleEventSql('e', 2, mode)}
        WHERE v.experiment_id = $1 AND v.enabled = true
        GROUP BY v.id, v.name, v.traffic_split
        ORDER BY v.name`,
@@ -482,7 +492,7 @@ router.get('/:id/health', async (req, res) => {
           COUNT(e.id) FILTER (WHERE e.event_type = 'view' AND e.change_applied IS NOT NULL)::int AS reported_views,
           COUNT(e.id) FILTER (WHERE e.event_type = 'view' AND e.change_applied IS TRUE)::int AS applied_views
        FROM variants v
-       LEFT JOIN events e ON e.variant_id = v.id AND ${visibleEventSql('e', 2)}
+       LEFT JOIN events e ON e.variant_id = v.id AND ${visibleEventSql('e', 2, mode)}
        WHERE v.experiment_id = $1
        GROUP BY v.id
        ORDER BY v.created_at`,
@@ -527,6 +537,8 @@ router.get('/:id/health', async (req, res) => {
 router.post('/', async (req, res) => {
   const { name, url_match, client_id, allowed_hosts } = req.body;
   if (!name || !url_match) return res.status(400).json({ error: 'name and url_match are required' });
+  const testType = normaliseTestType(req.body.test_type);
+  if (!testType.ok) return res.status(400).json({ error: testType.error });
   const pageMatch = resolvePageMatch(url_match, req.body.url_match_type);
   if (!pageMatch.ok) return res.status(400).json({ error: pageMatch.error });
   const element = normaliseElementSelector(req.body.element_selector);
@@ -554,10 +566,11 @@ router.post('/', async (req, res) => {
     await client.query('BEGIN');
     const placed = await placeOnSite(client.query.bind(client), accountId, null, hosts);
 
+    const planJson = testType.type === 'demo' ? JSON.stringify(demoPlan({ variantCount: 2 })) : null;
     const { rows: expRows } = await client.query(
-      `INSERT INTO experiments (name, url_match, url_match_type, element_selector, client_id, allowed_hosts, goals, goals_scope, goals_migrated, account_id, site_id, needs_site)
-       VALUES ($1, $2, $3, $4, $5, $6::text[], '[]'::jsonb, 'shared', true, $7, $8, $9) RETURNING *`,
-      [name, url_match, pageMatch.type, element.selector, client_id || null, hosts, accountId, placed.siteId, placed.needsSite]
+      `INSERT INTO experiments (name, url_match, url_match_type, element_selector, client_id, allowed_hosts, goals, goals_scope, goals_migrated, account_id, site_id, needs_site, test_type, plan)
+       VALUES ($1, $2, $3, $4, $5, $6::text[], '[]'::jsonb, 'shared', true, $7, $8, $9, $10, $11::jsonb) RETURNING *`,
+      [name, url_match, pageMatch.type, element.selector, client_id || null, hosts, accountId, placed.siteId, placed.needsSite, testType.type, planJson]
     );
     const experiment = expRows[0];
 
@@ -615,7 +628,7 @@ router.post('/:id/variants', async (req, res) => {
 
     await client.query('BEGIN');
     const locked = await client.query(
-      `SELECT goals, goals_scope, account_id FROM experiments WHERE id = $1 AND account_id = $2 FOR UPDATE`,
+      `SELECT goals, goals_scope, account_id, test_type FROM experiments WHERE id = $1 AND account_id = $2 FOR UPDATE`,
       [id, req.account.id]
     );
     if (locked.rows.length === 0) {
@@ -648,6 +661,7 @@ router.post('/:id/variants', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
       [id, name, traffic_split ?? 50, JSON.stringify(changes ?? []), JSON.stringify(goalList)]
     );
+    if (locked.rows[0].test_type === 'demo') await refreshDemoPlan(client.query.bind(client), id);
     await client.query('COMMIT');
     if (scope === 'divergent') await recordGoalUsage(goalList, req.account.id);
     res.status(201).json(rows[0]);
@@ -856,6 +870,7 @@ router.patch('/:id/variants/:variantId/enabled', async (req, res) => {
       [enabled, variantId, id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id on that experiment' });
+    if (isDemo(owned)) await refreshDemoPlan(db.query.bind(db), id);
     res.json(rows[0]);
   } catch (err) {
     console.error(err);
@@ -877,6 +892,7 @@ router.delete('/:id/variants/:variantId', async (req, res) => {
       [variantId, id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id on that experiment' });
+    if (isDemo(owned)) await refreshDemoPlan(db.query.bind(db), id);
     res.status(204).end();
   } catch (err) {
     console.error(err);
@@ -1005,6 +1021,8 @@ router.patch('/:id/status', async (req, res) => {
 
     const existing = await ownedExperiment(req.account.id, id);
     if (!existing) return res.status(404).json({ error: 'no experiment found with that id' });
+    const typeError = typeChangeError(existing, req.body);
+    if (typeError) return res.status(400).json({ error: typeError });
     const change = normaliseStatusChange(existing.status, req.body);
     if (!change.ok) return res.status(change.statusCode || 400).json({ error: change.error });
     if (change.unchanged) {

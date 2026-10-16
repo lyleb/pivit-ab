@@ -5,6 +5,7 @@ const { eventAllowed } = require('../rate-limit');
 const { checkHost, originHostFromRequest, hostScopingMode } = require('../host-scope');
 const { scheduleEventDrop } = require('../event-drops');
 const { requestIsTestTraffic } = require('../test-traffic');
+const { captureDemoSample } = require('../demo-sample');
 const { publicScope } = require('../tenant');
 const router = express.Router();
 
@@ -70,7 +71,7 @@ router.post('/', async (req, res) => {
   try {
     const scope = await publicScope(req.body && req.body.site);
     const { rows } = await db.query(
-      `SELECT e.allowed_hosts, e.account_id, e.site_id
+      `SELECT e.allowed_hosts, e.account_id, e.site_id, e.test_type
        FROM variants v
        JOIN experiments e ON e.id = v.experiment_id
        WHERE v.id = $1 AND v.experiment_id = $2`,
@@ -111,7 +112,14 @@ router.post('/', async (req, res) => {
       return res.status(204).end();
     }
 
-    const isTest = requestIsTestTraffic(req);
+    // A demo test stores test traffic only. A real visitor is ignored and
+    // never written, so the result cannot mix with live data.
+    const demo = row.test_type === 'demo';
+    if (demo && !requestIsTestTraffic(req)) {
+      return res.status(204).end();
+    }
+
+    const isTest = demo ? true : requestIsTestTraffic(req);
     await db.query(
       `INSERT INTO events (experiment_id, variant_id, visitor_id, event_type, goal_id, is_test, change_applied)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -125,6 +133,13 @@ router.post('/', async (req, res) => {
         storedChangeApplied(event_type, change_applied),
       ]
     );
+    if (demo) {
+      try {
+        await captureDemoSample(experiment_id);
+      } catch (snapshotErr) {
+        console.error('Demo snapshot failed:', snapshotErr.message);
+      }
+    }
     // 204 keeps the beacon call cheap — no body needed on the client.
     res.status(204).end();
   } catch (err) {

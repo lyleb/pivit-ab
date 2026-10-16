@@ -349,6 +349,31 @@
     return !!matches && stored !== '1';
   }
 
+  const DEMO_RUNTIME_NOTE = 'The 14-day minimum runtime is skipped because this is a demo test. That is only allowed for a demo test. A live test still waits at least 14 days.';
+
+  function isDemoTest(experiment) {
+    if (!experiment) return false;
+    if (experiment.test_type === 'demo') return true;
+    return !!(experiment.plan && experiment.plan.demo === true);
+  }
+
+  function demoBadgeHtml() {
+    return '<span class="badge demo">Demo</span>';
+  }
+
+  function demoRuntimeNote() {
+    return DEMO_RUNTIME_NOTE;
+  }
+
+  function demoPlanHtml() {
+    return `<div class="demo-plan" data-demo-plan="1">
+      <h2>Demo plan</h2>
+      <p>This is a demo test on pivitlab. It counts pivit_qa, is_test and v_pt visitors only. Real visitors are ignored and are not bucketed.</p>
+      <p>The planned sample is fixed at 100 visitors per variant. The plan cannot be changed, and the test cannot be switched to live.</p>
+      <p>${escapeHtml(DEMO_RUNTIME_NOTE)}</p>
+    </div>`;
+  }
+
   return {
     escapeHtml,
     shortUrl,
@@ -381,5 +406,9 @@
     clientLoginUrl,
     previewExampleUrl,
     shouldShowSignpost,
+    isDemoTest,
+    demoBadgeHtml,
+    demoRuntimeNote,
+    demoPlanHtml,
   };
 });

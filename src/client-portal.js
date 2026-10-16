@@ -10,7 +10,7 @@ const CLIENT_PREVIEW_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 async function listForClient(clientId, accountId, now = new Date()) {
   const { rows } = await db.query(
     `SELECT e.id, e.name, e.status, e.url_match, e.url_match_type, e.created_at,
-            e.started_at, e.hypothesis, e.plan, e.peeked_at, e.goals,
+            e.started_at, e.hypothesis, e.plan, e.peeked_at, e.goals, e.test_type,
             (SELECT COUNT(*)::int FROM variants v WHERE v.experiment_id = e.id AND v.enabled) AS variant_count,
             s.snapshot_date, s.headline_code, s.detail, s.created_at AS snapshot_created_at
      FROM experiments e
@@ -44,7 +44,7 @@ async function listForClient(clientId, accountId, now = new Date()) {
 async function owned(clientId, accountId, experimentId) {
   const { rows } = await db.query(
     `SELECT id, name, status, url_match, url_match_type, allowed_hosts, goals, goals_scope,
-            plan, started_at, peeked_at, hypothesis, created_at, client_id, account_id, site_id
+            plan, started_at, peeked_at, hypothesis, created_at, client_id, account_id, site_id, test_type
      FROM experiments
      WHERE id = $1 AND client_id = $2 AND account_id = $3`,
     [experimentId, clientId, accountId]
