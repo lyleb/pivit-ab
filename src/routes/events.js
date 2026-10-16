@@ -43,6 +43,8 @@ function storedChangeApplied(eventType, value) {
 router.post('/', async (req, res) => {
   const { experiment_id, variant_id, visitor_id, event_type, goal_id, change_applied } = req.body;
 
+  // A missing variant is rejected. It is never filled in with the first or
+  // last variant on the experiment. The snippet is what assigns the visitor.
   if (!experiment_id || !variant_id || !visitor_id || !event_type) {
     return res.status(400).json({ error: 'experiment_id, variant_id, visitor_id, event_type are required' });
   }
