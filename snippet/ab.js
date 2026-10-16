@@ -92,6 +92,7 @@
   api.exposeWhenReady = exposeWhenReady;
   api.previewInfo = previewInfo;
   api.mayBucketExperiment = mayBucketExperiment;
+  api.assignVariant = assignVariant;
   api.TEST_VISITOR_PREFIX = 'v_pt';
   api.QA_STORAGE_KEY = 'pivit_qa';
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
@@ -252,29 +253,76 @@
     return id;
   }
 
-  // Deterministic-ish hash so the same visitor could be re-derived if storage is cleared
-  // mid-session; combined with localStorage stickiness for the common case.
+  // Weight as a number. A string "50" must not be concatenated onto the running
+  // total, which used to push almost every visitor into the last variant.
+  function variantWeight(variant) {
+    const n = Number(variant && variant.traffic_split);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return n;
+  }
+
+  // FNV-1a, then a finaliser, so ids that differ by one character (including
+  // v_pt…-1 and v_pt…-2, and experiment ids that share a prefix) do not land
+  // in neighbouring buckets.
+  function mixHash(text) {
+    let h = 2166136261;
+    const str = String(text);
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    h >>>= 0;
+    h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+    h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+    return (h ^ (h >>> 16)) >>> 0;
+  }
+
+  // Bucket one visitor. The seed is the experiment id plus the visitor id.
+  // The roll uses the full hash, not hash % weight, so a weight that does not
+  // divide 2^32 does not favour the low buckets. Returns null when the weights
+  // cannot place the visitor. It does not fall back to the first or last variant.
+  function assignVariant(experiment, visitorId) {
+    if (!experiment || visitorId == null || visitorId === '') return null;
+    const variants = experiment.variants || [];
+    const usable = [];
+    for (let i = 0; i < variants.length; i++) {
+      const variant = variants[i];
+      const weight = variantWeight(variant);
+      if (!variant || !variant.id || !(weight > 0)) continue;
+      usable.push({ variant: variant, weight: weight });
+    }
+    if (!usable.length) return null;
+    const total = usable.reduce((sum, item) => sum + item.weight, 0);
+    if (!(total > 0)) return null;
+    const hash = mixHash(String(experiment.id) + '\0' + String(visitorId));
+    let roll = Math.floor((hash * total) / 4294967296);
+    if (roll < 0) roll = 0;
+    if (roll >= total) roll = total - 1;
+    let cumulative = 0;
+    for (let i = 0; i < usable.length; i++) {
+      cumulative += usable[i].weight;
+      if (roll < cumulative) return usable[i].variant;
+    }
+    return null;
+  }
+
+  // Sticky via localStorage. A visitor we cannot store is not reported, so the
+  // server never keeps a variant the browser did not keep.
   function pickVariant(experiment, visitorId) {
-    const stored = localStorage.getItem(ASSIGNMENT_PREFIX + experiment.id);
+    let stored = null;
+    try { stored = localStorage.getItem(ASSIGNMENT_PREFIX + experiment.id); } catch (e) { stored = null; }
     if (stored) {
-      const match = experiment.variants.find((v) => v.id === stored);
+      const match = (experiment.variants || []).find((v) => v.id === stored);
       if (match) return match;
     }
 
-    const totalWeight = experiment.variants.reduce((sum, v) => sum + (v.traffic_split || 0), 0) || 100;
-    let hash = 0;
-    const str = visitorId + experiment.id;
-    for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
-    const roll = hash % totalWeight;
-
-    let cumulative = 0;
-    let chosen = experiment.variants[0];
-    for (const v of experiment.variants) {
-      cumulative += v.traffic_split || 0;
-      if (roll < cumulative) { chosen = v; break; }
+    const chosen = assignVariant(experiment, visitorId);
+    if (!chosen || !chosen.id) return null;
+    try {
+      localStorage.setItem(ASSIGNMENT_PREFIX + experiment.id, chosen.id);
+    } catch (e) {
+      return null;
     }
-
-    localStorage.setItem(ASSIGNMENT_PREFIX + experiment.id, chosen.id);
     return chosen;
   }
 
@@ -588,6 +636,13 @@
       });
     }
 
+    // A v_pt visitor is test traffic even before ?pivit_qa=1 is on the URL.
+    // The experiments request has to say so, or a demo test is left out of
+    // the list and that visitor is never bucketed.
+    let storedVisitor = '';
+    try { storedVisitor = localStorage.getItem(VISITOR_KEY) || ''; } catch (e) { storedVisitor = ''; }
+    const fetchAsTest = !wantsPreview && (qaOn || storedVisitor.indexOf(api.TEST_VISITOR_PREFIX) === 0);
+
     const url = encodeURIComponent(window.location.href);
     const previewQuery = wantsPreview
       ? `&preview=1&preview_variant=${encodeURIComponent(mode.variantId)}&preview_token=${encodeURIComponent(mode.token)}`
@@ -595,7 +650,7 @@
 
     try {
       const res = await fetch(
-        api.withQaQuery(api.withSite(`${API_BASE}/api/experiments?url=${url}${previewQuery}`, SITE_KEY), qaOn),
+        api.withQaQuery(api.withSite(`${API_BASE}/api/experiments?url=${url}${previewQuery}`, SITE_KEY), fetchAsTest),
         wantsPreview ? { cache: 'no-store' } : undefined
       );
       const data = await res.json();
@@ -653,6 +708,7 @@
         let already = null;
         try { already = localStorage.getItem(ASSIGNMENT_PREFIX + experiment.id); } catch (e) { already = null; }
         const variant = pickVariant(experiment, visitorId);
+        if (!variant) return;
         if (!already) enrolledThisView[experiment.id] = 1;
         const outcome = applyVariantChanges(variant);
         const changeApplied = outcome && (outcome.ok === true || outcome.ok === false) ? outcome.ok : undefined;

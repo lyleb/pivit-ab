@@ -182,7 +182,8 @@ router.get('/', async (req, res) => {
 
     const { rows: variants } = await db.query(
       `SELECT id, experiment_id, name, traffic_split, changes, goals, enabled
-       FROM variants WHERE experiment_id = ANY($1::uuid[])`,
+       FROM variants WHERE experiment_id = ANY($1::uuid[])
+       ORDER BY created_at, id`,
       [experimentIds]
     );
 

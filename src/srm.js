@@ -11,11 +11,11 @@
 //
 // Method: a chi-square goodness-of-fit test comparing observed visitor counts
 // per variant against the expected counts implied by configured traffic_split.
-// A very strict p-value threshold (0.001, not the usual 0.05) is standard
-// practice here specifically to avoid false alarms — SRM checks are meant to
-// catch "something is clearly broken," not ordinary statistical noise.
+// p < 0.01, stricter than the usual 0.05, so ordinary noise stays quiet and a
+// split as uneven as 104 against 146 in 250 visitors is flagged. The results
+// page, the health panel and the verdict all use this same bar.
 
-const SRM_P_VALUE_THRESHOLD = 0.001;
+const SRM_P_VALUE_THRESHOLD = 0.01;
 
 // log(Gamma(x)) via the Lanczos approximation — a standard, well-tested method.
 function logGamma(x) {
