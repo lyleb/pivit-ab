@@ -17,6 +17,7 @@ const { applyRateLimits } = require('./rate-limits');
 const { applyFirstRun } = require('./first-run');
 const { applyConclusion } = require('./conclusion');
 const { applyChangeApplied } = require('./change-applied');
+const { applyElementSelector } = require('./element-selector');
 
 const LOCK_KEY = 814021;
 
@@ -46,6 +47,9 @@ const VERSIONS = [
   { version: '010', name: 'conclusion', run: applyConclusion },
   // Whether a view's element changes were on the page. Stays out of schema.sql.
   { version: '011', name: 'change-applied', run: applyChangeApplied },
+  // Optional CSS selector. The test runs only when that element is on the page.
+  // Stays out of schema.sql.
+  { version: '012', name: 'element-selector', run: applyElementSelector },
 ];
 
 async function ensureMigrationsTable(queryable) {

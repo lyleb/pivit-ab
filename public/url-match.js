@@ -344,6 +344,14 @@
     }[matchType] || 'contains';
   }
 
+  // Shown next to the URL warning. The dashboard cannot see the customer's
+  // DOM, so this names the selector the preview will wait for.
+  function previewElementNote(selector) {
+    const sel = String(selector == null ? '' : selector).trim();
+    if (!sel) return '';
+    return "This test only runs when '" + sel + "' is on the page. Preview waits for that element and applies nothing if it never appears.";
+  }
+
   function previewUrlWarning(pattern, href, matchType) {
     const page = String(href == null ? '' : href).trim();
     const pat = String(pattern == null ? '' : pattern).trim();
@@ -453,6 +461,7 @@
     resolvePageMatch: resolvePageMatch,
     pageMatchLabel: pageMatchLabel,
     pageMatchHint: pageMatchHint,
+    previewElementNote: previewElementNote,
     previewUrlWarning: previewUrlWarning,
     defaultPreviewPage: defaultPreviewPage,
   };

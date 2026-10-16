@@ -94,7 +94,7 @@ async function main() {
     assert.strictEqual(await columnInfo(db), null);
 
     const applied = await migrate();
-    assert.deepStrictEqual(applied, ['003', '004', '005', '006', '007', '008', '009', '010', '011']);
+    assert.deepStrictEqual(applied, ['003', '004', '005', '006', '007', '008', '009', '010', '011', '012']);
     const index = await db.query(
       `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_rate_limits_window_start'`
     );
@@ -124,7 +124,18 @@ async function main() {
     assert.strictEqual(kept.rows[0].url_match_type, 'exact');
 
     const versions = await db.query(`SELECT version FROM schema_migrations ORDER BY version`);
-    assert.deepStrictEqual(versions.rows.map((row) => row.version), ['000', '001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011']);
+    assert.deepStrictEqual(versions.rows.map((row) => row.version), ['000', '001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012']);
+
+    const element = await db.query(
+      `SELECT element_selector, is_nullable
+       FROM experiments e
+       JOIN information_schema.columns c
+         ON c.table_name = 'experiments' AND c.column_name = 'element_selector'
+       WHERE e.id = $1`,
+      [experimentId]
+    );
+    assert.strictEqual(element.rows[0].element_selector, null);
+    assert.strictEqual(element.rows[0].is_nullable, 'YES');
 
     console.log('migrate catch-up tests passed');
   } finally {

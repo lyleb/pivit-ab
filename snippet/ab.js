@@ -26,6 +26,14 @@
  * so it does not add a request. Test visits still send it; the health
  * percentage leaves those visits out.
  *
+ * Element targeting: an experiment may set element_selector. The URL rule
+ * still has to match. The visitor is bucketed, the variant is applied, and
+ * the view is sent only once that element is on the page. A MutationObserver
+ * waits up to about four seconds. If the element never appears there is no
+ * assignment, no view, and nothing is applied. Pages that will never have
+ * the element are not held blank for that wait. Preview uses the same gate
+ * and names the selector in the preview note.
+ *
  * Preview mode: the dashboard opens ?ab_preview=<variant_id>&ab_preview_token=<token>.
  * The token is signed and expires. It can show a draft, paused or disabled
  * variant and never logs a view or conversion. An archived test is not shown:
@@ -59,6 +67,7 @@
  * other structural pseudos) are applied once, inline, exactly as before.
  */
 (function (root) {
+  const ELEMENT_WAIT_MS = 4000;
   const api = buildPivitRuntime();
   const clickSeen = Object.create(null);
   api.matchUrlGoal = matchUrlGoal;
@@ -72,6 +81,13 @@
   api.eventBody = eventBody;
   api.withQaQuery = withQaQuery;
   api.withSite = withSite;
+  api.ELEMENT_WAIT_MS = ELEMENT_WAIT_MS;
+  api.elementSelectorOf = elementSelectorOf;
+  api.elementQuery = elementQuery;
+  api.elementIsPresent = elementIsPresent;
+  api.waitForElement = waitForElement;
+  api.exposeWhenReady = exposeWhenReady;
+  api.previewInfo = previewInfo;
   api.TEST_VISITOR_PREFIX = 'v_pt';
   api.QA_STORAGE_KEY = 'pivit_qa';
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
@@ -372,6 +388,120 @@
     }
   }
 
+  function elementSelectorOf(experiment) {
+    const raw = experiment && experiment.element_selector;
+    return typeof raw === 'string' ? raw.trim() : '';
+  }
+
+  // none: no selector, so the URL rule is enough.
+  // present: the element is already in the document.
+  // missing: not yet, and a wait may still find it.
+  // invalid: querySelector threw, so the test must not run.
+  function elementQuery(doc, selector) {
+    const sel = typeof selector === 'string' ? selector.trim() : '';
+    if (!sel) return { state: 'none', selector: '' };
+    try {
+      const node = doc && doc.querySelector ? doc.querySelector(sel) : null;
+      return { state: node ? 'present' : 'missing', selector: sel };
+    } catch (err) {
+      return { state: 'invalid', selector: sel };
+    }
+  }
+
+  function elementIsPresent(doc, selector) {
+    const query = elementQuery(doc, selector);
+    return query.state === 'none' || query.state === 'present';
+  }
+
+  // Resolves when the element is there, or when the wait gives up.
+  // An empty selector resolves immediately as found. An invalid selector
+  // resolves immediately as not found, with no observer and no timer.
+  function waitForElement(doc, selector, options) {
+    const opts = options || {};
+    const timeoutMs = opts.timeoutMs == null ? ELEMENT_WAIT_MS : opts.timeoutMs;
+    const Observer = opts.MutationObserver || (typeof MutationObserver !== 'undefined' ? MutationObserver : null);
+    const setTimer = opts.setTimer || function (fn, ms) { return setTimeout(fn, ms); };
+    const clearTimer = opts.clearTimer || function (id) { clearTimeout(id); };
+    const sel = typeof selector === 'string' ? selector.trim() : '';
+
+    return new Promise(function (resolve) {
+      const first = elementQuery(doc, sel);
+      if (first.state === 'none') {
+        resolve({ found: true, reason: 'none' });
+        return;
+      }
+      if (first.state === 'present') {
+        resolve({ found: true, reason: 'present' });
+        return;
+      }
+      if (first.state === 'invalid') {
+        resolve({ found: false, reason: 'invalid' });
+        return;
+      }
+
+      let settled = false;
+      let observer = null;
+      let timer = null;
+      function finish(found, reason) {
+        if (settled) return;
+        settled = true;
+        if (observer) {
+          try { observer.disconnect(); } catch (err) { /* already gone */ }
+        }
+        if (timer != null) clearTimer(timer);
+        resolve({ found: found, reason: reason });
+      }
+      function look(reason) {
+        const query = elementQuery(doc, sel);
+        if (query.state === 'present') finish(true, reason);
+        else if (query.state === 'invalid') finish(false, 'invalid');
+      }
+
+      if (Observer && doc) {
+        try {
+          observer = new Observer(function () { look('appeared'); });
+          const target = doc.documentElement || doc.body || doc;
+          if (target) observer.observe(target, { childList: true, subtree: true });
+        } catch (err) {
+          observer = null;
+        }
+      }
+      timer = setTimer(function () {
+        look('appeared');
+        if (!settled) finish(false, 'timeout');
+      }, timeoutMs);
+    });
+  }
+
+  // onExpose is the bucket: assignment, DOM changes, and the view. It is
+  // not called when the element never appears.
+  function exposeWhenReady(experiment, deps) {
+    const d = deps || {};
+    const selector = elementSelectorOf(experiment);
+    return waitForElement(d.document, selector, d).then(function (gate) {
+      if (!gate.found) return { exposed: false, reason: gate.reason, selector: selector };
+      if (typeof d.onExpose === 'function') d.onExpose(experiment);
+      return { exposed: true, reason: gate.reason, selector: selector };
+    });
+  }
+
+  function previewInfo(experiment, variant, gate) {
+    const variantName = variant && variant.name ? variant.name : '';
+    const experimentName = experiment && experiment.name ? experiment.name : '';
+    const selector = elementSelectorOf(experiment);
+    const found = !gate || gate.found !== false;
+    if (selector && !found) {
+      return '[ab] preview mode — not showing variant "' + variantName + '" for experiment "' + experimentName
+        + '". This page has no element matching "' + selector + '", so nothing is applied. No events are being logged.';
+    }
+    if (selector) {
+      return '[ab] preview mode — showing variant "' + variantName + '" for experiment "' + experimentName
+        + '". It runs only when "' + selector + '" is on the page. No events are being logged.';
+    }
+    return '[ab] preview mode — showing variant "' + variantName + '" for experiment "' + experimentName
+      + '". No events are being logged.';
+  }
+
   function previewVariant(experiments, preview) {
     if (!preview || !preview.variant_id) return null;
     const list = experiments || [];
@@ -472,8 +602,23 @@
           ? previewVariant(data.experiments, data.preview)
           : null;
         if (match) {
-          applyVariantChanges(match.variant);
-          console.info(`[ab] preview mode — showing variant "${match.variant.name}" for experiment "${match.experiment.name}". No events are being logged.`);
+          const selector = api.elementSelectorOf(match.experiment);
+          const query = api.elementQuery(document, selector);
+          if (query.state === 'present' || query.state === 'none') {
+            applyVariantChanges(match.variant);
+            console.info(api.previewInfo(match.experiment, match.variant, { found: true, reason: query.state }));
+          } else if (query.state === 'invalid') {
+            console.info(api.previewInfo(match.experiment, match.variant, { found: false, reason: 'invalid' }));
+          } else {
+            // Reveal now. A page without the element must not stay blank
+            // for the whole wait. Apply later only if the element appears.
+            revealPage();
+            console.info('[ab] preview mode — waiting for "' + selector + '" before showing experiment "' + match.experiment.name + '". No events are being logged.');
+            const gate = await api.waitForElement(document, selector);
+            if (gate.found) applyVariantChanges(match.variant);
+            console.info(api.previewInfo(match.experiment, match.variant, gate));
+            return;
+          }
         }
         revealPage();
         return;
@@ -486,7 +631,11 @@
 
       const visitorId = getVisitorId();
       const enrolledThisView = Object.create(null);
-      (data.experiments || []).forEach((experiment) => {
+      const waiting = [];
+
+      // Assignment and the view happen here, and only here. A waiting
+      // experiment does not call this until its element is on the page.
+      function enroll(experiment) {
         if (!experiment.variants || experiment.variants.length === 0) return;
         let already = null;
         try { already = localStorage.getItem(ASSIGNMENT_PREFIX + experiment.id); } catch (e) { already = null; }
@@ -496,10 +645,33 @@
         const changeApplied = outcome && (outcome.ok === true || outcome.ok === false) ? outcome.ok : undefined;
         sendEvent(experiment.id, variant.id, visitorId, 'view', null, changeApplied);
         wireConversionTracking(experiment.id, variant.id, visitorId, goalsFor(experiment, variant));
+      }
+
+      (data.experiments || []).forEach((experiment) => {
+        if (!experiment.variants || experiment.variants.length === 0) return;
+        const selector = api.elementSelectorOf(experiment);
+        const query = api.elementQuery(document, selector);
+        if (query.state === 'invalid') return;
+        if (query.state === 'none' || query.state === 'present') enroll(experiment);
+        else waiting.push(experiment);
       });
 
-      // Reveal now — DOM changes are applied, so this is the earliest safe moment.
-      // Everything after this (goal-checking) doesn't affect what's visible.
+      waiting.forEach((experiment) => {
+        api.exposeWhenReady(experiment, {
+          document: document,
+          onExpose: function () {
+            if (!hasTrackingConsent()) return;
+            enroll(experiment);
+          },
+        }).catch((err) => {
+          console.warn('[ab] element wait failed:', err);
+        });
+      });
+
+      // Reveal now. Experiments whose element is already there are applied.
+      // A missing element does not hold the page blank: a site-wide URL rule
+      // would otherwise hide every page that will never have the button.
+      // The observer still applies the variant if the element appears in time.
       revealPage();
 
       // Check "visited a URL" goals on every page load — including pages with no
