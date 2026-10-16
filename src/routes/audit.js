@@ -2,39 +2,24 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth, requireSuperadmin } = require('../middleware/auth');
 const { publicServerError } = require('../public-error');
+const { listAccountAudit } = require('../audit-log');
 
 const router = express.Router();
 
+// Owner only, and only this account. View-as already switches req.account.
+// A client session is not an owner, so it gets the same 401 as signed out.
 router.get('/', requireAuth(['owner']), async (req, res) => {
   try {
-    const all = req.account.superadmin === true && !req.account.viewAs;
-    const params = [];
-    let where = '';
-    if (!all) {
-      params.push(req.account.id);
-      where = 'WHERE account_id = $1';
-    }
-    const { rows } = await db.query(
-      `SELECT id, account_id, actor_user_id, actor_label, action, target_type, target_id, detail, ip, created_at
-       FROM audit_log
-       ${where}
-       ORDER BY created_at DESC, id DESC
-       LIMIT 200`,
-      params
-    );
+    const result = await listAccountAudit(req.account.id, req.query);
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
     res.json({
-      entries: rows.map((row) => ({
-        id: Number(row.id),
-        account_id: row.account_id,
-        actor_user_id: row.actor_user_id,
-        actor_label: row.actor_label,
-        action: row.action,
-        target_type: row.target_type,
-        target_id: row.target_id,
-        detail: row.detail || {},
-        ip: row.ip,
-        created_at: row.created_at,
-      })),
+      entries: result.entries,
+      page: result.page,
+      page_size: result.page_size,
+      total: result.total,
+      tests: result.tests,
+      users: result.users,
+      actions: result.actions,
     });
   } catch (err) {
     res.status(500).json(publicServerError(err));
