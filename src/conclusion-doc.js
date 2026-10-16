@@ -49,6 +49,13 @@ function push(items, text, size, bold, gapBefore) {
   });
 }
 
+function toneFor(label) {
+  if (label === 'Win') return 'win';
+  if (label === 'Loss') return 'loss';
+  if (label === 'Inconclusive') return 'inconclusive';
+  return 'neutral';
+}
+
 // Copies the stored concluded object. Returns null when the snapshot has no
 // result, so the caller cannot invent one.
 function freezeConclusion(experiment, snapshot, generatedOn) {
@@ -73,18 +80,18 @@ function freezeConclusion(experiment, snapshot, generatedOn) {
 function conclusionLines(content) {
   const stored = (content && content.concluded) || {};
   const items = [];
-  push(items, 'pivitlab', 14, true, 0);
-  push(items, 'Conclusion', 20, true, 14);
-  push(items, content.experiment_name || 'Test', 13, true, 6);
+  items.push({
+    kind: 'title',
+    text: 'Conclusion',
+    subtitle: content.experiment_name || 'Test',
+  });
   if (content.demo) {
-    push(items, 'Demo', 12, true, 8);
-    push(
-      items,
-      'Demo test. Test traffic only. Real visitors are not included. The 14-day minimum runtime is skipped, which is only allowed for a demo test.',
-      10,
-      false,
-      4
-    );
+    items.push({
+      kind: 'callout',
+      eyebrow: 'Demo',
+      text: 'Demo test. Test traffic only. Real visitors are not included. The 14-day minimum runtime is skipped, which is only allowed for a demo test.',
+      gapBefore: 12,
+    });
   }
   const finished = stored.finished_label ? `, finished ${stored.finished_label}` : '';
   push(
@@ -92,7 +99,7 @@ function conclusionLines(content) {
     `Stored result${finished}. These figures were copied from that result. pivitlab did not recalculate them for this document.`,
     10,
     false,
-    10
+    12
   );
   if (content.peeked) {
     push(
@@ -104,18 +111,26 @@ function conclusionLines(content) {
     );
   }
 
-  push(items, 'Verdict', 13, true, 16);
+  items.push({ kind: 'heading', text: 'Verdict', gapBefore: 16 });
   const heading = stored.label === 'Win' || stored.label === 'Loss'
     ? `${stored.label}: ${stored.variant_name || ''}`.trim()
     : (stored.label || 'Verdict');
-  push(items, heading, 16, true, 6);
-  push(items, stored.summary, 11, false, 6);
-  if (stored.range_label) push(items, `95% range: ${stored.range_label}`, 11, false, 4);
-  if (stored.range_line && stored.range_line !== `95% range ${stored.range_label}`) {
-    push(items, stored.range_line, 11, false, 2);
-  }
-  if (stored.probability_label) push(items, stored.probability_label, 11, false, 4);
-  if (stored.verdict_line) push(items, stored.verdict_line, 10, false, 4);
+  const rangeCaption = stored.range_label ? `95% range: ${stored.range_label}` : '';
+  const extraLine = stored.range_line && stored.range_line !== `95% range ${stored.range_label}`
+    ? stored.range_line
+    : '';
+  items.push({
+    kind: 'verdict',
+    tone: toneFor(stored.label),
+    title: heading,
+    summary: stored.summary || '',
+    rangeLabel: stored.range_label || '',
+    rangeCaption,
+    extraLine,
+    probability: stored.probability_label || '',
+    gapBefore: 8,
+  });
+  if (stored.verdict_line) push(items, stored.verdict_line, 10, false, 8);
   push(
     items,
     'Probability best is a secondary detail, not the decision. The decision is the 95% credible range on the relative uplift.',
@@ -124,45 +139,53 @@ function conclusionLines(content) {
     6
   );
 
-  push(items, 'Results', 13, true, 16);
-  const goal = stored.goal_label || 'Conversions';
-  push(items, `Version    Visitors    ${goal}    Rate`, 10, true, 6);
-  (stored.rows || []).forEach((row) => {
-    push(
-      items,
-      `${row.version}    ${row.visitors}    ${row.conversions}    ${row.rate}`,
-      10,
-      false,
-      2
-    );
-  });
+  const rows = stored.rows || [];
+  const tiles = [];
+  if (stored.visitors != null) tiles.push({ label: 'Visitors', value: String(stored.visitors) });
+  if (stored.days != null) tiles.push({ label: 'Days', value: String(stored.days) });
+  if (stored.finished_label) tiles.push({ label: 'Finished', value: String(stored.finished_label) });
+  if (stored.goal_label) tiles.push({ label: 'Goal', value: String(stored.goal_label) });
+  if (tiles.length) items.push({ kind: 'tiles', tiles, gapBefore: 12 });
+
+  if (rows.length || stored.visitors != null) {
+    items.push({ kind: 'heading', text: 'Results', gapBefore: 16 });
+  }
+  if (rows.length) {
+    const goal = stored.goal_label || 'Conversions';
+    items.push({
+      kind: 'table',
+      headers: ['Version', 'Visitors', goal, 'Rate'],
+      rows: rows.map((row) => [row.version, row.visitors, row.conversions, row.rate]),
+      gapBefore: 8,
+    });
+  }
   if (stored.visitors != null) {
     push(items, `${stored.visitors} visitors over ${stored.days} days.`, 10, false, 8);
   }
 
   if (content.hypothesis) {
-    push(items, 'Hypothesis', 13, true, 16);
+    items.push({ kind: 'heading', text: 'Hypothesis', gapBefore: 16 });
     push(items, content.hypothesis, 11, false, 6);
   }
   if (content.page_line) {
-    push(items, 'Page', 13, true, 12);
-    push(items, content.page_line, 11, false, 4);
+    items.push({ kind: 'heading', text: 'Page', gapBefore: 14 });
+    push(items, content.page_line, 11, false, 6);
   }
   if (content.goal) {
-    push(items, 'Goal', 13, true, 12);
-    push(items, content.goal, 11, false, 4);
+    items.push({ kind: 'heading', text: 'Goal', gapBefore: 14 });
+    push(items, content.goal, 11, false, 6);
   }
 
   const next = stored.whats_next || [];
   if (next.length) {
-    push(items, "What's next", 13, true, 16);
+    items.push({ kind: 'heading', text: "What's next", gapBefore: 16 });
     next.forEach((step, index) => {
       push(items, `${index + 1}. ${step.title || ''}`, 11, true, 8);
       push(items, step.body || '', 10, false, 2);
     });
   }
 
-  push(items, 'How pivitlab decides', 13, true, 18);
+  items.push({ kind: 'heading', text: 'How pivitlab decides', gapBefore: 18 });
   push(items, METHOD, 10, false, 6);
   if (content.generated_on) {
     push(items, `Document date: ${longDate(content.generated_on)}.`, 9, false, 14);
@@ -176,19 +199,25 @@ function conclusionPdf(content) {
 
 function approvalLines({ experimentName, approverName, approvedAt, releasedAt, demo }) {
   const items = [];
-  push(items, 'pivitlab', 14, true, 0);
-  push(items, 'Approval record', 20, true, 14);
+  items.push({
+    kind: 'title',
+    text: 'Approval record',
+    subtitle: `Test: ${experimentName || 'Test'}`,
+  });
   push(
     items,
     'This records a click to approve in pivitlab. It is not a paper signature.',
     11,
     false,
-    10
+    12
   );
-  push(items, `Test: ${experimentName || 'Test'}`, 12, true, 16);
   if (demo) {
-    push(items, 'Demo', 12, true, 8);
-    push(items, 'Demo test. This approval is for test traffic only.', 10, false, 4);
+    items.push({
+      kind: 'callout',
+      eyebrow: 'Demo',
+      text: 'Demo test. This approval is for test traffic only.',
+      gapBefore: 12,
+    });
   }
   push(items, `Approved by: ${approverName || 'Client'}`, 12, false, 8);
   push(items, `Approved on: ${longStamp(approvedAt)}`, 12, false, 6);

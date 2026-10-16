@@ -163,12 +163,16 @@ assert.ok(pdfText.includes('(Demo)'));
 assert.ok(pdfText.includes('14-day'));
 assert.ok(pdfText.includes('Test traffic only'));
 assert.ok(pdfText.includes('demo test'));
+assert.ok(pdfText.includes('Built by Heclr'));
 const livePdf = conclusionPdf({
   experiment_name: 'Homepage',
   demo: false,
   concluded: { label: 'Win', variant_name: 'Challenger', summary: 'Ahead.', rows: [] },
 });
-assert.ok(!livePdf.toString('latin1').includes('(Demo)'));
+const liveText = livePdf.toString('latin1');
+assert.ok(!liveText.includes('(Demo)'));
+assert.ok(liveText.includes('Built by Heclr'));
+assert.ok(liveText.includes('/ImLogo'));
 const approval = approvalPdf({
   experimentName: 'Homepage demo',
   approverName: 'North Shop',
