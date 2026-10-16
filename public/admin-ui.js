@@ -365,6 +365,106 @@
     return DEMO_RUNTIME_NOTE;
   }
 
+  const AUDIT_PAGE_SIZE = 25;
+
+  const AUDIT_ACTION_LABELS = {
+    test_traffic_remove: 'Removed test traffic',
+    test_traffic_restore: 'Restored test traffic',
+    reveal: 'Revealed early',
+    role_change: 'Changed a role',
+    signin: 'Signed in',
+    emergency_signin: 'Signed in with the owner password',
+    signout_everywhere: 'Signed out everywhere',
+    signup: 'Signed up',
+    email_verified: 'Verified email',
+    signup_requested: 'Asked to sign up',
+    signin_failed: 'Failed sign-in',
+    site_added: 'Added a site',
+    site_verified: 'Verified a site',
+    domain_conflict: 'Flagged a domain clash',
+    invite_created: 'Created an invite',
+    invite_revoked: 'Revoked an invite',
+    access_request_invite: 'Created an invite from a request',
+    view_as: 'Started a support view',
+    view_as_stop: 'Stopped a support view',
+    review_request: 'Asked for a review',
+    review_decided: 'Marked a review as seen',
+    conclusion_drafted: 'Drafted a conclusion',
+    conclusion_released: 'Released a conclusion',
+    conclusion_approved: 'Approved a conclusion',
+    email_bounce: 'Email bounced',
+  };
+
+  function auditActionLabel(action) {
+    if (AUDIT_ACTION_LABELS[action]) return AUDIT_ACTION_LABELS[action];
+    return String(action || '').replace(/_/g, ' ');
+  }
+
+  function auditDetailText(entry) {
+    const detail = (entry && entry.detail) || {};
+    if (entry && entry.action === 'role_change') {
+      const who = detail.email ? `${detail.email}, ` : '';
+      return `${who}from ${detail.from_role || 'unknown'} to ${detail.to_role || 'unknown'}`;
+    }
+    if (detail.visitor_count != null || detail.event_count != null || (detail.criteria && detail.criteria.kind === 'peek')) {
+      const visitors = Number(detail.visitor_count) || 0;
+      const events = Number(detail.event_count) || 0;
+      const criteria = detail.criteria || {};
+      let what = 'Test traffic';
+      if (criteria.kind === 'peek') what = 'Early look';
+      else if (criteria.mode === 'prefix' && criteria.prefix) what = `Prefix ${criteria.prefix}`;
+      const visitorWord = visitors === 1 ? 'visitor' : 'visitors';
+      const eventWord = events === 1 ? 'event' : 'events';
+      return `${what}. ${visitors} ${visitorWord}, ${events} ${eventWord}.`;
+    }
+    if (detail.host) return String(detail.host);
+    if (detail.website) return String(detail.website);
+    if (detail.name) return String(detail.name);
+    return '';
+  }
+
+  function auditRoute(hash) {
+    const text = String(hash || '');
+    if (text !== '#audit' && !text.startsWith('#audit?')) return null;
+    const params = new URLSearchParams(text.includes('?') ? text.slice(text.indexOf('?') + 1) : '');
+    const page = parseInt(params.get('page') || '1', 10);
+    return {
+      test: params.get('test') || '',
+      user: params.get('user') || '',
+      action: params.get('action') || '',
+      page: Number.isFinite(page) && page > 0 ? page : 1,
+    };
+  }
+
+  function auditHash(state) {
+    const current = state || {};
+    const params = new URLSearchParams();
+    if (current.test) params.set('test', current.test);
+    if (current.user) params.set('user', current.user);
+    if (current.action) params.set('action', current.action);
+    if (current.page && Number(current.page) > 1) params.set('page', String(current.page));
+    const query = params.toString();
+    return query ? `#audit?${query}` : '#audit';
+  }
+
+  function auditQuery(state) {
+    const current = state || {};
+    const params = new URLSearchParams();
+    if (current.test) params.set('test', current.test);
+    if (current.user) params.set('user', current.user);
+    if (current.action) params.set('action', current.action);
+    params.set('page', String(current.page && current.page > 0 ? current.page : 1));
+    params.set('page_size', String(current.pageSize || AUDIT_PAGE_SIZE));
+    return `/api/audit?${params.toString()}`;
+  }
+
+  function auditPageLabel(page, total, pageSize) {
+    const size = Number(pageSize) > 0 ? Number(pageSize) : AUDIT_PAGE_SIZE;
+    const pages = Math.max(1, Math.ceil((Number(total) || 0) / size));
+    const current = Math.min(Math.max(1, Number(page) || 1), pages);
+    return `Page ${current} of ${pages}`;
+  }
+
   function demoPlanHtml() {
     return `<div class="demo-plan" data-demo-plan="1">
       <h2>Demo plan</h2>
@@ -410,5 +510,12 @@
     demoBadgeHtml,
     demoRuntimeNote,
     demoPlanHtml,
+    AUDIT_PAGE_SIZE,
+    auditActionLabel,
+    auditDetailText,
+    auditRoute,
+    auditHash,
+    auditQuery,
+    auditPageLabel,
   };
 });

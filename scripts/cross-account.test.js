@@ -57,6 +57,7 @@ function appFor(session) {
   app.use('/api/access-requests', require('../src/routes/access-requests'));
   app.use('/api/access-requests', require('../src/routes/access-requests').adminRouter);
   app.use('/api/audit', require('../src/routes/audit'));
+  app.use('/api/account/members', require('../src/routes/members'));
   app.use('/api/setup', require('../src/routes/setup').setupRouter);
   app.use('/api/sites', require('../src/routes/setup').sitesRouter);
   app.use('/api/admin', require('../src/routes/audit').adminRouter);
@@ -389,6 +390,7 @@ async function main() {
         ['PATCH', `/api/clients/${aClient.rows[0].id}`, { name: 'Hacked' }],
         ['DELETE', `/api/clients/${aClient.rows[0].id}`],
         ['POST', `/api/review-requests/${aReview.rows[0].id}/decide`, {}],
+        ['PATCH', `/api/account/members/${alpha.userId}`, { role: 'member', account_id: beta.id }],
       ];
       for (const [method, urlPath, body] of foreign) {
         await expectHidden(server, method, urlPath, body, `${who} ${method} ${urlPath}`);
@@ -482,6 +484,11 @@ async function main() {
 
     await denyOwner(serverB, 'owner B');
     await denyOwner(serverMember, 'member B');
+    const alphaRole = await db.query(
+      `SELECT role FROM memberships WHERE account_id = $1 AND user_id = $2`,
+      [alpha.id, alpha.userId]
+    );
+    assert.strictEqual(alphaRole.rows[0].role, 'owner');
 
     const clientPaths = [
       ['GET', `/api/client/experiments/${aRunning.id}`],
@@ -514,6 +521,12 @@ async function main() {
     const clientView = await request(serverClientB, 'POST', '/api/auth/view-as', { account_id: alpha.id });
     assert.strictEqual(clientView.status, 404);
     assertClean(clientView, 'client B view as');
+    const clientAudit = await request(serverClientB, 'GET', '/api/audit');
+    assert.strictEqual(clientAudit.status, 401);
+    assertClean(clientAudit, 'client B audit');
+    const clientRole = await request(serverClientB, 'PATCH', `/api/account/members/${alpha.userId}`, { role: 'member' });
+    assert.strictEqual(clientRole.status, 401);
+    assertClean(clientRole, 'client B role change');
 
     const mixed = await request(serverMixed, 'GET', '/api/client/experiments');
     assert.strictEqual(mixed.status, 401);
@@ -751,6 +764,7 @@ async function main() {
       ['POST', `/api/experiments/${aRunning.id}/test-traffic/remove`, { mode: 'test', confirm: true }],
       ['POST', `/api/review-requests/${aReview.rows[0].id}/decide`, {}],
       ['POST', '/api/sites', { website: 'evil.example' }],
+      ['PATCH', `/api/account/members/${alpha.userId}`, { role: 'member' }],
     ];
     for (const [method, urlPath, body] of viewWrites) {
       const res = await request(viewServer, method, urlPath, body);
@@ -759,6 +773,11 @@ async function main() {
     }
     const hiddenInvites = await request(viewServer, 'GET', '/api/invites');
     assert.strictEqual(hiddenInvites.status, 403);
+    const roleAfterView = await db.query(
+      `SELECT role FROM memberships WHERE account_id = $1 AND user_id = $2`,
+      [alpha.id, alpha.userId]
+    );
+    assert.strictEqual(roleAfterView.rows[0].role, 'owner');
 
     const viewRow = await db.query(
       `SELECT account_id, actor_user_id, action FROM audit_log WHERE action = 'view_as' ORDER BY id DESC LIMIT 1`

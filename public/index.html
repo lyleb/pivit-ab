@@ -225,6 +225,16 @@
     margin: 10px 0 14px;
   }
   .empty { padding: 28px 8px; color: var(--text-muted); }
+  .audit-filters {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px 14px;
+    align-items: end;
+    margin-bottom: 8px;
+  }
+  .audit-filters label { margin-top: 0; }
+  .audit-filter-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 16px; }
+  #audit-table td { vertical-align: top; }
   @media (max-width: 860px) {
     .app-shell { flex-direction: column; }
     .sidebar {
@@ -245,6 +255,7 @@
     }
     .sidebar-nav::-webkit-scrollbar { display: none; }
     .sidebar-nav .nav-item { width: auto; flex: 0 0 auto; min-height: 40px; white-space: nowrap; }
+    .audit-filters { grid-template-columns: 1fr; }
     .main-area { padding: 20px 16px 64px; }
     .grid-2, .detail-top, .page-head { grid-template-columns: 1fr; display: flex; flex-direction: column; }
     .goal-row { grid-template-columns: 1fr; }
@@ -281,6 +292,7 @@
       <button type="button" class="nav-item" id="nav-page-create" data-go="#create">Create experiment</button>
       <button type="button" class="nav-item" id="nav-page-preview" data-go="#preview">Preview &amp; manage</button>
       <button type="button" class="nav-item" id="nav-page-status" data-go="#status">Start &amp; pause</button>
+      <button type="button" class="nav-item" id="nav-page-audit" data-go="#audit">Audit log</button>
     </nav>
     <div class="sidebar-foot">
       <button type="button" class="nav-item" id="logout-all">Sign out everywhere</button>
@@ -581,6 +593,55 @@
         <p class="hint" id="status-hint">The status shown here is the one the server last confirmed.</p>
         <div id="status-actions" class="inline-actions" style="margin-top:16px;"></div>
         <p id="status-result" class="hint"></p>
+      </section>
+    </div>
+
+    <div id="page-audit" class="page">
+      <div class="page-head">
+        <div>
+          <h1>Audit log</h1>
+          <p class="hint" style="margin:4px 0 0;">What happened on this account in pivitlab. Newest first. Only an owner of this account can see these events.</p>
+        </div>
+      </div>
+      <section class="card">
+        <form id="audit-filters" class="audit-filters">
+          <div>
+            <label for="audit-test">Test</label>
+            <select id="audit-test"><option value="">All tests</option></select>
+          </div>
+          <div>
+            <label for="audit-user">User</label>
+            <select id="audit-user"><option value="">All users</option></select>
+          </div>
+          <div>
+            <label for="audit-action">Action</label>
+            <select id="audit-action"><option value="">All actions</option></select>
+          </div>
+        </form>
+        <div class="audit-filter-actions">
+          <button type="submit" form="audit-filters">Apply filters</button>
+          <button type="button" class="btn-ghost" id="audit-clear">Clear</button>
+        </div>
+        <p id="audit-msg" class="hint">Loading the audit log…</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Audit log (scrolls sideways)">
+          <table id="audit-table" hidden>
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>User</th>
+                <th>Action</th>
+                <th>Test</th>
+                <th>Detail</th>
+              </tr>
+            </thead>
+            <tbody id="audit-body"></tbody>
+          </table>
+        </div>
+        <div class="inline-actions" id="audit-pager" hidden>
+          <button type="button" class="btn-ghost" id="audit-prev">Previous</button>
+          <span id="audit-page" class="hint"></span>
+          <button type="button" class="btn-ghost" id="audit-next">Next</button>
+        </div>
       </section>
     </div>
   </div>
@@ -1006,13 +1067,13 @@ function go(hash) {
 }
 
 function showPage(id) {
-  ['page-home', 'page-detail', 'page-create', 'page-preview', 'page-status'].forEach((pageId) => {
+  ['page-home', 'page-detail', 'page-create', 'page-preview', 'page-status', 'page-audit'].forEach((pageId) => {
     document.getElementById(pageId).classList.toggle('active', pageId === id);
   });
 }
 
 function setNav(activeId) {
-  ['page-home', 'page-create', 'page-preview', 'page-status'].forEach((id) => {
+  ['page-home', 'page-create', 'page-preview', 'page-status', 'page-audit'].forEach((id) => {
     const el = document.getElementById('nav-' + id);
     if (el) el.classList.toggle('active', id === activeId);
   });
@@ -1031,6 +1092,14 @@ async function applyRoute() {
     setNav('page-home');
     setTitle('pivitlab — Experiment');
     await openExperiment(expMatch[1], expMatch[2] || 'overview', { token });
+    return;
+  }
+  const audit = UI.auditRoute(hash);
+  if (audit) {
+    showPage('page-audit');
+    setNav('page-audit');
+    setTitle('pivitlab — Audit log');
+    await loadAudit(audit, token);
     return;
   }
   const pages = { '#home': 'page-home', '#create': 'page-create', '#preview': 'page-preview', '#status': 'page-status' };
@@ -3380,6 +3449,71 @@ async function loadTestAudit(expId) {
   if (table) table.style.display = 'table';
 }
 
+function fillAuditSelect(select, html, current) {
+  select.innerHTML = html;
+  if ([...select.options].some((option) => option.value === current)) select.value = current;
+}
+
+async function loadAudit(state, token) {
+  const msg = document.getElementById('audit-msg');
+  const table = document.getElementById('audit-table');
+  const body = document.getElementById('audit-body');
+  const pager = document.getElementById('audit-pager');
+  if (!msg || !table || !body || !pager) return;
+  msg.className = 'hint';
+  msg.textContent = 'Loading the audit log…';
+  const result = await callApi(UI.auditQuery(Object.assign({}, state, { pageSize: UI.AUDIT_PAGE_SIZE })), { headers: authHeaders() });
+  if (token != null && token !== routeToken) return;
+  if (!result.ok) {
+    msg.className = 'error-msg';
+    msg.textContent = 'Could not load the audit log.';
+    table.hidden = true;
+    pager.hidden = true;
+    return;
+  }
+  const data = result.data || {};
+  const tests = ['<option value="">All tests</option>'].concat((data.tests || []).map((test) =>
+    `<option value="${UI.escapeHtml(test.id)}">${UI.escapeHtml(test.name)}</option>`
+  ));
+  fillAuditSelect(document.getElementById('audit-test'), tests.join(''), state.test || '');
+  const users = ['<option value="">All users</option>'].concat((data.users || []).map((user) =>
+    `<option value="${UI.escapeHtml(user.value)}">${UI.escapeHtml(user.label)}</option>`
+  ));
+  fillAuditSelect(document.getElementById('audit-user'), users.join(''), state.user || '');
+  const actions = ['<option value="">All actions</option>'].concat((data.actions || []).map((action) =>
+    `<option value="${UI.escapeHtml(action)}">${UI.escapeHtml(UI.auditActionLabel(action))}</option>`
+  ));
+  fillAuditSelect(document.getElementById('audit-action'), actions.join(''), state.action || '');
+
+  const entries = data.entries || [];
+  const filtered = !!(state.test || state.user || state.action);
+  if (entries.length === 0) {
+    msg.className = 'hint';
+    msg.textContent = filtered
+      ? 'No events match these filters.'
+      : 'Nothing has been recorded for this account yet.';
+    table.hidden = true;
+    body.innerHTML = '';
+  } else {
+    msg.textContent = '';
+    body.innerHTML = entries.map((entry) => `<tr>
+      <td>${UI.escapeHtml(formatAuditWhen(entry.created_at))}</td>
+      <td>${UI.escapeHtml(entry.actor_label || 'Unknown')}</td>
+      <td>${UI.escapeHtml(UI.auditActionLabel(entry.action))}</td>
+      <td>${UI.escapeHtml(entry.experiment_name || '—')}</td>
+      <td>${UI.escapeHtml(UI.auditDetailText(entry))}</td>
+    </tr>`).join('');
+    table.hidden = false;
+  }
+  const page = data.page || state.page || 1;
+  const size = data.page_size || UI.AUDIT_PAGE_SIZE;
+  const pages = Math.max(1, Math.ceil((Number(data.total) || 0) / size));
+  document.getElementById('audit-page').textContent = UI.auditPageLabel(page, data.total, size);
+  document.getElementById('audit-prev').disabled = page <= 1;
+  document.getElementById('audit-next').disabled = page >= pages;
+  pager.hidden = (Number(data.total) || 0) === 0;
+}
+
 function closeTestTrafficModal() {
   const modal = document.getElementById('test-traffic-modal');
   if (modal) modal.classList.remove('active');
@@ -4699,6 +4833,27 @@ if (window.Chart) {
   Chart.defaults.color = '#c5c8d4';
   Chart.defaults.borderColor = 'rgba(255,255,255,0.08)';
 }
+
+document.getElementById('audit-filters').addEventListener('submit', (e) => {
+  e.preventDefault();
+  go(UI.auditHash({
+    test: document.getElementById('audit-test').value,
+    user: document.getElementById('audit-user').value,
+    action: document.getElementById('audit-action').value,
+    page: 1,
+  }));
+});
+document.getElementById('audit-clear').addEventListener('click', () => go('#audit'));
+document.getElementById('audit-prev').addEventListener('click', () => {
+  const state = UI.auditRoute(location.hash) || { page: 1 };
+  state.page = Math.max(1, (state.page || 1) - 1);
+  go(UI.auditHash(state));
+});
+document.getElementById('audit-next').addEventListener('click', () => {
+  const state = UI.auditRoute(location.hash) || { page: 1 };
+  state.page = (state.page || 1) + 1;
+  go(UI.auditHash(state));
+});
 
 document.getElementById('logout-all').addEventListener('click', async () => {
   await fetch('/api/auth/logout-all', { method: 'POST' });

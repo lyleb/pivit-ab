@@ -47,9 +47,9 @@ State-changing requests must come from https://pivitlab.com, from `APP_ORIGIN`, 
 
 ## Audit log
 
-`audit_log` records sign-up, sign-in (magic link, client password, and the emergency password as `emergency_signin`), sign-out everywhere, failed codes, invites, sites, verification, Reveal early, test-traffic remove and restore, and superadmin view-as start and stop. An account owner sees their own rows. A superadmin sees the whole log, except while using view-as, which is limited to that account and cannot change anything. If the audit table is missing, those actions still succeed.
+`audit_log` records sign-up, sign-in (magic link, client password, and the emergency password as `emergency_signin`), sign-out everywhere, failed codes, invites, sites, verification, Reveal early, test-traffic remove and restore, role changes, and superadmin view-as start and stop. An owner sees only that account's rows. A superadmin sees the same limit: their own account, or the account they are viewing. View-as stays read-only. A client viewer cannot open the log. The Audit log screen is on the owner dashboard. If the audit table is missing, those actions still succeed.
 
-The experiment screen still reads `test_traffic_audit`. New remove, restore and Reveal rows are written there and copied into `audit_log`. Rows that already existed are copied once by migration 002.
+The experiment screen still reads `test_traffic_audit`. New remove, restore and Reveal rows are written there and to `audit_log`. Rows that already existed are copied by migration 002. Migration 014 copies any that were missed. The old table is kept.
 
 ## Access requests
 
