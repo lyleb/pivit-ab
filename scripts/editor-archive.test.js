@@ -77,7 +77,7 @@ assert.ok(editorSrc.includes('pivit-expired-link'));
 assert.ok(snippetSrc.includes('pivit-expired-link'));
 assert.ok(snippetSrc.includes("data.code === 'archived'"));
 assert.ok(snippetSrc.includes('preview_expired'));
-assert.ok(snippetSrc.includes("const EDITOR_VERSION = '20261015b'"));
+assert.ok(snippetSrc.includes("const EDITOR_VERSION = '20261016a'"));
 assert.ok(editorSrc.includes("This selector isn't on the current page."));
 assert.ok(editorSrc.includes('pivit-selector-warning'));
 assert.ok(snippetSrc.includes('editor.js?v='));

@@ -44,6 +44,11 @@
  * token is ignored, so drafts are not served to anyone who guesses the URL.
  * If the URL still has an older ab_edit or ab_preview (a leftover from the
  * previous test), the last one wins, and preview applies only that experiment.
+ * ?pivit_device=desktop|tablet|mobile (with a preview token) opens device
+ * frames. The frame reloads the page without that parameter, so the variant's
+ * CSS, HTML and JavaScript run inside the frame the same way they do live.
+ * Switching device or refreshing loads the frame again, including JavaScript
+ * that runs once on load. A normal visit ignores pivit_device.
  *
  * Anti-flicker: if the anti-flicker snippet (from the dashboard's "Copy
  * Snippet" popover) is also installed in <head>, it hides the page via an
@@ -127,13 +132,45 @@
   let qaOn = false;
   const ASSIGNMENT_PREFIX = '_ab_assign_';
   // Bump when editor.js changes so a cached copy cannot keep the old variant.
-  const EDITOR_VERSION = '20261015b';
+  const EDITOR_VERSION = '20261016a';
+  // Bump when device-preview.js changes so a cached shell cannot skip JavaScript.
+  const DEVICE_PREVIEW_VERSION = '20261016a';
 
   // The first query value is the leftover. The last ab_edit or ab_preview is
   // the link the owner just opened.
   function lastQuery(params, name) {
     const values = params.getAll(name).filter((value) => value);
     return values.length ? values[values.length - 1] : null;
+  }
+
+  // Only these three open a device frame. Anything else is a normal preview.
+  function previewDevice(value) {
+    const name = String(value || '').toLowerCase();
+    if (name === 'desktop' || name === 'tablet' || name === 'mobile') return name;
+    return '';
+  }
+
+  // The shell covers this document. The framed copy of the page, without
+  // pivit_device, is what applies the variant. Loaded only for a preview.
+  function mountDevicePreview(device) {
+    if (document.getElementById('pivit-device-shell')) return;
+    const shell = document.createElement('div');
+    shell.setAttribute('id', 'pivit-device-shell');
+    shell.setAttribute('data-device', device);
+    shell.style.position = 'fixed';
+    shell.style.inset = '0';
+    shell.style.zIndex = '2147483647';
+    shell.style.background = '#e8eaef';
+    (document.documentElement || document.body).appendChild(shell);
+    const previous = document.querySelectorAll('script[data-pivit-device-preview]');
+    for (let i = 0; i < previous.length; i++) previous[i].remove();
+    const loader = document.createElement('script');
+    loader.src = `${API_BASE}/snippet/device-preview.js?v=${DEVICE_PREVIEW_VERSION}`;
+    loader.async = false;
+    loader.setAttribute('data-pivit-device-preview', '1');
+    loader.setAttribute('data-api', API_BASE);
+    loader.setAttribute('data-device', device);
+    document.head.appendChild(loader);
   }
 
   function pageMode() {
@@ -573,6 +610,18 @@
     // Preview needs both the variant id and a signed token. The token is what
     // lets a draft or paused experiment through; the id alone does not.
     const wantsPreview = mode.type === 'preview' && !!(mode.variantId && mode.token);
+
+    // Device frames are a preview of the saved variant. The top document does
+    // not apply changes: the frame loads this URL without pivit_device, and
+    // that load runs CSS, HTML and JavaScript exactly as a visitor would.
+    const devicePreview = wantsPreview
+      ? previewDevice(lastQuery(new URLSearchParams(window.location.search), 'pivit_device'))
+      : '';
+    if (devicePreview) {
+      mountDevicePreview(devicePreview);
+      revealPage();
+      return;
+    }
 
     if (!wantsPreview && !hasTrackingConsent()) {
       // No consent yet (and this isn't a preview) — don't write to localStorage,

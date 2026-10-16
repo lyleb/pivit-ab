@@ -492,8 +492,7 @@
     previewRow.style.gap = '6px';
     previewRow.style.marginTop = '8px';
     ['Desktop', 'Tablet', 'Mobile'].forEach((label) => {
-      const sizes = { Desktop: [1280, 800], Tablet: [768, 1024], Mobile: [390, 844] };
-      const btn = makeButton(label, '#f0f0f7', () => openPreview(sizes[label][0], sizes[label][1]));
+      const btn = makeButton(label, '#f0f0f7', () => openPreview(label.toLowerCase()));
       btn.style.flex = '1';
       btn.style.color = COLORS.ink;
       btn.style.fontSize = '11px';
@@ -507,7 +506,7 @@
     hint.style.fontSize = '11px';
     hint.style.color = '#6b6f83';
     hint.style.marginTop = '8px';
-    hint.textContent = 'Preview reflects the last save, not unsaved edits.';
+    hint.textContent = 'Preview shows the last save, not unsaved edits. Each device runs the variant\'s JavaScript.';
     toolbar.appendChild(hint);
 
     refreshToolbarState();
@@ -698,7 +697,7 @@
     selectorWarnEl.textContent = missing ? SELECTOR_MISSING : '';
   }
 
-  async function openPreview(width, height) {
+  async function openPreview(device) {
     try {
       const res = await editorFetch(`${API_BASE}/api/editor/variants/${encodeURIComponent(VARIANT_ID)}/preview-token?token=${encodeURIComponent(TOKEN)}`);
       const data = await res.json().catch(() => ({}));
@@ -714,9 +713,13 @@
       const url = new URL(window.location.href);
       url.searchParams.delete('ab_edit');
       url.searchParams.delete('token');
+      url.searchParams.delete('pivit_device');
       url.searchParams.set('ab_preview', VARIANT_ID);
       url.searchParams.set('ab_preview_token', data.preview_token);
-      window.open(url.toString(), '_blank', `width=${width},height=${height}`);
+      // The shell frames this preview and reloads it when the device changes,
+      // so JavaScript that runs once on load runs again. A sized popup does not.
+      url.searchParams.set('pivit_device', device === 'tablet' || device === 'mobile' ? device : 'desktop');
+      window.open(url.toString(), '_blank');
     } catch (err) {
       window.alert("Couldn't open the preview. Check your connection and try again.");
     }
