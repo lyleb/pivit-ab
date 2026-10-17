@@ -157,17 +157,34 @@ async function listAccountAudit(accountId, query) {
        FROM memberships m
        JOIN users u ON u.id = m.user_id
        WHERE m.account_id = $1
+         AND m.removed_at IS NULL
+         AND u.archived_at IS NULL
+         AND u.deleted_at IS NULL
        ORDER BY u.email, u.id`,
       [accountId]
     ),
     db.query(
-      `SELECT DISTINCT actor_label
-       FROM audit_log
-       WHERE account_id = $1
-         AND actor_user_id IS NULL
-         AND actor_label IS NOT NULL
-         AND btrim(actor_label) <> ''
-       ORDER BY actor_label`,
+      `SELECT DISTINCT l.actor_label
+       FROM audit_log l
+       WHERE l.account_id = $1
+         AND l.actor_user_id IS NULL
+         AND l.actor_label IS NOT NULL
+         AND btrim(l.actor_label) <> ''
+         AND NOT EXISTS (
+           SELECT 1 FROM users u
+           WHERE (u.archived_at IS NOT NULL OR u.deleted_at IS NOT NULL)
+             AND lower(u.email) = lower(l.actor_label)
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM clients c
+           WHERE c.account_id = l.account_id
+             AND (c.archived_at IS NOT NULL OR c.deleted_at IS NOT NULL)
+             AND (
+               lower(c.username) = lower(l.actor_label)
+               OR c.name = l.actor_label
+             )
+         )
+       ORDER BY l.actor_label`,
       [accountId]
     ),
     db.query(

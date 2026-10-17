@@ -15,6 +15,8 @@ router.get('/', async (req, res) => {
        FROM clients c
        LEFT JOIN experiments e ON e.client_id = c.id AND e.account_id = c.account_id
        WHERE c.account_id = $1
+         AND c.archived_at IS NULL
+         AND c.deleted_at IS NULL
        GROUP BY c.id
        ORDER BY c.name`,
       [req.account.id]
@@ -56,7 +58,10 @@ router.patch('/:id', async (req, res) => {
     if (password && password.length < 8) return res.status(400).json({ error: 'password must be at least 8 characters' });
 
     const { rows: existingRows } = await db.query(
-      `SELECT * FROM clients WHERE id = $1 AND account_id = $2`,
+      `SELECT * FROM clients
+       WHERE id = $1 AND account_id = $2
+         AND archived_at IS NULL
+         AND deleted_at IS NULL`,
       [id, req.account.id]
     );
     if (existingRows.length === 0) return res.status(404).json({ error: 'no client found with that id' });
@@ -85,7 +90,11 @@ router.patch('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { rows } = await db.query(
-      `DELETE FROM clients WHERE id = $1 AND account_id = $2 RETURNING id`,
+      `DELETE FROM clients
+       WHERE id = $1 AND account_id = $2
+         AND archived_at IS NULL
+         AND deleted_at IS NULL
+       RETURNING id`,
       [req.params.id, req.account.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no client found with that id' });

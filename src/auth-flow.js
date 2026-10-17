@@ -9,6 +9,7 @@ const { sha256, timingSafeStringEqual } = require('./timing');
 const { normaliseSiteDomain, normalisedDomainExpr } = require('./site-domain');
 const { newSiteKey } = require('./db/tenancy');
 const { recordAudit } = require('./audit');
+const { personClosed, SIGN_IN_CLOSED } = require('./person-state');
 const { hit, LIMITED_MESSAGE } = require('./rate-limit');
 const { sendEmail } = require('./mailer');
 const { appUrl } = require('./app-origin');
@@ -167,8 +168,11 @@ async function requestSignIn(email, req) {
     return { ok: true, message: LINK_SENT };
   }
 
-  const { rows } = await db.query(`SELECT id FROM users WHERE email = $1`, [email]);
-  if (!rows[0]) return { ok: true, message: LINK_SENT };
+  const { rows } = await db.query(
+    `SELECT id, suspended_at, deleted_at FROM users WHERE email = $1`,
+    [email]
+  );
+  if (!rows[0] || personClosed(rows[0])) return { ok: true, message: LINK_SENT };
 
   const client = await db.pool.connect();
   let issued;
@@ -206,7 +210,13 @@ async function requestSignup({ email, website, inviteCode, req }) {
     return { ok: true, message: LINK_SENT };
   }
 
-  const existing = await db.query(`SELECT id FROM users WHERE email = $1`, [email]);
+  const existing = await db.query(
+    `SELECT id, suspended_at, deleted_at FROM users WHERE email = $1`,
+    [email]
+  );
+  if (existing.rows[0] && personClosed(existing.rows[0])) {
+    return { ok: true, message: LINK_SENT };
+  }
   const purpose = existing.rows[0] ? 'signin' : 'signup';
 
   const client = await db.pool.connect();
@@ -250,7 +260,7 @@ async function requestSignup({ email, website, inviteCode, req }) {
 async function membershipFor(client, userId) {
   const { rows } = await client.query(
     `SELECT account_id, role FROM memberships
-     WHERE user_id = $1
+     WHERE user_id = $1 AND removed_at IS NULL
      ORDER BY (role = 'owner') DESC, created_at
      LIMIT 1`,
     [userId]
@@ -262,6 +272,7 @@ async function finishSignin(client, email, ip) {
   const { rows } = await client.query(`SELECT * FROM users WHERE email = $1 FOR UPDATE`, [email]);
   const user = rows[0];
   if (!user) return { ok: false, status: 400, error: 'That sign-in link is not valid, or it has expired.' };
+  if (personClosed(user)) return { ok: false, status: 401, error: SIGN_IN_CLOSED };
   const wasVerified = !!user.verified_at;
   await client.query(
     `UPDATE users SET verified_at = COALESCE(verified_at, now()) WHERE id = $1`,

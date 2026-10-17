@@ -21,6 +21,7 @@ const { applyElementSelector } = require('./element-selector');
 const { applyDemoTest } = require('./demo-test');
 const { applyAuditBackfill } = require('./audit-backfill');
 const { applyActiveSite } = require('./active-site');
+const { applyPeopleState } = require('./people-state');
 
 const LOCK_KEY = 814021;
 
@@ -62,6 +63,9 @@ const VERSIONS = [
   // The remembered setup site. Nullable, so existing accounts are left unset.
   // Stays out of schema.sql.
   { version: '015', name: 'active-site', run: applyActiveSite },
+  // Suspended, archived and deleted marks, and removed memberships.
+  // Nullable, so existing people stay active. Stays out of schema.sql.
+  { version: '016', name: 'people-state', run: applyPeopleState },
 ];
 
 async function ensureMigrationsTable(queryable) {

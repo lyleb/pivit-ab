@@ -393,6 +393,10 @@
     conclusion_released: 'Released a conclusion',
     conclusion_approved: 'Approved a conclusion',
     email_bounce: 'Email bounced',
+    'user.suspended': 'Suspended sign-in',
+    'user.unsuspended': 'Allowed sign-in again',
+    'user.archived': 'Archived a person',
+    'user.restored': 'Restored a person',
   };
 
   function auditActionLabel(action) {
@@ -402,6 +406,10 @@
 
   function auditDetailText(entry) {
     const detail = (entry && entry.detail) || {};
+    if (entry && String(entry.action || '').indexOf('user.') === 0) {
+      if (detail.email) return String(detail.email);
+      if (detail.username) return String(detail.username);
+    }
     if (entry && entry.action === 'role_change') {
       const who = detail.email ? `${detail.email}, ` : '';
       return `${who}from ${detail.from_role || 'unknown'} to ${detail.to_role || 'unknown'}`;

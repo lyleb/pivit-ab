@@ -6,6 +6,7 @@ const db = require('./db');
 const { migrate } = require('./db/migrate');
 const sessionMiddleware = require('./session');
 const { sessionLifetime } = require('./session-lifetime');
+const { personAccess } = require('./person-state');
 const { csrfMiddleware } = require('./csrf');
 
 const { hostScopingMode } = require('./host-scope');
@@ -27,6 +28,7 @@ const hostHitsRouter = require('./routes/host-hits');
 const invitesRouter = require('./routes/invites');
 const accessRequestsRouter = require('./routes/access-requests');
 const auditRouter = require('./routes/audit');
+const peopleRouter = require('./routes/people');
 const membersRouter = require('./routes/members');
 const { setupRouter, sitesRouter } = require('./routes/setup');
 const webhooksRouter = require('./routes/webhooks');
@@ -61,6 +63,7 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(sessionMiddleware);
 app.use(sessionLifetime);
+app.use(personAccess);
 app.use(csrfMiddleware);
 // Count snippet and public API hits without delaying the response. /health
 // and /robots.txt are excluded inside the middleware. A counter failure is
@@ -117,6 +120,7 @@ app.use('/api/audit', auditRouter);
 app.use('/api/account/members', membersRouter);
 app.use('/api/setup', setupRouter);
 app.use('/api/sites', sitesRouter);
+app.use('/api/admin', peopleRouter);
 app.use('/api/admin', auditRouter.adminRouter);
 app.use('/api/webhooks', webhooksRouter);
 app.use('/api/experiments', conclusionOwnerRouter);

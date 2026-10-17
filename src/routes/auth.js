@@ -17,6 +17,7 @@ const {
   consumeLink,
   consumeCode,
 } = require('../auth-flow');
+const { SIGN_IN_CLOSED, personClosed, refuseClosedSession } = require('../person-state');
 
 const router = express.Router();
 
@@ -106,7 +107,11 @@ async function ownerFromPassword(req) {
     fields.accountId = legacy.id;
     if (legacy.user_id) {
       fields.userId = legacy.user_id;
-      const { rows } = await db.query(`SELECT is_superadmin FROM users WHERE id = $1`, [legacy.user_id]);
+      const { rows } = await db.query(
+        `SELECT is_superadmin, suspended_at, deleted_at FROM users WHERE id = $1`,
+        [legacy.user_id]
+      );
+      if (personClosed(rows[0])) return { closed: true };
       fields.superadmin = !!(rows[0] && rows[0].is_superadmin);
     }
   }
@@ -118,6 +123,7 @@ async function ownerFromPassword(req) {
     action: 'emergency_signin',
     ip: req.ip,
   });
+  return { closed: false };
 }
 
 function sendFlowResult(res, result) {
@@ -158,7 +164,10 @@ router.post('/login', async (req, res) => {
     }
 
     await loginSuccess(bucket);
-    await ownerFromPassword(req);
+    const started = await ownerFromPassword(req);
+    if (started && started.closed) {
+      return res.status(401).json({ error: SIGN_IN_CLOSED });
+    }
     res.json({ role: 'owner' });
   } catch (err) {
     res.status(500).json(publicServerError(err));
@@ -188,6 +197,10 @@ router.post('/client-login', async (req, res) => {
     if (!client || !passwordOk) {
       await loginFailure(bucket);
       return res.status(401).json({ error: 'incorrect username or password' });
+    }
+    if (personClosed(client)) {
+      await loginSuccess(bucket);
+      return res.status(401).json({ error: SIGN_IN_CLOSED });
     }
 
     await loginSuccess(bucket);
@@ -381,6 +394,11 @@ router.post('/view-as/stop', async (req, res) => {
 // GET /api/auth/me — lets the dashboard/client page check login state on load
 // without storing anything itself; the session cookie (if any) does the work.
 router.get('/me', async (req, res) => {
+  try {
+    if (await refuseClosedSession(req, res)) return;
+  } catch (err) {
+    return res.status(500).json(publicServerError(err));
+  }
   const role = (req.session && req.session.role) || null;
   const client = role === 'client' ? { id: req.session.clientId, name: req.session.clientName } : null;
   const body = { role, client };
