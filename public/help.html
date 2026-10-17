@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<link rel="canonical" href="https://pivitlab.com/help.html">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/svg+xml" href="/assets/pivitlab-icon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<title>pivitlab — Who's who</title>
+<link rel="stylesheet" href="/assets/pivit.css?v=5">
+<style>
+  .legal-wrap h2 { margin-top: 32px; }
+  .legal-wrap ol { margin: 0 0 8px; padding-left: 1.3em; }
+  .legal-wrap li { margin: 8px 0; }
+  .help-contents { margin: 16px 0 8px; padding-left: 1.3em; }
+</style>
+</head>
+<body>
+<div class="legal-wrap">
+  <span class="brand-logo" role="img" aria-label="pivitlab"></span>
+  <h1>Who's who in pivitlab</h1>
+  <p>Three kinds of people use pivitlab. The badge next to the logo tells you which one you are.</p>
+  <p><a href="/index.html">Back to the dashboard</a></p>
+  <ol class="help-contents">
+    <li><a href="#who">Who's who</a></li>
+    <li><a href="#users">The Users screen</a></li>
+    <li><a href="#invites">Agency invites</a></li>
+    <li><a href="#team">The Team page and Viewers</a></li>
+    <li><a href="#sign-in">How sign-in works</a></li>
+    <li><a href="#audit">The audit log</a></li>
+  </ol>
+
+  <h2 id="who">Who's who</h2>
+  <ol>
+    <li>Look at the badge next to the pivitlab logo.</li>
+    <li><strong>Platform admin</strong> can see every agency. The badge says Platform admin. This person has the Users screen, can make an invite code for a new agency, and can open a read-only support view of another agency.</li>
+    <li>An <strong>agency</strong> is one company on pivitlab. People in it are an <strong>Owner</strong> or a <strong>Member</strong>. The badge says Owner or Member. An Owner runs the team. A Member can see the team and the tests, and cannot invite people or change them.</li>
+    <li>A <strong>Viewer</strong> is a read-only login for results. The badge says Viewer. A Viewer sees only the tests an Owner has assigned to them. They sign in with a username and password, not an email.</li>
+  </ol>
+  <p class="hint">The names stored in the database stay as they are (accounts, clients, session role client). On screen the names are Platform admin, Agency, Owner, Member and Viewer.</p>
+
+  <h2 id="users">The Users screen</h2>
+  <p>This screen is for a Platform admin. Stop a support view first. Users is hidden while you are viewing another agency.</p>
+  <ol>
+    <li>Open <strong>Users</strong> in the sidebar.</li>
+    <li>Search by name, email or username. Use Type, Status and Agency to narrow the list. Archived people stay hidden until you tick <strong>Show archived</strong>.</li>
+    <li>To stop someone signing in, choose <strong>Suspend</strong> and confirm. They are signed out of every agency straight away. They cannot sign in until you choose <strong>Unsuspend</strong>.</li>
+    <li>To hide someone from lists, choose <strong>Archive</strong> and confirm. They disappear from lists and dropdowns in every agency, including the user filter on the audit log. They can still sign in until you also suspend them. <strong>Restore</strong> puts them back on the lists.</li>
+    <li><strong>Delete</strong> is rare. It appears only when the person is already suspended or archived. Type their email, or a Viewer's username, exactly. pivitlab then removes their name, email or username, password and sign-in links, and their place in every agency. This cannot be undone. The audit log stays. The person is shown as "Deleted user" and a short code, not their name.</li>
+  </ol>
+  <p>You cannot suspend, archive or delete yourself. pivitlab also refuses if that would leave no Platform admin, or no Owner for an agency. The screen says why.</p>
+
+  <h2 id="invites">Agency invites</h2>
+  <p>There are two invites. Do not mix them up.</p>
+  <p>A <strong>new agency</strong> starts from a code made by a Platform admin:</p>
+  <ol>
+    <li>On Home, find <strong>Invite codes</strong>.</li>
+    <li>Add a note if you want, then choose <strong>Create invite code</strong>.</li>
+    <li>Copy the code. It is shown once, works once, and lasts 14 days. <strong>Revoke</strong> stops it.</li>
+    <li>Send the person to the sign-up page with that code. They enter a work email and a website.</li>
+    <li>That creates a new agency. It does not add them to an agency that already exists.</li>
+  </ol>
+  <p>A <strong>colleague</strong> joins an agency that already exists. An Owner does this from Team:</p>
+  <ol>
+    <li>Open <strong>Team</strong>.</li>
+    <li>Under <strong>Invite someone</strong>, enter their work email and choose Member or Owner.</li>
+    <li>Choose <strong>Email the invite</strong>, or <strong>Create a link</strong> if you would rather copy it. The link is shown once.</li>
+    <li>They open the link and press <strong>Join this agency</strong>. Opening the link does not use it up. The link works once and lasts 7 days.</li>
+    <li>Joining adds them to this agency. It does not create a new one. If they already use pivitlab, they are added to this agency.</li>
+    <li><strong>Pending invites</strong> lists the ones still open. <strong>Resend</strong> emails a new link and replaces the previous one. <strong>Revoke</strong> stops it.</li>
+  </ol>
+  <p>You cannot invite an address that is suspended or deleted. If they are already in the agency, the page says so.</p>
+
+  <h2 id="team">The Team page and Viewers</h2>
+  <ol>
+    <li>Open <strong>Team</strong>. An Owner and a Member can open it. Stop a support view first.</li>
+    <li>The list is everyone in this agency: Owners, Members and Viewers. Archived people stay hidden until you tick <strong>Show archived</strong>.</li>
+    <li>A Member can read the list. Only an Owner can change it. The page says so.</li>
+    <li>To change an Owner or a Member, choose Owner or Member in the Role menu. It saves when you change it. The agency must keep at least one Owner, so the last Owner's role cannot be changed.</li>
+    <li>To take an Owner or a Member out of this agency, choose <strong>Remove</strong> and confirm. They lose access here. They are not deleted from pivitlab, and any other agency they belong to is left as it is. You cannot remove yourself, and you cannot remove the last Owner.</li>
+    <li>To add a Viewer, fill in display name, username and a password of at least 8 characters, then choose <strong>Create viewer</strong>. Copy the password then. It is shown once.</li>
+    <li>On a Viewer's row, <strong>Edit</strong> changes the name or username. <strong>Reset password</strong> sets a new one, signs them out, and shows the new password once.</li>
+    <li><strong>Suspend</strong> signs that Viewer out straight away. They cannot sign in until you choose <strong>Unsuspend</strong>. <strong>Archive</strong> hides them from this agency's lists. They can still sign in until you suspend them. <strong>Restore</strong> puts them back. Tick <strong>Show archived</strong> to see them.</li>
+    <li>Assign a Viewer to a test from that test's Settings tab, under Viewer. Leave it empty to keep the test internal. They only see the tests you assign.</li>
+    <li>Home also has a <strong>Viewers</strong> button. An Owner can create a Viewer, rename one, reset a password, or delete the login there. Delete removes that login and unassigns their tests. The tests stay. That is not the same as Delete on the Users screen.</li>
+  </ol>
+
+  <h2 id="sign-in">How sign-in works</h2>
+  <p>Platform admin, Owner and Member:</p>
+  <ol>
+    <li>Open the sign-in page and enter the work email.</li>
+    <li>Choose <strong>Email me a sign-in link</strong>.</li>
+    <li>The email has a link and a 6-digit code. Each lasts 15 minutes and works once.</li>
+    <li>The link opens a page where you press <strong>Sign in</strong>. A mail tool that only opens the link does not use it up. You can type the code instead.</li>
+    <li>You land on the dashboard. The badge shows Platform admin, Owner or Member.</li>
+  </ol>
+  <p>A person creating a new agency uses the invite code first, then the same email. A colleague who was invited presses <strong>Join this agency</strong> and is signed in from that page.</p>
+  <p>An Owner or a Member stays signed in for 30 days of use, and never more than 90 days from sign-in. A Platform admin session lasts 12 hours and is not extended when they come back.</p>
+  <p>A Viewer:</p>
+  <ol>
+    <li>Open the address the agency gave you, or choose <strong>Viewer login</strong> on the sign-in page. The address is <code>/login.html?role=client</code>.</li>
+    <li>Enter the username and password. There is no email sign-in for a Viewer.</li>
+    <li>You land on the results page. If you forget the password, ask the agency. An Owner resets it from Team.</li>
+  </ol>
+  <p>When sign-in is closed:</p>
+  <ol>
+    <li><strong>Suspend</strong> stops sign-in at once, including a session that is already open.</li>
+    <li><strong>Archive</strong> on its own does not stop sign-in.</li>
+    <li>A deleted person cannot sign in.</li>
+    <li>Asking for an email link still shows "If that address can be used, we've sent a link." Nothing is sent, and the page does not say why.</li>
+    <li>A Viewer whose password is right, but who is suspended or deleted, sees "That sign-in isn't available."</li>
+  </ol>
+  <p>The password page at the unlisted address is only a fallback for the platform admin. Day to day, sign in by email. It is not linked from the sign-in page.</p>
+
+  <h2 id="audit">The audit log</h2>
+  <ol>
+    <li>Open <strong>Audit log</strong> in the sidebar.</li>
+    <li>You see what happened in this agency, newest first. That includes sign-in, invites, sites, tests, and changes to people.</li>
+    <li>Choose a test, a user or an action, then <strong>Apply filters</strong>. <strong>Clear</strong> removes them. <strong>Previous</strong> and <strong>Next</strong> move through the list.</li>
+    <li>An Owner and a Member can open it. A Viewer cannot. A Platform admin sees their own agency, or the agency they are viewing. A support view is read-only, and starting or stopping it is written here.</li>
+    <li>Archived and deleted people drop out of the user filter, so old names do not pile up. The rows stay in the log.</li>
+    <li>After a delete, those rows name them as "Deleted user" and a short code, not their email or username.</li>
+  </ol>
+  <p><strong>Sign out everywhere</strong>, at the bottom of the sidebar, ends your other sessions.</p>
+</div>
+</body>
+</html>

@@ -1,5 +1,5 @@
 // Two customer accounts, each with its own user, site key, experiments,
-// variants, events and client login. Account B must not list, read, edit,
+// variants, events and viewer sign-in. Account B must not list, read, edit,
 // start, pause, archive, export, preview, or see results or portal data for
 // account A. scripts/isolation-db.test.js already covers the legacy account
 // (no site key) against one other customer, including the emergency password

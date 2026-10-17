@@ -2,7 +2,7 @@
 
 Invite-only. An agency Owner enters a work email and a website, then signs in from a link or a 6-digit code. There is no agency password. The Owner signs in day to day the same way, by email at info@heclr.com. The owner password (`ADMIN_API_KEY`) stays as a fallback, on the unlisted page `/owner`. That page is not linked from sign-in, is noindexed, and is left out of `robots.txt`. The public sign-in page is email sign-in and viewer login. The session cookie is `pivit.sid` (in production, `__Host-pivit.sid`). Do not rotate `SESSION_SECRET`.
 
-The names on screen are **Platform admin**, **Agency** (with roles **Owner** and **Member**) and **Viewer**. In the database and the API those are still `users.is_superadmin`, the `accounts` table, membership roles `owner` and `member`, and the `clients` table with session `role` `client`. The viewer sign-in address stays `/login.html?role=client`. The viewer page stays `/client.html`.
+The names on screen are **Platform admin**, **Agency** (with roles **Owner** and **Member**) and **Viewer**. In the database and the API those are still `users.is_superadmin`, the `accounts` table, membership roles `owner` and `member`, and the `clients` table with session `role` `client`. The Viewer sign-in address stays `/login.html?role=client`. The sign-in page calls it Viewer login. The viewer page stays `/client.html`. The screens are in [help.md](help.md).
 
 Agency #1 stays **Heclr**. The platform admin is **info@heclr.com** (`is_superadmin`). The first email sign-in sets `verified_at`.
 
@@ -39,6 +39,26 @@ pivitlab.com still has a null MX, so the domain does not receive mail. Every out
 4. That first sign-in is the email verification. The agency is named after the domain. The site is not verified yet.
 5. The home screen shows a first-run checklist above the experiments: add the site, install the snippet (the status uses the install-check note), create a test, open the page with `?pivit_qa=1`, then start the test. Each step ticks from the agency's own data. The list can be hidden, and it hides itself once every step has ticked. A test can be built before the snippet has been seen, and cannot be started until that check has passed. If a visit from the site arrives with no site key, or with a key that is not this agency's, the snippet step says so. The public snippet response stays an empty list, the same as a host that is not allowed.
 
+## How a colleague joins an existing agency
+
+An invite code creates a new agency. It does not add a person to one that already exists. An Owner uses **Team** for that.
+
+1. Open **Team**, under **Invite someone**. Enter their work email and choose Member or Owner.
+2. Choose **Email the invite**, or **Create a link**. The link is shown once, works once, lasts 7 days, and can be revoked. Opening it does not use it up.
+3. They press **Join this agency**. That adds them to this agency. If they already use pivitlab, they are added. It does not create an agency or a site.
+4. **Pending invites** lists the ones still open. **Resend** emails a new link and replaces the previous one.
+
+A suspended or deleted address cannot be invited. Someone already in the agency cannot be invited again. A Member can see Team and cannot send invites. See [help.md](help.md).
+
+## Who signs in how
+
+1. A Platform admin, an Owner and a Member use the sign-in page. They enter a work email and choose **Email me a sign-in link**. The email has a link and a 6-digit code. Each lasts 15 minutes and works once. The link opens a page where they press **Sign in**.
+2. A Platform admin session lasts 12 hours from sign-in and is not renewed. An Owner or a Member stays signed in for 30 days of use, and never more than 90 days from sign-in.
+3. A Viewer chooses **Viewer login** on the sign-in page, or opens `/login.html?role=client`, and enters the username and password their agency gave them. There is no email sign-in for a Viewer. An Owner resets the password from Team.
+4. The fallback password at `/owner` is only for the platform admin. It is not linked from the sign-in page. Day to day, sign in by email.
+
+**Suspend** signs the person out at once and refuses the next sign-in. **Archive** hides them from lists and does not, on its own, stop sign-in. A deleted person cannot sign in. Asking for an email link still answers "If that address can be used, we've sent a link." Nothing is sent. A Viewer whose password is right, but who is suspended or deleted, sees "That sign-in isn't available."
+
 The reply to "email me a link" is always "If that address can be used, we've sent a link." Asking for a link, signing up (including an invite code) and the access-request form are limited in Postgres: 5 per email address per hour, and 20 per IP per hour (10 per IP per hour for an access request). The owner page at `/owner` and the emergency password are limited too, as is viewer password sign-in (5 failures, then 60 seconds). A limit answers 429 with `Retry-After` and "Please wait a moment and try again." The counters survive a redeploy and are shared by every instance. `POST /api/event` keeps a separate limit of 60 events a minute per IP, also in Postgres. A normal visit stays under it, the reply stays 204 so the live snippet is unchanged, and a limiter error does not drop the event.
 
 An agency session lasts 30 days of use (idle) and never more than 90 days from sign-in (absolute), even if they keep coming back. Both deadlines are stored in the session row in Postgres. A platform admin session, including the emergency password, lasts 12 hours from sign-in and is not renewed. Signing in does not end other sessions. **Sign out everywhere** does, for an Owner on the dashboard and for a viewer on their page. Changing a viewer's password, or deleting that viewer, ends their sessions. Changing `ADMIN_API_KEY` ends emergency-password sessions only. Each sign-in replaces the session id, and so does starting or stopping view-as.
@@ -49,7 +69,9 @@ State-changing requests must come from https://pivitlab.com, from `APP_ORIGIN`, 
 
 ## Audit log
 
-`audit_log` records sign-up, sign-in (magic link, viewer password, and the emergency password as `emergency_signin`), sign-out everywhere, failed codes, invites, sites, verification, Reveal early, test-traffic remove and restore, role changes, and platform-admin view-as start and stop. An Owner sees only that agency's rows. A platform admin sees the same limit: their own agency, or the agency they are viewing. View-as stays read-only. A viewer cannot open the log. The Audit log screen is on the Owner dashboard. If the audit table is missing, those actions still succeed. Stored `actor_label` values such as `superadmin` and `client` are unchanged; the screen shows them as Platform admin and Viewer.
+`audit_log` records sign-up, sign-in (magic link, Viewer password, and the emergency password as `emergency_signin`), sign-out everywhere, failed codes, invites (including an agency invite created, resent, revoked or accepted), sites, verification, Reveal early, test-traffic remove and restore, role changes, removing someone from an agency, Viewer create, edit, password reset and delete, and platform-admin suspend, unsuspend, archive, restore and delete. An Owner or a Member sees only that agency's rows. A platform admin sees the same limit: their own agency, or the agency they are viewing. View-as stays read-only, and starting or stopping it is written here. A Viewer cannot open the log. The Audit log screen is on the dashboard. If the audit table is missing, those actions still succeed. Stored `actor_label` values such as `superadmin` and `client` are unchanged; the screen shows them as Platform admin and Viewer.
+
+The user filter is current people in the agency, plus names already written on a row. Archived and deleted people are left out of that filter, so old names do not pile up. The rows stay. After a delete, those rows name the person as "Deleted user" and a short code, not their email or username. See [help.md](help.md).
 
 The experiment screen still reads `test_traffic_audit`. New remove, restore and Reveal rows are written there and to `audit_log`. Rows that already existed are copied by migration 002. Migration 014 copies any that were missed. The old table is kept.
 

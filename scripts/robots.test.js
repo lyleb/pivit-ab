@@ -86,6 +86,7 @@ const pagesOnDisk = {
   'join.html': 'https://pivitlab.com/join.html',
   'legal.html': 'https://pivitlab.com/legal.html',
   'privacy.html': 'https://pivitlab.com/privacy.html',
+  'help.html': 'https://pivitlab.com/help.html',
 };
 for (const [file, href] of Object.entries(pagesOnDisk)) {
   const html = fs.readFileSync(path.join(__dirname, '../public', file), 'utf8');
@@ -199,6 +200,7 @@ function get(port, urlPath, headers) {
       '/join.html': 'http://127.0.0.1:3000/join.html',
       '/legal.html': 'http://127.0.0.1:3000/legal.html',
       '/privacy.html': 'http://127.0.0.1:3000/privacy.html',
+      '/help.html': 'http://127.0.0.1:3000/help.html',
     };
 
     for (const [urlPath, href] of Object.entries(expectedCanonical)) {

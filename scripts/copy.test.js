@@ -60,6 +60,7 @@ assert.ok(adminHtml.includes('id="emergency-dismiss"'));
 assert.ok(adminHtml.includes('Support view: see another agency read-only. Every view is logged.'));
 assert.ok(adminHtml.includes('id="role-badge"'));
 assert.ok(adminHtml.includes('UI.roleBadgeLabel'));
+assert.ok(adminHtml.includes('href="/help.html">Help</a>'));
 assert.ok(!adminHtml.includes('You\'re signed in with the emergency password'));
 assert.ok(!adminHtml.includes('View as another account'));
 assert.ok(!adminHtml.includes('id="status-value"'));
@@ -165,6 +166,7 @@ const uiFiles = [
   'public/client.html',
   'public/sign-in.html',
   'public/join.html',
+  'public/help.html',
   'src/pages/landing.html',
 ];
 for (const file of uiFiles) {
@@ -188,14 +190,33 @@ assert.ok(mail.includes('Finish creating your pivitlab agency'));
 assert.ok(mail.includes('create your pivitlab agency and sign in'));
 assert.ok(!mail.includes('pivitlab account'));
 
-const docs = ['README.md', 'docs/signup.md', 'docs/tenancy.md', 'docs/how-pivitlab-decides.md'];
+const docs = ['README.md', 'docs/signup.md', 'docs/tenancy.md', 'docs/how-pivitlab-decides.md', 'docs/help.md'];
 for (const file of docs) {
   const body = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
   assert.ok(body.includes('Platform admin') || body.includes('platform admin'), file);
   assert.ok(/[Vv]iewer/.test(body), file);
   assert.ok(/[Aa]gency/.test(body), file);
   assert.ok(!body.includes('Client login'), file);
+  assert.ok(!/client login/i.test(body), file);
   assert.ok(!body.includes('Pivitlab'), file);
+}
+
+const helpPage = fs.readFileSync(path.join(__dirname, '../public/help.html'), 'utf8');
+const helpDoc = fs.readFileSync(path.join(__dirname, '../docs/help.md'), 'utf8');
+for (const phrase of [
+  "Who's who in pivitlab",
+  'The Users screen',
+  'Agency invites',
+  'The Team page and Viewers',
+  'How sign-in works',
+  'The audit log',
+  'Show archived',
+  'Join this agency',
+  'Deleted user',
+  'That sign-in isn\'t available.',
+]) {
+  assert.ok(helpPage.includes(phrase), `help.html missing ${phrase}`);
+  assert.ok(helpDoc.includes(phrase), `help.md missing ${phrase}`);
 }
 
 console.log('copy tests passed');

@@ -1,4 +1,4 @@
-// Public origin for the snippet tag, the client login link and every link in
+// Public origin for the snippet tag, the viewer sign-in link and every link in
 // an email. Those URLs come from APP_ORIGIN. They do not use the browser's
 // location.origin or the request Host header.
 //
@@ -40,6 +40,7 @@ const CANONICAL_PAGES = {
   '/join.html': { file: 'join.html', pathname: '/join.html' },
   '/legal.html': { file: 'legal.html', pathname: '/legal.html' },
   '/privacy.html': { file: 'privacy.html', pathname: '/privacy.html' },
+  '/help.html': { file: 'help.html', pathname: '/help.html' },
 };
 
 function normaliseAppOrigin(raw) {
@@ -67,7 +68,7 @@ function productionRefusal() {
   return 'Refusing to start. NODE_ENV is production and APP_ORIGIN must be an https origin, for example https://pivitlab.com. The value is missing or is not https. Set APP_ORIGIN and restart.';
 }
 
-// Origin used in the snippet tag, the client login link and email links.
+// Origin used in the snippet tag, the viewer sign-in link and email links.
 // Overrides are for tests. After exit(1) this throws, so a test stub that
 // does not throw still cannot return a non-https origin.
 function publicAppOrigin(overrides) {
