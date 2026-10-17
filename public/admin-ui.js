@@ -458,6 +458,19 @@
     return `/api/audit?${params.toString()}`;
   }
 
+  const DOMAIN_IN_USE_WARNING = 'This domain is already in use. A test runs only where this site\'s snippet is installed.';
+
+  // One site is used as it is. Several sites use a remembered id, and never
+  // the first row, until the owner has chosen.
+  function siteChoiceState(sites, rememberedId) {
+    const list = Array.isArray(sites) ? sites : [];
+    if (list.length === 1) return { required: false, site: list[0], sites: list };
+    const site = rememberedId
+      ? (list.find((item) => item && item.id === rememberedId) || null)
+      : null;
+    return { required: list.length > 1 && !site, site, sites: list };
+  }
+
   function auditPageLabel(page, total, pageSize) {
     const size = Number(pageSize) > 0 ? Number(pageSize) : AUDIT_PAGE_SIZE;
     const pages = Math.max(1, Math.ceil((Number(total) || 0) / size));
@@ -502,6 +515,8 @@
     formatCreated,
     displayOrigin,
     snippetTag,
+    DOMAIN_IN_USE_WARNING,
+    siteChoiceState,
     installCheckLine,
     clientLoginUrl,
     previewExampleUrl,

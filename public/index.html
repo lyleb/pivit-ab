@@ -90,6 +90,14 @@
     color: #1a1d27; background: #fff;
   }
   .support-controls select option { color: #1a1d27; background: #fff; }
+  .site-picker { margin: 0 0 14px; }
+  .site-picker select { max-width: 420px; }
+  .site-row {
+    display: flex; justify-content: space-between; gap: 12px; align-items: flex-start;
+    padding: 12px 0; border-bottom: 1px solid var(--border);
+  }
+  .site-row:last-child { border-bottom: none; }
+  .site-row .banner { margin: 8px 0 0; }
   .plan-sentence { font-size: 1.08em; font-weight: 750; margin: 8px 0 6px; letter-spacing: -0.01em; }
   details.plan-more {
     border: 0; margin: 4px 0 0; overflow: visible; background: transparent; border-radius: 0;
@@ -323,6 +331,13 @@
           </div>
           <button type="button" class="btn-ghost" id="first-run-dismiss">Hide checklist</button>
         </div>
+        <div id="setup-site-wrap" class="site-picker" hidden>
+          <label for="setup-site">Site</label>
+          <select id="setup-site">
+            <option value="">Choose a site</option>
+          </select>
+          <p class="hint">This account has more than one site. Choose which site the snippet and the first test are for. pivitlab remembers the choice.</p>
+        </div>
         <ol class="setup-list">
           <li id="step-site">
             <span class="setup-num">1</span>
@@ -336,6 +351,7 @@
                 <input id="add-site-website" placeholder="example.co.uk" spellcheck="false" autocapitalize="off">
                 <button type="submit" id="add-site-btn">Add site</button>
                 <p id="add-site-error" class="error-msg"></p>
+                <p id="add-site-warning" class="banner" role="status" hidden></p>
               </form>
             </div>
           </li>
@@ -382,7 +398,19 @@
             </div>
           </li>
         </ol>
-        <p id="first-run-conflict" class="banner" hidden>Another account has also added this domain. A test runs only where that account's snippet is installed.</p>
+        <p id="first-run-conflict" class="banner" hidden>This domain is already in use. A test runs only where this site's snippet is installed.</p>
+      </div>
+      <div class="card" id="sites-card">
+        <h2>Sites</h2>
+        <p class="hint" style="margin-top:0;">Each site has its own snippet. pivitlab only runs a test on the domains you add here. www, https:// and a trailing path are saved as the bare domain.</p>
+        <div id="sites-list"></div>
+        <form id="sites-add-form" style="margin-top:12px;">
+          <label for="sites-add-website">Website</label>
+          <input id="sites-add-website" placeholder="example.co.uk" spellcheck="false" autocapitalize="off" autocomplete="off">
+          <button type="submit" id="sites-add-btn">Add site</button>
+          <p id="sites-add-error" class="error-msg"></p>
+          <p id="sites-add-warning" class="banner" role="status" hidden></p>
+        </form>
       </div>
       <div class="card" id="review-requests-card" hidden>
         <h2>Review requests</h2>
@@ -470,6 +498,14 @@
       </div>
       <div class="steps" id="wizard-steps"></div>
       <div class="card wizard-card" id="wizard-card">
+        <div id="wizard-site-wrap" class="site-picker" hidden>
+          <label for="wizard-site">Site</label>
+          <select id="wizard-site">
+            <option value="">Choose a site</option>
+          </select>
+          <p class="hint">This account has more than one site. Choose the site for this test, its snippet and its goals. pivitlab remembers the choice.</p>
+        </div>
+        <p id="wizard-domain-warning" class="banner" role="status" hidden></p>
         <div id="wizard-step-1" class="wizard-step">
           <label for="wizard-name">Experiment name</label>
           <input id="wizard-name" placeholder="Homepage CTA copy">
@@ -516,6 +552,7 @@
         </div>
 
         <div id="wizard-step-3" class="wizard-step" hidden>
+          <p id="wizard-goals-site" class="hint" hidden>Choose a site before adding goals. Suggestions stay with that site.</p>
           <p class="hint" style="margin-top:0;">Optional. Goals are saved once for the experiment and apply to every variant, including Control. Skip if you will add them in the editor.</p>
           <p style="margin-top:10px;"><a class="picker-link picker-bookmarklet" href="#">Selector Picker</a> <span class="hint">Drag to your bookmarks bar, then click it on the live page.</span></p>
           <div id="wizard-popular-goals"></div>
@@ -530,6 +567,7 @@
           <button type="button" class="btn-ghost" onclick="copyAntiflicker('wizard-antiflicker-copied')">Copy</button>
           <span id="wizard-antiflicker-copied" class="hint"></span>
           <p class="hint" style="font-weight:700; color:var(--ink);">2. Add just before &lt;/body&gt;</p>
+          <p id="wizard-snippet-site" class="hint" hidden></p>
           <pre id="wizard-snippet-code"></pre>
           <button type="button" class="btn-ghost" onclick="copySnippet('wizard-snippet-copied')">Copy</button>
           <span id="wizard-snippet-copied" class="hint"></span>
@@ -653,6 +691,14 @@
     <button type="button" class="modal-close" id="snippet-close" aria-label="Close">✕</button>
   </div>
   <div class="snippet-body">
+    <div id="snippet-site-wrap" class="site-picker" hidden>
+      <label for="snippet-site">Site</label>
+      <select id="snippet-site">
+        <option value="">Choose a site</option>
+      </select>
+      <p class="hint">Choose the site this snippet is for. pivitlab remembers the choice.</p>
+      <p id="snippet-site-needed" class="hint" hidden>Choose a site to get the snippet.</p>
+    </div>
     <p class="hint" style="margin-top:0; font-weight:700; color:var(--ink);">1. Add to &lt;head&gt; <span class="hint" style="font-weight:400;">(reduces flicker — recommended)</span></p>
     <pre id="antiflicker-code"></pre>
     <button type="button" class="btn-ghost" onclick="copyAntiflicker('antiflicker-copied')">Copy</button>
@@ -734,6 +780,11 @@ const WIZARD_LABELS = ['Basics', 'Variants', 'Goals', 'Install', 'Review'];
 let clientsCache = [];
 let experimentsCache = [];
 let experimentsLoaded = false;
+let accountSites = [];
+let accountSitesLoaded = false;
+let accountSitesLoad = null;
+let chosenSiteId = '';
+let siteChoiceRequired = false;
 let currentDetail = null;
 let includeTestTraffic = false;
 let includeTestExperimentId = null;
@@ -965,6 +1016,165 @@ function markSetupStep(elementId, done) {
   if (state) state.textContent = done ? 'Done' : 'To do';
 }
 
+function domainLabel(site) {
+  if (!site) return '';
+  return (site.domains && site.domains[0]) || site.name || '';
+}
+
+function chosenSiteRecord() {
+  return accountSites.find((site) => site.id === chosenSiteId) || null;
+}
+
+function domainsForChosenSite() {
+  const site = chosenSiteRecord();
+  if (!site) return '';
+  return (site.domains || []).join('\n');
+}
+
+function applyAccountSites(setup) {
+  const sites = (setup && Array.isArray(setup.sites) && setup.sites)
+    || (setup && setup.site ? [setup.site] : []);
+  accountSites = sites;
+  accountSitesLoaded = true;
+  const remembered = setup && setup.site ? setup.site.id : '';
+  const choice = UI.siteChoiceState(sites, remembered);
+  chosenSiteId = choice.site ? choice.site.id : '';
+  siteChoiceRequired = choice.required === true;
+  snippetSiteKey = choice.site && typeof choice.site.public_key === 'string' ? choice.site.public_key : '';
+  paintSitePickers();
+  paintSitesCard(sites);
+  applyDisplayedOrigins();
+  fillInstallSnippets();
+}
+
+function ensureAccountSites() {
+  if (accountSitesLoaded) return Promise.resolve();
+  if (!accountSitesLoad) {
+    accountSitesLoad = callApi('/api/setup').then((result) => {
+      accountSitesLoad = null;
+      if (result.ok) applyAccountSites(result.data);
+    });
+  }
+  return accountSitesLoad;
+}
+
+function paintSitePickers() {
+  const show = accountSites.length > 1;
+  ['setup-site', 'wizard-site', 'snippet-site'].forEach((id) => {
+    const select = document.getElementById(id);
+    const wrap = document.getElementById(id + '-wrap');
+    if (!select) return;
+    const options = ['<option value="">Choose a site</option>'].concat(accountSites.map((site) => {
+      const label = domainLabel(site) || 'Site';
+      return `<option value="${UI.escapeHtml(site.id)}">${UI.escapeHtml(label)}</option>`;
+    }));
+    select.innerHTML = options.join('');
+    select.value = chosenSiteId || '';
+    if (id === 'wizard-site') select.disabled = !!wizard.expId;
+    if (wrap) wrap.hidden = !show;
+  });
+  const needed = document.getElementById('snippet-site-needed');
+  if (needed) needed.hidden = !(show && !chosenSiteId);
+}
+
+function paintSitesCard(sites) {
+  const list = document.getElementById('sites-list');
+  const addForm = document.getElementById('sites-add-form');
+  if (!list) return;
+  const readOnly = !!(sessionMe && sessionMe.view_as && sessionMe.view_as.id);
+  if (addForm) addForm.hidden = readOnly;
+  if (!sites.length) {
+    list.innerHTML = '<p class="hint">No site yet. Add the website you want to test.</p>';
+    return;
+  }
+  list.innerHTML = sites.map((site) => {
+    const domain = domainLabel(site);
+    const seen = site.verified ? 'Snippet seen' : 'Snippet not seen yet';
+    const warning = site.conflict
+      ? `<p class="banner" role="status">${UI.escapeHtml(UI.DOMAIN_IN_USE_WARNING)}</p>`
+      : '';
+    const edit = readOnly ? '' : `
+      <button type="button" class="btn-ghost" data-site-edit-toggle="${UI.escapeHtml(site.id)}">Edit</button>`;
+    const form = readOnly ? '' : `
+      <form class="site-edit" data-site-edit="${UI.escapeHtml(site.id)}" hidden>
+        <label>Website</label>
+        <input data-site-website value="${UI.escapeHtml(domain)}" spellcheck="false" autocapitalize="off" autocomplete="off">
+        <p class="hint">Saving replaces the domains on this site with this website.</p>
+        <button type="submit">Save site</button>
+        <p class="error-msg" data-site-error></p>
+        <p class="banner" data-site-warning role="status" hidden></p>
+      </form>`;
+    return `<div class="site-row" data-site-id="${UI.escapeHtml(site.id)}">
+      <div style="flex:1;min-width:0;">
+        <strong>${UI.escapeHtml(domain)}</strong>
+        <span class="hint">${seen}</span>
+        ${warning}
+        ${form}
+      </div>
+      ${edit}
+    </div>`;
+  }).join('');
+}
+
+function showFormWarning(el, text) {
+  if (!el) return;
+  el.hidden = !text;
+  el.textContent = text || '';
+}
+
+function apiErrorText(result) {
+  if (result && result.data && result.data.error) return result.data.error;
+  return (result && result.message) || 'Something went wrong.';
+}
+
+async function rememberChosenSite(siteId) {
+  if (!siteId || siteId === chosenSiteId) return { ok: true };
+  const result = await callApi('/api/setup/site', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ site_id: siteId }),
+  });
+  if (!result.ok) return result;
+  applyAccountSites(result.data);
+  if (!wizard.expId) {
+    wizard.hostsEdited = false;
+    wizard.hosts = domainsForChosenSite();
+    const field = document.getElementById('wizard-hosts');
+    if (field) field.value = wizard.hosts;
+  }
+  if (wizard.step === 3) loadPopularGoals('wizard-popular-goals', 'wizard');
+  paintGoalSiteLine();
+  return result;
+}
+
+function paintGoalSiteLine() {
+  const goalsSite = document.getElementById('wizard-goals-site');
+  const snippetSite = document.getElementById('wizard-snippet-site');
+  const label = domainLabel(chosenSiteRecord());
+  if (goalsSite) {
+    if (accountSites.length > 1 && !chosenSiteId) {
+      goalsSite.hidden = false;
+      goalsSite.textContent = 'Choose a site before adding goals. Suggestions stay with that site.';
+    } else if (label) {
+      goalsSite.hidden = false;
+      goalsSite.textContent = `Goals for ${label}.`;
+    } else {
+      goalsSite.hidden = true;
+    }
+  }
+  if (snippetSite) {
+    if (accountSites.length > 1 && !chosenSiteId) {
+      snippetSite.hidden = false;
+      snippetSite.textContent = 'Choose a site to get the snippet.';
+    } else if (label) {
+      snippetSite.hidden = false;
+      snippetSite.textContent = `Snippet for ${label}.`;
+    } else {
+      snippetSite.hidden = true;
+    }
+  }
+}
+
 function paintFirstRun(setup) {
   const site = setup && setup.site;
   const checklist = (setup && setup.checklist) || {};
@@ -984,13 +1194,18 @@ function paintFirstRun(setup) {
   markSetupStep('step-test', testDone);
   markSetupStep('step-preview', checklistStepDone(checklist, 'preview'));
   markSetupStep('step-start', checklistStepDone(checklist, 'started'));
-  const domain = site ? ((site.domains && site.domains[0]) || site.name) : '';
+  const domain = domainLabel(site);
   if (site) {
     form.hidden = true;
     host.textContent = domain;
-    if (typeof site.public_key === 'string') snippetSiteKey = site.public_key;
     document.getElementById('first-run-snippet').textContent = snippetTag();
     conflict.hidden = !site.conflict;
+    if (site.conflict) conflict.textContent = UI.DOMAIN_IN_USE_WARNING;
+  } else if (accountSites.length > 1) {
+    form.hidden = true;
+    host.textContent = 'Choose a site.';
+    document.getElementById('first-run-snippet').textContent = 'Choose a site to get the snippet.';
+    conflict.hidden = true;
   } else {
     form.hidden = false;
     host.textContent = 'Add the site you want to test.';
@@ -1002,7 +1217,7 @@ function paintFirstRun(setup) {
   checkText.className = line.problem ? 'error-msg' : 'hint';
   if (previewUrl) previewUrl.textContent = UI.previewExampleUrl(domain);
   if (create) {
-    create.hidden = testDone || !site;
+    create.hidden = testDone || accountSites.length === 0;
     create.disabled = !site;
   }
   if (testDoneHint) {
@@ -1042,9 +1257,10 @@ async function refreshFirstRun() {
   const show = checklist.visible === true;
   card.hidden = !show;
   if (dismiss) dismiss.hidden = !!(sessionMe && sessionMe.view_as && sessionMe.view_as.id);
+  applyAccountSites(result.data);
   const site = result.data.site;
   if (unverified) {
-    const line = UI.installCheckLine(site, site && ((site.domains && site.domains[0]) || site.name));
+    const line = UI.installCheckLine(site, domainLabel(site));
     unverified.textContent = line.banner || 'We have not seen the snippet on your site yet. You can build a test, and you can start it once the check ticks.';
     unverified.hidden = show || !site || site.verified;
   }
@@ -3696,13 +3912,17 @@ function hostFromPageUrl(value) {
 }
 
 function suggestedSiteDomains() {
+  if (accountSites.length > 1) return domainsForChosenSite();
   const fromUrl = hostFromPageUrl(wizard.url);
   if (fromUrl) return fromUrl;
-  if (!wizard.clientId) return '';
-  const last = experimentsCache.find((exp) =>
-    exp.client_id === wizard.clientId && Array.isArray(exp.allowed_hosts) && exp.allowed_hosts.length
-  );
-  return last ? last.allowed_hosts.join(', ') : '';
+  if (wizard.clientId) {
+    const last = experimentsCache.find((exp) =>
+      exp.client_id === wizard.clientId && Array.isArray(exp.allowed_hosts) && exp.allowed_hosts.length
+    );
+    if (last) return last.allowed_hosts.join(', ');
+  }
+  if (accountSites.length === 1) return (accountSites[0].domains || []).join('\n');
+  return '';
 }
 
 function applyHostSuggestion() {
@@ -3713,6 +3933,7 @@ function applyHostSuggestion() {
 }
 
 async function renderWizard() {
+  await ensureAccountSites();
   if (wizard.expId && wizard.variants.length === 0) await ensureWizardVariants();
   for (let step = 1; step <= 5; step += 1) {
     document.getElementById('wizard-step-' + step).hidden = step !== wizard.step;
@@ -3774,8 +3995,11 @@ async function renderWizard() {
     if (!list.childElementCount && wizard.goalRows.length) {
       wizard.goalRows.forEach((g) => addGoalRow(g, 'wizard-goals-list'));
     }
+    paintGoalSiteLine();
     loadPopularGoals('wizard-popular-goals', 'wizard');
   }
+  paintGoalSiteLine();
+  paintSitePickers();
   if (wizard.step === 4) {
     document.querySelectorAll('[data-wizard-check]').forEach((box) => {
       box.checked = !!wizard.checks[box.dataset.wizardCheck];
@@ -3853,6 +4077,10 @@ async function persistWizardBasics() {
   if (!wizard.matchTouched) syncWizardMatch(false);
   readWizardBasics();
   if (!wizard.name || !wizard.url) { wizardMsg('Add a name and a URL match.'); return false; }
+  if (siteChoiceRequired || (accountSites.length > 1 && !chosenSiteId)) {
+    wizardMsg('Choose a site.');
+    return false;
+  }
   if (!wizard.hosts) { wizardMsg('Add at least one site domain.'); return false; }
   if (!wizard.expId) {
     const result = await callApi('/api/experiments', {
@@ -3865,9 +4093,11 @@ async function persistWizardBasics() {
         client_id: wizard.clientId || null,
         allowed_hosts: wizard.hosts,
         test_type: wizard.testType === 'demo' ? 'demo' : 'live',
+        site_id: chosenSiteId || null,
       }),
     });
-    if (!result.ok) { wizardMsg(result.message); return false; }
+    if (!result.ok) { wizardMsg(apiErrorText(result)); return false; }
+    showFormWarning(document.getElementById('wizard-domain-warning'), result.data.domain_warning || '');
     wizard.expId = result.data.id;
     if (result.data.test_type) wizard.testType = result.data.test_type;
     rememberSavedHosts(result.data);
@@ -4387,7 +4617,18 @@ function collectGoals(listId) {
 async function loadPopularGoals(containerId, mode) {
   const container = document.getElementById(containerId);
   if (!container) return;
-  const result = await callApi('/api/goals/popular?limit=5', { headers: authHeaders() });
+  const params = new URLSearchParams();
+  params.set('limit', '5');
+  const siteId = mode === 'wizard'
+    ? chosenSiteId
+    : (currentDetail && currentDetail.site_id ? currentDetail.site_id : '');
+  if (siteId) params.set('site_id', siteId);
+  const result = await callApi('/api/goals/popular?' + params.toString(), { headers: authHeaders() });
+  if (result.ok && result.data && result.data.site_choice_required) {
+    container.innerHTML = '<p class="hint">Choose a site before adding goals. Suggestions stay with that site.</p>';
+    popularGoalsCache = [];
+    return;
+  }
   if (!result.ok || !result.data.goals || result.data.goals.length === 0) {
     container.innerHTML = '';
     popularGoalsCache = [];
@@ -4716,9 +4957,10 @@ function applyDisplayedOrigins() {
   const origin = publicOrigin();
   const login = document.getElementById('client-login-url');
   if (login) login.textContent = UI.clientLoginUrl(origin);
+  const tag = accountSitesLoaded ? installSnippetText() : UI.snippetTag(origin, snippetSiteKey);
   ['wizard-snippet-code', 'snippet-code'].forEach((id) => {
     const el = document.getElementById(id);
-    if (el) el.textContent = UI.snippetTag(origin, snippetSiteKey);
+    if (el) el.textContent = tag;
   });
 }
 
@@ -4744,9 +4986,14 @@ function copyText(text, statusId) {
 function copySnippet(statusId) { copyText(snippetTag(), statusId || 'snippet-copied'); }
 function copyAntiflicker(statusId) { copyText(antiflickerSnippet(), statusId || 'antiflicker-copied'); }
 
+function installSnippetText() {
+  if (accountSites.length > 1 && !chosenSiteId) return 'Choose a site to get the snippet.';
+  return snippetTag();
+}
+
 function fillInstallSnippets() {
   const anti = antiflickerSnippet();
-  const tag = snippetTag();
+  const tag = installSnippetText();
   [['antiflicker-code', anti], ['wizard-antiflicker-code', anti], ['snippet-code', tag], ['wizard-snippet-code', tag]].forEach(([id, text]) => {
     const el = document.getElementById(id);
     if (el) el.textContent = text;
@@ -4772,8 +5019,9 @@ function closeSnippetPopover() {
   }
 }
 
-function openSnippetPopover(toggle) {
+async function openSnippetPopover(toggle) {
   const pop = document.getElementById('snippet-popover');
+  await ensureAccountSites();
   fillInstallSnippets();
   snippetReturnFocus = toggle || null;
   pop.classList.add('open');
@@ -4865,10 +5113,12 @@ document.getElementById('first-run-copy').addEventListener('click', () => {
 });
 
 document.getElementById('first-run-create').addEventListener('click', () => {
-  const siteHost = document.getElementById('step-site-host').textContent;
-  if (siteHost && siteHost.includes('.')) {
+  if (!chosenSiteId) return;
+  if (!wizard.expId) {
+    wizard.hostsEdited = false;
+    wizard.hosts = domainsForChosenSite();
     const hosts = document.getElementById('wizard-hosts');
-    if (hosts && !hosts.value) hosts.value = siteHost;
+    if (hosts) hosts.value = wizard.hosts;
   }
   go('#create');
 });
@@ -4902,11 +5152,90 @@ document.getElementById('add-site-form').addEventListener('submit', async (event
   });
   btn.disabled = false;
   if (!result.ok) {
-    errorEl.textContent = result.message;
+    errorEl.textContent = apiErrorText(result);
     return;
   }
-  if (result.data.site && result.data.site.public_key) snippetSiteKey = result.data.site.public_key;
+  showFormWarning(document.getElementById('add-site-warning'), result.data.domain_warning || '');
+  if (result.data.site && result.data.site.public_key && accountSites.length < 1) {
+    snippetSiteKey = result.data.site.public_key;
+  }
   await refreshFirstRun();
+});
+
+['setup-site', 'wizard-site', 'snippet-site'].forEach((id) => {
+  const select = document.getElementById(id);
+  if (!select) return;
+  select.addEventListener('change', async () => {
+    if (!select.value) {
+      select.value = chosenSiteId || '';
+      return;
+    }
+    const result = await rememberChosenSite(select.value);
+    if (result && result.ok === false) {
+      select.value = chosenSiteId || '';
+    }
+    if (id === 'snippet-site') fillInstallSnippets();
+    const card = document.getElementById('first-run');
+    if (card && !card.hidden) await refreshFirstRun();
+  });
+});
+
+document.getElementById('sites-add-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const errorEl = document.getElementById('sites-add-error');
+  const btn = document.getElementById('sites-add-btn');
+  const input = document.getElementById('sites-add-website');
+  errorEl.textContent = '';
+  showFormWarning(document.getElementById('sites-add-warning'), '');
+  btn.disabled = true;
+  const result = await callApi('/api/sites', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ website: input.value }),
+  });
+  btn.disabled = false;
+  if (!result.ok) {
+    errorEl.textContent = apiErrorText(result);
+    return;
+  }
+  input.value = '';
+  showFormWarning(document.getElementById('sites-add-warning'), result.data.domain_warning || '');
+  await refreshFirstRun();
+});
+
+document.getElementById('sites-list').addEventListener('click', (event) => {
+  const toggle = event.target.closest('[data-site-edit-toggle]');
+  if (!toggle) return;
+  const form = document.querySelector(`[data-site-edit="${toggle.getAttribute('data-site-edit-toggle')}"]`);
+  if (form) form.hidden = !form.hidden;
+});
+
+document.getElementById('sites-list').addEventListener('submit', async (event) => {
+  const form = event.target.closest('[data-site-edit]');
+  if (!form) return;
+  event.preventDefault();
+  const siteId = form.getAttribute('data-site-edit');
+  const errorEl = form.querySelector('[data-site-error]');
+  const input = form.querySelector('[data-site-website]');
+  if (errorEl) errorEl.textContent = '';
+  showFormWarning(form.querySelector('[data-site-warning]'), '');
+  const result = await callApi('/api/sites/' + encodeURIComponent(siteId), {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ website: input ? input.value : '' }),
+  });
+  if (!result.ok) {
+    if (errorEl) errorEl.textContent = apiErrorText(result);
+    return;
+  }
+  showFormWarning(form.querySelector('[data-site-warning]'), result.data.domain_warning || '');
+  await refreshFirstRun();
+  if (result.data.domain_warning) {
+    const fresh = document.querySelector(`[data-site-edit="${siteId}"] [data-site-warning]`);
+    showFormWarning(fresh, result.data.domain_warning);
+    const freshForm = document.querySelector(`[data-site-edit="${siteId}"]`);
+    if (freshForm) freshForm.hidden = false;
+  }
 });
 
 document.getElementById('invite-create').addEventListener('click', async () => {

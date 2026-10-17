@@ -451,9 +451,15 @@ async function main() {
     assert.notStrictEqual(setupB.json.site.public_key, aKey);
     const siteCount = await db.query(`SELECT COUNT(*)::int AS n FROM sites WHERE account_id = $1`, [aId]);
     const addOnA = await request(serverB, 'POST', '/api/sites', { website: 'evil.example' });
-    assert.notStrictEqual(addOnA.status, 201);
+    assert.strictEqual(addOnA.status, 201, addOnA.text);
+    assert.strictEqual(addOnA.json.site.name, 'evil.example');
+    assert.ok(!addOnA.text.includes(aKey));
+    assert.ok(!addOnA.text.includes('cantsaythat'));
+    assert.ok(!addOnA.text.includes(aId));
     const siteCountAfter = await db.query(`SELECT COUNT(*)::int AS n FROM sites WHERE account_id = $1`, [aId]);
     assert.strictEqual(siteCountAfter.rows[0].n, siteCount.rows[0].n);
+    const addedOwner = await db.query(`SELECT account_id FROM sites WHERE name = 'evil.example'`);
+    assert.strictEqual(addedOwner.rows[0].account_id, bId);
 
     const superUser = await db.query(`SELECT id FROM users WHERE is_superadmin IS TRUE LIMIT 1`);
     const viewSession = {

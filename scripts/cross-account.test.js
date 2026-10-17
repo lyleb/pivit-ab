@@ -420,7 +420,10 @@ async function main() {
 
       const goals = await request(server, 'GET', '/api/goals/popular');
       assert.strictEqual(goals.status, 200);
-      assert.ok(goals.json.goals.some((goal) => goal.label === 'beta-only-goal'));
+      assert.ok(!goals.json.goals.some((goal) => goal.label === 'alpha-only-goal'));
+      if (!goals.json.site_choice_required) {
+        assert.ok(goals.json.goals.some((goal) => goal.label === 'beta-only-goal'));
+      }
       assertClean(goals, `${who} goals`);
 
       const hits = await request(server, 'GET', '/api/host-hits');
@@ -440,13 +443,21 @@ async function main() {
       assertClean(audit, `${who} audit`);
 
       const setup = await request(server, 'GET', '/api/setup');
-      assert.strictEqual(setup.status, 200);
-      assert.strictEqual(setup.json.site.public_key, beta.key);
+      assert.strictEqual(setup.status, 200, setup.text);
+      if (who === 'owner B') {
+        assert.strictEqual(setup.json.site.public_key, beta.key);
+      } else {
+        // Owner B has already added a second site, so the choice is unset.
+        assert.strictEqual(setup.json.site, null);
+        assert.strictEqual(setup.json.site_choice_required, true);
+        assert.ok(setup.json.sites.some((site) => site.public_key === beta.key));
+        assert.ok(!setup.json.sites.some((site) => site.public_key === alpha.key));
+      }
       assertClean(setup, `${who} setup`);
 
       const me = await request(server, 'GET', '/api/auth/me');
       assert.strictEqual(me.json.account.id, beta.id);
-      assert.strictEqual(me.json.snippet_site_key, beta.key);
+      assert.strictEqual(me.json.snippet_site_key, who === 'owner B' ? beta.key : null);
       assert.strictEqual(me.json.view_as, null);
       assertClean(me, `${who} session`);
 
@@ -474,7 +485,18 @@ async function main() {
       assertClean(created, `${who} create with Alpha's client`);
 
       const siteAdd = await request(server, 'POST', '/api/sites', { website: 'alpha.example' });
-      assert.notStrictEqual(siteAdd.status, 201);
+      if (who === 'owner B') {
+        assert.strictEqual(siteAdd.status, 201, siteAdd.text);
+        assert.strictEqual(
+          siteAdd.json.domain_warning,
+          'This domain is already in use. A test runs only where this site\'s snippet is installed.'
+        );
+        assert.ok(!siteAdd.text.includes(alpha.id));
+        assert.ok(!siteAdd.text.includes('Alpha Ltd'));
+        assert.ok(!siteAdd.text.includes(alpha.key));
+      } else {
+        assert.notStrictEqual(siteAdd.status, 201);
+      }
       assertClean(siteAdd, `${who} add site`);
 
       const view = await request(server, 'POST', '/api/auth/view-as', { account_id: alpha.id });
@@ -853,9 +875,9 @@ async function main() {
 
       const site = await db.query(`SELECT domains, conflict FROM sites WHERE id = $1`, [alpha.siteId]);
       assert.deepStrictEqual(site.rows[0].domains, ['alpha.example']);
-      assert.strictEqual(site.rows[0].conflict, false);
+      assert.strictEqual(site.rows[0].conflict, true);
       const betaSites = await db.query(`SELECT COUNT(*)::int AS n FROM sites WHERE account_id = $1`, [beta.id]);
-      assert.strictEqual(betaSites.rows[0].n, 1);
+      assert.strictEqual(betaSites.rows[0].n, 2);
       const created = await db.query(`SELECT id FROM experiments WHERE name = 'should-not-create'`);
       assert.strictEqual(created.rows.length, 0);
     }
