@@ -6,7 +6,7 @@
 const crypto = require('crypto');
 const db = require('./db');
 const { sha256, timingSafeStringEqual } = require('./timing');
-const { normaliseHost } = require('./host-scope');
+const { normaliseSiteDomain, normalisedDomainExpr } = require('./site-domain');
 const { newSiteKey } = require('./db/tenancy');
 const { recordAudit } = require('./audit');
 const { hit, LIMITED_MESSAGE } = require('./rate-limit');
@@ -33,22 +33,7 @@ function normaliseEmail(raw) {
 }
 
 function customerHost(raw) {
-  let text = String(raw || '').trim();
-  if (!text || text.length > 300) return '';
-  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) text = 'https://' + text;
-  let hostname = '';
-  try {
-    hostname = new URL(text).hostname;
-  } catch (err) {
-    return '';
-  }
-  const host = normaliseHost(hostname);
-  if (!host || host === 'localhost' || host.endsWith('.localhost')) return '';
-  if (/^\d+(\.\d+){3}$/.test(host)) return '';
-  const labels = host.split('.');
-  if (labels.length < 2) return '';
-  if (!labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) return '';
-  return host;
+  return normaliseSiteDomain(raw);
 }
 
 function newInviteCode() {
@@ -314,9 +299,16 @@ async function finishSignin(client, email, ip) {
 }
 
 async function markDomainConflict(client, accountId, host, siteId) {
+  const normalised = normaliseSiteDomain(host);
+  if (!normalised) return false;
   const { rows } = await client.query(
-    `SELECT id FROM sites WHERE account_id <> $1 AND $2 = ANY(domains)`,
-    [accountId, host]
+    `SELECT id FROM sites
+     WHERE account_id <> $1
+       AND EXISTS (
+         SELECT 1 FROM unnest(domains) AS raw
+         WHERE ${normalisedDomainExpr('raw')} = $2
+       )`,
+    [accountId, normalised]
   );
   if (rows.length === 0) return false;
   const ids = rows.map((row) => row.id).concat([siteId]);
@@ -569,6 +561,7 @@ module.exports = {
   TOKEN_TTL_MS,
   normaliseEmail,
   customerHost,
+  markDomainConflict,
   requestIp,
   normaliseInviteCode,
   requestSignIn,
