@@ -6,6 +6,7 @@
 const db = require('./db');
 const { normaliseHost } = require('./host-scope');
 const { newSiteKey, PRIMARY_SITE_HOST } = require('./db/tenancy');
+const { guardSiteDomains, isUuid } = require('./site-domain');
 
 const SITE_KEY_RE = /^site_[a-f0-9]{16,80}$/i;
 
@@ -147,13 +148,19 @@ async function ownedExperiment(accountId, experimentId) {
 
 async function snippetSiteKey(accountId) {
   const { rows } = await db.query(
-    `SELECT public_key FROM sites
-     WHERE account_id = $1
-     ORDER BY (name = $2) DESC, (verified_at IS NOT NULL) DESC, created_at
-     LIMIT 1`,
-    [accountId, PRIMARY_SITE_HOST]
+    `SELECT s.public_key,
+            (s.id = a.active_site_id) AS chosen,
+            (SELECT COUNT(*)::int FROM sites WHERE account_id = a.id) AS n
+     FROM sites s
+     JOIN accounts a ON a.id = s.account_id
+     WHERE s.account_id = $1
+     ORDER BY chosen DESC, s.created_at, s.id`,
+    [accountId]
   );
-  return rows[0] ? rows[0].public_key : null;
+  if (!rows.length) return null;
+  if (rows[0].n === 1) return rows[0].public_key;
+  if (rows[0].chosen === true) return rows[0].public_key;
+  return null;
 }
 
 // ok:false means the caller must not fall back to the legacy account.
@@ -179,10 +186,21 @@ async function publicScope(rawKey) {
   };
 }
 
+function domainError(message, statusCode) {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  return err;
+}
+
+async function refuseSameAccountDomain(guard) {
+  if (guard.ok) return;
+  throw domainError(guard.error, 409);
+}
+
 // Keeps the site key stable when this experiment is the only one on its site.
 // A shared site is left alone so one test cannot widen another test's domains.
 async function placeOnSite(query, accountId, experimentId, hosts) {
-  if (!hosts.length) return { siteId: null, needsSite: true };
+  if (!hosts.length) return { siteId: null, needsSite: true, warningHost: null };
 
   let currentSiteId = null;
   if (experimentId) {
@@ -200,6 +218,12 @@ async function placeOnSite(query, accountId, experimentId, hosts) {
       [currentSiteId, accountId, experimentId]
     );
     if (siblings.rows[0].n === 0) {
+      const guard = await guardSiteDomains(query, {
+        accountId,
+        hosts,
+        exceptSiteId: currentSiteId,
+      });
+      await refuseSameAccountDomain(guard);
       await query(
         `UPDATE sites
          SET domains = $2::text[],
@@ -207,7 +231,7 @@ async function placeOnSite(query, accountId, experimentId, hosts) {
          WHERE id = $1 AND account_id = $4`,
         [currentSiteId, hosts, hosts[0], accountId, PRIMARY_SITE_HOST]
       );
-      return { siteId: currentSiteId, needsSite: false };
+      return { siteId: currentSiteId, needsSite: false, warningHost: guard.warningHost };
     }
   }
 
@@ -217,15 +241,41 @@ async function placeOnSite(query, accountId, experimentId, hosts) {
   );
   const wanted = hostKey(hosts);
   const match = sites.find((site) => hostKey(site.domains) === wanted);
-  if (match) return { siteId: match.id, needsSite: false };
+  if (match) return { siteId: match.id, needsSite: false, warningHost: null };
 
+  const guard = await guardSiteDomains(query, { accountId, hosts, exceptSiteId: null });
+  await refuseSameAccountDomain(guard);
   const inserted = await query(
     `INSERT INTO sites (account_id, name, domains, public_key)
      VALUES ($1, $2, $3::text[], $4)
      RETURNING id`,
     [accountId, hosts[0], hosts, newSiteKey()]
   );
-  return { siteId: inserted.rows[0].id, needsSite: false };
+  return { siteId: inserted.rows[0].id, needsSite: false, warningHost: guard.warningHost };
+}
+
+// A named site is used as given. When the caller does not name one, the host
+// list is matched to an existing site. The oldest site is not a fallback.
+async function resolveExperimentSite(query, accountId, experimentId, hosts, requestedSiteId) {
+  const raw = requestedSiteId ? String(requestedSiteId) : '';
+  if (!raw) return placeOnSite(query, accountId, experimentId, hosts);
+  if (!isUuid(raw)) throw domainError('no site found with that id', 404);
+  const owned = await query(
+    `SELECT id FROM sites WHERE id = $1 AND account_id = $2`,
+    [raw, accountId]
+  );
+  if (!owned.rows[0]) throw domainError('no site found with that id', 404);
+  const guard = await guardSiteDomains(query, {
+    accountId,
+    hosts,
+    exceptSiteId: owned.rows[0].id,
+  });
+  await refuseSameAccountDomain(guard);
+  return {
+    siteId: owned.rows[0].id,
+    needsSite: hosts.length === 0,
+    warningHost: guard.warningHost,
+  };
 }
 
 module.exports = {
@@ -239,5 +289,6 @@ module.exports = {
   snippetSiteKey,
   publicScope,
   placeOnSite,
+  resolveExperimentSite,
   hostKey,
 };

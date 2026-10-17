@@ -20,6 +20,7 @@ const { applyChangeApplied } = require('./change-applied');
 const { applyElementSelector } = require('./element-selector');
 const { applyDemoTest } = require('./demo-test');
 const { applyAuditBackfill } = require('./audit-backfill');
+const { applyActiveSite } = require('./active-site');
 
 const LOCK_KEY = 814021;
 
@@ -58,6 +59,9 @@ const VERSIONS = [
   // Copy leftover test_traffic_audit rows into audit_log. The old table stays.
   // Stays out of schema.sql.
   { version: '014', name: 'audit-backfill', run: applyAuditBackfill },
+  // The remembered setup site. Nullable, so existing accounts are left unset.
+  // Stays out of schema.sql.
+  { version: '015', name: 'active-site', run: applyActiveSite },
 ];
 
 async function ensureMigrationsTable(queryable) {

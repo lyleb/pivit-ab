@@ -25,7 +25,9 @@ const {
   parseHostList,
   hostScopingMode,
 } = require('../host-scope');
-const { publicScope, ownedExperiment, placeOnSite } = require('../tenant');
+const { publicScope, ownedExperiment, placeOnSite, resolveExperimentSite } = require('../tenant');
+const { markDomainConflict } = require('../auth-flow');
+const { DOMAIN_IN_USE_WARNING, routeStatus } = require('../site-domain');
 const { matchPageUrl, resolvePageMatch } = require('../../public/url-match');
 const { normaliseElementSelector } = require('../element-selector');
 const { isDemo, normaliseTestType, typeChangeError, demoPlan, countOptions } = require('../demo-test');
@@ -39,6 +41,12 @@ const {
   expiredPreviewMessage,
 } = require('../editor-context');
 const router = express.Router();
+
+async function noteDomainWarning(client, accountId, placed) {
+  if (!placed || !placed.warningHost || !placed.siteId) return null;
+  await markDomainConflict(client, accountId, placed.warningHost, placed.siteId);
+  return DOMAIN_IN_USE_WARNING;
+}
 
 function publicScopeSql(accountParam, siteParam) {
   return `($${siteParam}::uuid IS NULL AND account_id = $${accountParam}) OR ($${siteParam}::uuid IS NOT NULL AND site_id = $${siteParam})`;
@@ -565,7 +573,15 @@ router.post('/', async (req, res) => {
   try {
     client = await db.pool.connect(); // inside the try too — a connection failure must produce a clean error, not an unhandled rejection
     await client.query('BEGIN');
-    const placed = await placeOnSite(client.query.bind(client), accountId, null, hosts);
+    const requestedSiteId = req.body && req.body.site_id ? String(req.body.site_id) : '';
+    const placed = await resolveExperimentSite(
+      client.query.bind(client),
+      accountId,
+      null,
+      hosts,
+      requestedSiteId
+    );
+    const domainWarning = await noteDomainWarning(client, accountId, placed);
 
     const planJson = testType.type === 'demo' ? JSON.stringify(demoPlan({ variantCount: 2 })) : null;
     const { rows: expRows } = await client.query(
@@ -582,9 +598,13 @@ router.post('/', async (req, res) => {
     );
 
     await client.query('COMMIT');
-    res.status(201).json({ ...experiment, control_variant: variantRows[0] });
+    const created = { ...experiment, control_variant: variantRows[0] };
+    if (domainWarning) created.domain_warning = domainWarning;
+    res.status(201).json(created);
   } catch (err) {
     if (client) await client.query('ROLLBACK').catch((rollbackErr) => console.error('Rollback failed:', rollbackErr));
+    const status = routeStatus(err);
+    if (status) return res.status(status).json({ error: err.message });
     console.error(err);
     if (err.code === '23503') return res.status(400).json({ error: 'no client found with that id' });
     res.status(500).json({ error: 'internal error', detail: err.message });
@@ -989,6 +1009,7 @@ router.patch('/:id/hosts', async (req, res) => {
     try {
       await client.query('BEGIN');
       const placed = await placeOnSite(client.query.bind(client), req.account.id, id, parsed.hosts);
+      const domainWarning = await noteDomainWarning(client, req.account.id, placed);
       const { rows } = await client.query(
         `UPDATE experiments
          SET allowed_hosts = $1::text[], site_id = $2, needs_site = $3
@@ -1001,9 +1022,12 @@ router.patch('/:id/hosts', async (req, res) => {
         return res.status(404).json({ error: 'no experiment found with that id' });
       }
       await client.query('COMMIT');
+      if (domainWarning) rows[0].domain_warning = domainWarning;
       return res.json(rows[0]);
     } catch (err) {
       await client.query('ROLLBACK').catch((rollbackErr) => console.error('Rollback failed:', rollbackErr));
+      const status = routeStatus(err);
+      if (status) return res.status(status).json({ error: err.message });
       console.error(err);
       return res.status(500).json({ error: 'internal error', detail: err.message });
     } finally {
