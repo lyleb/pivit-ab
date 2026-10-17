@@ -188,6 +188,9 @@ async function deliverInvite({ to, agencyName, role, token }) {
       to,
       subject: `Join ${agency} on pivitlab`,
       text: inviteEmailText({ agencyName: agency, role, link }),
+      tag: 'agency-invite',
+      buttonLabel: 'Join this agency',
+      href: link,
     });
     if (!sent || sent.error) return { emailed: false, emailError: EMAIL_FAILED, link };
     return { emailed: sent.sent === true || sent.logged === true, emailError: null, link };

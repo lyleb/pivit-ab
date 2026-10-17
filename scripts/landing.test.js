@@ -186,6 +186,7 @@ async function dbChecks() {
   process.env.ADMIN_API_KEY = 'landing-admin-key-value';
   process.env.SESSION_SECRET = 'landing-session-secret-value-32chars';
   delete process.env.POSTMARK_SERVER_TOKEN;
+  delete process.env.POSTMARK_STREAM;
   delete process.env.EMAIL_FROM;
   delete process.env.EMAIL_REPLY_TO;
   delete process.env.ACCESS_REQUEST_EMAIL;
@@ -278,6 +279,10 @@ async function dbChecks() {
     assert.ok(mailed);
     assert.strictEqual(mailed.to, 'info@heclr.com');
     assert.strictEqual(mailed.subject, 'New pivitlab access request');
+    assert.strictEqual(mailed.tag, 'access-request');
+    assert.strictEqual(mailed.from, '"pivitlab" <no-reply@pivitlab.com>');
+    assert.ok(mailed.html.includes('Sam Taylor'));
+    assert.ok(mailed.html.includes('>Open the dashboard<'));
     assert.ok(mailed.text.includes('Sam Taylor'));
     assert.ok(mailed.text.includes('sam@example.co.uk'));
     assert.ok(mailed.text.includes('https://example.co.uk'));
@@ -386,7 +391,13 @@ async function dbChecks() {
       }, {}, Object.assign({ 'X-Forwarded-For': '203.0.113.40' }, origin));
       assert.strictEqual(sent.status, 201, sent.text);
       assert.strictEqual(posted.body.To, 'info@heclr.com');
-      assert.strictEqual(posted.body.From, 'no-reply@pivitlab.com');
+      assert.strictEqual(posted.body.From, '"pivitlab" <no-reply@pivitlab.com>');
+      assert.strictEqual(posted.body.MessageStream, 'outbound');
+      assert.strictEqual(posted.body.Tag, 'access-request');
+      assert.ok(posted.body.HtmlBody.includes('Sent Case'));
+      assert.ok(posted.body.HtmlBody.includes('pivitlab'));
+      assert.ok(posted.body.TextBody.includes('Sent Case'));
+      assert.ok(!JSON.stringify(posted.body).toLowerCase().includes('list-unsubscribe'));
       assert.ok(posted.body.Subject.includes('access request'));
       const sentNotice = await db.query(
         `SELECT COUNT(*)::int AS n FROM owner_notices WHERE body LIKE '%sent@example.co.uk%'`

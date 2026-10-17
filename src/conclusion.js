@@ -300,7 +300,14 @@ async function notifyOwner({ accountId, experiment, clientName, whenLabel }) {
         `Open pivitlab: ${appUrl('/')}`,
       ].join('\n');
       for (const email of emails) {
-        const result = await sendEmail({ to: email, subject, text });
+        const result = await sendEmail({
+          to: email,
+          subject,
+          text,
+          tag: 'conclusion-approved',
+          buttonLabel: 'Open pivitlab',
+          href: appUrl('/'),
+        });
         if (result && result.sent) sent = true;
       }
       if (sent) return { channel: 'email' };

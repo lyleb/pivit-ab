@@ -137,6 +137,9 @@ async function sendLink({ email, token, code, signup }) {
     to: email,
     subject,
     text: signInText({ link, code, signup }),
+    tag: signup ? 'signup-link' : 'login-link',
+    buttonLabel: 'Sign in',
+    href: link,
   });
 }
 

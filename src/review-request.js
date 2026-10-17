@@ -52,7 +52,14 @@ async function notifyOwners({ emails, experiment, clientName }) {
   let lastError = '';
   for (const email of emails) {
     try {
-      const result = await sendEmail({ to: email, subject, text });
+      const result = await sendEmail({
+        to: email,
+        subject,
+        text,
+        tag: 'review-request',
+        buttonLabel: 'Open pivitlab',
+        href: link,
+      });
       if (result && result.error) {
         failed += 1;
         lastError = 'email was rejected';
