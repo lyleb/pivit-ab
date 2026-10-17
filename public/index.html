@@ -32,7 +32,7 @@
   .nav-item {
     display: flex; align-items: center; width: 100%; text-align: left; gap: 10px;
     padding: 10px 12px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.9em;
-    color: var(--text-muted); background: transparent; border: none; margin: 0;
+    color: var(--text-muted); background: transparent; border: none; margin: 0; text-decoration: none;
   }
   .nav-item:hover { background: #1a1e28; color: var(--ink); }
   .nav-item.active { background: rgba(86,53,251,0.16); color: #c4b6ff; }
@@ -340,6 +340,7 @@
       <button type="button" class="nav-item" id="nav-page-audit" data-go="#audit">Audit log</button>
       <button type="button" class="nav-item" id="nav-page-team" data-go="#team" hidden>Team</button>
       <button type="button" class="nav-item" id="nav-page-users" data-go="#users" hidden>Users</button>
+      <a class="nav-item" href="/help.html">Help</a>
     </nav>
     <div class="sidebar-foot">
       <button type="button" class="nav-item" id="logout-all">Sign out everywhere</button>

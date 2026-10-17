@@ -1,8 +1,8 @@
 # Agencies migration (Sprint 1a)
 
-On screen, an account is an **agency**. The person who can see every agency is a **platform admin** (`users.is_superadmin`). People in an agency are an **Owner** or a **Member** (`memberships.role` is still `owner` or `member`). A view-only login is a **viewer**. The table is still `clients`, the session role is still `client`, and the page is still `/client.html`.
+On screen, an account is an **agency**. The person who can see every agency is a **platform admin** (`users.is_superadmin`). People in an agency are an **Owner** or a **Member** (`memberships.role` is still `owner` or `member`). A view-only login is a **Viewer**. The table is still `clients`, the session role is still `client`, and the page is still `/client.html`. Who can do what today is in [help.md](help.md).
 
-This is the foundations half of agencies. There is no sign-up screen, no magic-link email, and no Stripe. The Owner still signs in with `ADMIN_API_KEY`. The session cookie is still `pivit.sid`. `SESSION_SECRET` is not rotated.
+This page is the foundations half of agencies, as it was when migration 001 ran. Sign-up, email sign-in, the Users screen and agency invites came later. See [signup.md](signup.md) and [help.md](help.md). The session cookie is still `pivit.sid`. `SESSION_SECRET` is not rotated.
 
 Agency #1 is named **Heclr**. The platform admin is **info@heclr.com**, with `verified_at` left empty because email sign-in is Sprint 1b. The membership role is `owner`. `accounts.legacy` is true, and only one legacy agency is allowed.
 
@@ -75,7 +75,7 @@ Isolation has to live in the query. A new Owner, viewer or public route should:
 
 ## Judgement calls, where the plan and the code differ
 
-- **View as, and the audit log.** PIV-022's audited platform-admin view is Sprint 1b, because it depends on PIV-108. The user row stores `is_superadmin`. There is no view-as screen, so the owner login response and the dashboard do not change.
+- **View as, and the audit log.** The user row stores `is_superadmin`. A platform admin can open a read-only support view of another agency from the dashboard. Starting and stopping that view is written to the audit log. See [help.md](help.md).
 - **Install check blocks Start.** A snippet call with the site key, from an Origin on that site's domain list, sets `verified_at`. Starting is refused until then. Migrated sites, including cantsaythat.co.uk, are marked verified because they already have traffic. A new site may have `verified_at` null. Starting still requires a non-empty `allowed_hosts` list. A duplicate domain sets `sites.conflict` and an audit row. A separate notice to Lyle is not built.
 - **`allowed_hosts` is not copied from the site.** The plan says a site drives `allowed_hosts`. Overwriting that column during the migration could add a host the experiment does not serve today, or drop one it does. Site domains are the normalised host set used to group tests. Serving still uses the experiment's own list plus the existing host check.
 - **`host_hits` stays one row per day, host and origin.** The primary key is unchanged, so the existing upsert and the metrics tests keep working. `account_id` is `NOT NULL` with a default of Heclr, and the admin reading filters on it. The box-tester exclusion windows are shown only to the legacy account. Hits for a later account cannot be told apart until the snippet sends a site key and the primary key includes the account. That is a Sprint 1b change, not this one.

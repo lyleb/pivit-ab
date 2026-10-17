@@ -11,7 +11,7 @@ Basic A/B testing platform: snippet + API + results dashboard.
    node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
    ```
 4. `npm run dev` — starts the server on `http://localhost:3000`. Startup applies any missing database versions (see [docs/tenancy.md](docs/tenancy.md)). A failed migration rolls back and the process exits.
-5. Open `http://localhost:3000` for the public landing page. The admin dashboard is at `http://localhost:3000/index.html` (it asks you to sign in). Logged-in Owners and Members who open `/` are sent to the dashboard. Viewer sessions are sent to `/client.html`. On screen the roles are Platform admin, Agency (Owner or Member) and Viewer. The database and API names (`accounts`, `clients`, `role=client`) stay as they are.
+5. Open `http://localhost:3000` for the public landing page. The admin dashboard is at `http://localhost:3000/index.html` (it asks you to sign in). Logged-in Owners and Members who open `/` are sent to the dashboard. Viewer sessions are sent to `/client.html`. On screen the roles are Platform admin, Agency (Owner or Member) and Viewer. The database and API names (`accounts`, `clients`, `role=client`) stay as they are. Help in the sidebar opens the same steps as [docs/help.md](docs/help.md).
 
 ## Deploying (recommended: Railway)
 
@@ -238,7 +238,7 @@ Same chart, same toggle, on both the admin dashboard and the viewer page.
 
 ## Viewer credentials, on-page
 
-Creating a viewer or resetting their password no longer uses a browser `alert()`/`prompt()` dialog — both show a persistent, copyable box on the page itself (username + password, with a "Copy both" button), since a native dialog disappears the moment you dismiss it and can't be copied cleanly. The password itself is never stored in retrievable form — if you navigate away without copying it, you'd need to reset it again.
+Creating a viewer or resetting their password shows a persistent, copyable box on the page itself (username + password, with a "Copy both" button), since a dialog that disappears cannot be copied cleanly. The password itself is never stored in retrievable form — if you navigate away without copying it, reset it again from Team.
 
 ## Owner login
 
@@ -251,21 +251,21 @@ There's a real login screen now at `/login.html` (branded, matching the dashboar
 - 5 failed password attempts locks that IP out for 60 seconds. The lockout is stored in Postgres, so a redeploy does not clear it. The reply is 429 with `Retry-After`.
 - Every admin route now requires an active owner session; the old `x-api-key` header no longer does anything.
 
-## Viewer login
+## Viewer sign-in
 
-A second, separate login exists for viewers — read-only, scoped to only the experiments you've explicitly assigned them. The screen says Viewer. The address is still `/login.html?role=client`, and the page is still `/client.html`.
+A second, separate sign-in exists for Viewers — read-only, scoped to only the experiments you've explicitly assigned them. The screen says Viewer. The address is still `/login.html?role=client`, and the page is still `/client.html`. The sign-in page calls this Viewer login.
 
-- **Creating a viewer**: dashboard → **Viewers** → **Add a viewer** (display name, username, password). Give them the login URL shown there (your dashboard's own `/login.html?role=client`), their username, and the password.
+- **Creating a viewer**: dashboard → **Team** → **Add a Viewer** (display name, username, password). Give them the sign-in address (`/login.html?role=client`), their username, and the password. The password is shown once. Home → **Viewers** can also create one, reset the password, or delete the login.
 - **Assigning experiments**: the experiment list and Settings have a Viewer field — pick a viewer to give them access to that experiment's results, or leave it internal-only. This is manual, per-experiment, on purpose — there's no automatic assignment by domain or URL.
-- **What viewers see**: their own page at `/client.html`, listing only their assigned experiments (grouped by URL), with results (table + charts) for whichever one they click. No creation, editing, variant management, goals, CSV export, or any other admin control — it's genuinely read-only.
+- **What viewers see**: their own page at `/client.html`, listing only their assigned experiments (grouped by URL), with results (table + charts) for whichever one they click. No creation, editing, variant management, goals, CSV export, or any other admin control — it's read-only.
 - **Enforcement is server-side, not just hidden UI**: every viewer route under `/api/client` double-checks that the requested experiment's `client_id` actually matches the logged-in viewer's session before returning anything. A viewer can't see another viewer's data by guessing or editing an experiment ID.
-- Deleting a viewer never deletes their experiments or results — it just un-assigns them back to the agency.
+- Deleting a viewer from Home → **Viewers** never deletes their experiments or results — it unassigns them. Suspending or archiving a Viewer is done from Team. A Platform admin can do the same from Users, and can delete them only after they are suspended or archived. See [docs/help.md](docs/help.md).
 
 ## Admin authentication
 
 The public snippet endpoints (`GET /api/experiments`, `POST /api/event`, `GET /api/experiments/by-ids`) stay open on purpose — they're called from any visitor's browser and have no sensitive data to protect (just "which experiments run on this URL" and "log this event"). Those responses do not include the site-domain list. A public fetch is filtered by the page host (the `url` query, then `Origin`, then `Referer` — never this server's own hostname). `POST /api/event` checks that the variant belongs to the experiment, then drops the event with a normal 204 when the `Origin` or `Referer` host is known and not in the experiment's domains, and drops events for an experiment with no domains when `HOST_SCOPING=enforce`.
 
-`GET /api/experiments/host-report` and `PATCH /api/experiments/:id/hosts` are owner-only. `GET /api/host-hits` is owner-only too: a daily rollup of hits to the snippet and the public API (`/snippet`, `GET /api/experiments`, `GET /api/experiments/by-ids`, `POST /api/event`), keyed by the request host and the customer-site origin. `/health` and `/robots.txt` are not counted. The counter is an upsert and never blocks or fails the request. The home page shows the last 30 days. Rows are kept until you delete them. Everything else requires an active session with the right role (`owner` or `client`), enforced per-route.
+`GET /api/experiments/host-report` and `PATCH /api/experiments/:id/hosts` are owner-only. `GET /api/host-hits` is owner-only too: a daily rollup of hits to the snippet and the public API (`/snippet`, `GET /api/experiments`, `GET /api/experiments/by-ids`, `POST /api/event`), keyed by the request host and the customer-site origin. `/health` and `/robots.txt` are not counted. The counter is an upsert and never blocks or fails the request. The home page shows the last 30 days. Rows are kept until you delete them. Everything else requires an active session. An Owner or a Member uses the dashboard. A Viewer uses the viewer page. The session role is still `owner` or `client`, enforced per-route.
 
 A conversion in results, the Bayesian panel, the viewer page, the trend chart and the CSV `unique_conversion` column is a unique visitor per variant (and per goal, when goals are listed separately). Repeat clicks stay visible on the owner results table as **Conversion events**. The rate uses the unique count, so it cannot exceed 100%. The Bayesian calculation itself is unchanged; it is only fed that unique count.
 
@@ -302,15 +302,14 @@ A running test that has a plan shows health, progress and the traffic split unti
 
 ## What's NOT in v1 (by design)
 
-- One Owner per agency on screen today. Viewer logins exist. A colleague cannot yet be added as a Member from the dashboard.
+- Viewers still sign in with a username and password. Email sign-in for Viewers is not built.
 - 50/50-style manual splits only, no auto traffic allocation
 - No multi-page funnels
-- No password reset flow — if you forget the owner password, it's whatever `ADMIN_API_KEY` is set to in Railway; for a viewer, you reset it for them from the dashboard
+- The fallback owner password cannot be reset inside pivitlab. It is whatever `ADMIN_API_KEY` is set to. An Owner resets a Viewer password from Team.
 
 ## Next steps to consider
 
 - Support for multiple goals per variant with individual conversion rates
-- Per-teammate owner logins if you ever bring someone else onto the admin side
 - Retiring the selector-picker bookmarklet: the editor now covers click goals, so it's only needed for hand-typing a selector into the dashboard form. URL goals could get an editor action too.
 - An "also set this goal on the other variants" option in the editor. Left out deliberately for now: an edit token is scoped to one variant, and widening it to write to siblings (whose selectors may legitimately differ) is a bigger trust decision than it looks — the shared-goals warning covers the risk meanwhile.
 - A real code editor (e.g. CodeMirror) in place of the plain textareas in the visual editor's panel
