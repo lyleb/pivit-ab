@@ -73,6 +73,7 @@ async function main() {
   process.env.NODE_ENV = 'test';
   process.env.HOST_SCOPING = 'transition';
   delete process.env.APP_ORIGIN;
+  delete process.env.PORT;
   delete process.env.PIVIT_TENANCY_FAULT;
 
   const db = require('../src/db');
@@ -127,7 +128,6 @@ async function main() {
     }
 
     server = await listen(appFor({ role: 'owner' }));
-    const port = server.address().port;
 
     const archivedGet = await request(server, 'GET', `/api/editor/variants/${archived.variantId}?token=${encodeURIComponent(editToken(archived.variantId))}`);
     assert.strictEqual(archivedGet.status, 409);
@@ -137,8 +137,10 @@ async function main() {
     assert.strictEqual(archivedGet.json.test.status_label, 'Archived');
     assert.strictEqual(archivedGet.json.variant.name, 'Checkout Social proof');
     assert.strictEqual(archivedGet.json.test.link_label, 'Open Checkout step in pivitlab');
-    assert.ok(archivedGet.json.test.url.includes(`/index.html#experiment/${archived.id}`));
-    assert.ok(archivedGet.json.test.url.startsWith(`http://127.0.0.1:${port}/`));
+    assert.strictEqual(
+      archivedGet.json.test.url,
+      `http://127.0.0.1:3000/index.html#experiment/${archived.id}`
+    );
     assert.ok(!archivedGet.text.includes('ARCHIVED_SECRET'));
 
     const archivedPatch = await request(

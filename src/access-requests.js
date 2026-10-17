@@ -9,7 +9,7 @@ const { normaliseEmail, customerHost, createInvite, requestIp } = require('./aut
 const { recordAudit } = require('./audit');
 const { hit, LIMITED_MESSAGE } = require('./rate-limit');
 const { sendEmail, replyToAddress } = require('./mailer');
-const { configuredAppOrigin } = require('./app-origin');
+const { appUrl } = require('./app-origin');
 const { accessRequestsEnabled } = require('./access-flag');
 const { legacyAccount } = require('./tenant');
 
@@ -29,7 +29,6 @@ function cleanName(raw) {
 }
 
 function alertText(row) {
-  const origin = configuredAppOrigin() || 'https://pivitlab.com';
   return [
     'Someone asked for access to pivitlab.',
     '',
@@ -38,7 +37,7 @@ function alertText(row) {
     `Website: https://${row.website}`,
     '',
     'Create an invite code from the dashboard:',
-    `${origin}/index.html`,
+    appUrl('/index.html'),
     '',
     'pivitlab',
   ].join('\n');

@@ -1,9 +1,15 @@
-// Optional public origin for URLs the admin UI shows (snippet tag, client login).
-// APP_ORIGIN is a feature flag: unset or invalid means the UI keeps using
-// location.origin. This does not change which host serves traffic.
+// Public origin for the snippet tag, the client login link and every link in
+// an email. Those URLs come from APP_ORIGIN. They do not use the browser's
+// location.origin or the request Host header.
 //
-// The same rules live in public/admin-ui.js (displayOrigin) so the page can
-// ignore a bad payload on its own. null fallback makes that return null here.
+// Production (NODE_ENV=production) refuses to start unless APP_ORIGIN is an
+// https origin, for example https://pivitlab.com. In development, a missing
+// or invalid value falls back to http://127.0.0.1:<port> (port 3000 when
+// PORT is unset) and a warning is logged once.
+//
+// The same acceptance rules live in public/admin-ui.js (displayOrigin) so the
+// page can ignore a bad payload on its own. null fallback makes that return
+// null here. The dashboard passes null: it does not substitute location.origin.
 //
 // The HTML pages also get a canonical link. pivitlab.com is the Search Console
 // property. pivitlab.co.uk already redirects there, but pivit.click still
@@ -20,6 +26,9 @@ const path = require('path');
 const { displayOrigin } = require('../public/admin-ui');
 
 const DEFAULT_CANONICAL_ORIGIN = 'https://pivitlab.com';
+const DEV_FALLBACK_PORT = '3000';
+
+let warnedFallback = false;
 
 const CANONICAL_PAGES = {
   '/index.html': { file: 'index.html', pathname: '/index.html' },
@@ -41,9 +50,68 @@ function configuredAppOrigin() {
   return normaliseAppOrigin(process.env.APP_ORIGIN);
 }
 
+function developmentFallbackOrigin(env) {
+  const raw = env && env.PORT != null ? String(env.PORT).trim() : '';
+  const port = /^\d{1,5}$/.test(raw) && Number(raw) > 0 && Number(raw) <= 65535
+    ? String(Number(raw))
+    : DEV_FALLBACK_PORT;
+  return `http://127.0.0.1:${port}`;
+}
+
+function fallbackWarning(origin) {
+  return `APP_ORIGIN is unset or is not a valid http or https origin. Using ${origin} for the snippet tag, the client login link and email links. Set APP_ORIGIN to the public https address, for example https://pivitlab.com, before you deploy.`;
+}
+
+function productionRefusal() {
+  return 'Refusing to start. NODE_ENV is production and APP_ORIGIN must be an https origin, for example https://pivitlab.com. The value is missing or is not https. Set APP_ORIGIN and restart.';
+}
+
+// Origin used in the snippet tag, the client login link and email links.
+// Overrides are for tests. After exit(1) this throws, so a test stub that
+// does not throw still cannot return a non-https origin.
+function publicAppOrigin(overrides) {
+  const env = (overrides && overrides.env) || process.env;
+  const log = (overrides && overrides.log) || console;
+  const normalised = normaliseAppOrigin(env && env.APP_ORIGIN);
+  const production = !!(env && env.NODE_ENV === 'production');
+
+  if (production) {
+    if (!normalised || normalised.indexOf('https://') !== 0) {
+      const message = productionRefusal();
+      if (log && typeof log.error === 'function') log.error(message);
+      const exit = (overrides && overrides.exit) || process.exit;
+      exit(1);
+      throw new Error(message);
+    }
+    return normalised;
+  }
+
+  if (normalised) return normalised;
+
+  const fallback = developmentFallbackOrigin(env);
+  const message = fallbackWarning(fallback);
+  if (overrides && overrides.log) {
+    if (typeof log.warn === 'function') log.warn(message);
+  } else if (!warnedFallback) {
+    warnedFallback = true;
+    console.warn(message);
+  }
+  return fallback;
+}
+
+// Absolute pivitlab URL. The path must start with one slash so it cannot
+// replace the origin (a scheme or a protocol-relative URL would).
+function appUrl(path, overrides) {
+  const suffix = String(path || '/');
+  if (!suffix.startsWith('/') || suffix.startsWith('//')) {
+    throw new Error('A pivitlab link must start with a single slash.');
+  }
+  return publicAppOrigin(overrides) + suffix;
+}
+
 function sendPublicConfig(req, res) {
   res.set('Cache-Control', 'no-store');
-  res.json({ appOrigin: configuredAppOrigin() });
+  res.json({ appOrigin: publicAppOrigin() });
 }
 
 function canonicalOrigin() {
@@ -94,6 +162,9 @@ module.exports = {
   CANONICAL_PAGES,
   normaliseAppOrigin,
   configuredAppOrigin,
+  developmentFallbackOrigin,
+  publicAppOrigin,
+  appUrl,
   sendPublicConfig,
   canonicalOrigin,
   canonicalUrl,

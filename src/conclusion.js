@@ -6,17 +6,13 @@ const db = require('./db');
 const { recordAudit } = require('./audit');
 const { sendEmail } = require('./mailer');
 const { ownerEmails } = require('./review-request');
-const { configuredAppOrigin } = require('./app-origin');
+const { appUrl } = require('./app-origin');
 const { londonDateISO, formatLondonStamp } = require('./clock');
 const { freezeConclusion, conclusionPdf, approvalPdf, pdfNames, sendPdf } = require('./conclusion-doc');
 
 const MISSING = 'no experiment found with that id';
 const NO_STORED_RESULT = 'No stored result yet. The conclusion uses the daily result and does not calculate a new one.';
 const ALREADY_RELEASED = 'This conclusion is already released. The released document stays as it is.';
-
-function origin() {
-  return configuredAppOrigin() || 'https://pivitlab.com';
-}
 
 function postmarkConfigured() {
   return Boolean(String(process.env.POSTMARK_SERVER_TOKEN || '').trim());
@@ -301,7 +297,7 @@ async function notifyOwner({ accountId, experiment, clientName, whenLabel }) {
         '',
         'The approval is recorded in pivitlab. Open the test to download the record.',
         '',
-        `Open pivitlab: ${origin()}/`,
+        `Open pivitlab: ${appUrl('/')}`,
       ].join('\n');
       for (const email of emails) {
         const result = await sendEmail({ to: email, subject, text });
