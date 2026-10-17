@@ -83,7 +83,7 @@ router.post('/experiments/:experimentId/review-request', async (req, res) => {
     const result = await requestReview({
       experiment,
       clientId: req.session.clientId,
-      clientName: client.rows[0] ? client.rows[0].name : 'A client',
+      clientName: client.rows[0] ? client.rows[0].name : 'A viewer',
       accountId: req.account.id,
       ip: req.ip,
     });

@@ -59,7 +59,7 @@ function developmentFallbackOrigin(env) {
 }
 
 function fallbackWarning(origin) {
-  return `APP_ORIGIN is unset or is not a valid http or https origin. Using ${origin} for the snippet tag, the client login link and email links. Set APP_ORIGIN to the public https address, for example https://pivitlab.com, before you deploy.`;
+  return `APP_ORIGIN is unset or is not a valid http or https origin. Using ${origin} for the snippet tag, the viewer login link and email links. Set APP_ORIGIN to the public https address, for example https://pivitlab.com, before you deploy.`;
 }
 
 function productionRefusal() {

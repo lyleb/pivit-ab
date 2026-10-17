@@ -328,7 +328,7 @@ router.post('/view-as', async (req, res) => {
     }
     const accountId = req.body && req.body.account_id;
     if (!accountId || accountId === account.id) {
-      return res.status(400).json({ error: 'Choose a different account.' });
+      return res.status(400).json({ error: 'Choose a different agency.' });
     }
     const { rows } = await db.query(`SELECT id, name FROM accounts WHERE id = $1`, [accountId]);
     if (!rows[0]) return res.status(404).json({ error: 'not found' });

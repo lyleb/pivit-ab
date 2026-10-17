@@ -14,7 +14,7 @@ async function setMembershipRole({ accountId, actorUserId, targetUserId, role, i
     return { ok: false, status: 404, error: 'not found' };
   }
   if (!ROLES.has(role)) {
-    return { ok: false, status: 400, error: 'Role must be owner or member.' };
+    return { ok: false, status: 400, error: 'Role must be Owner or Member.' };
   }
 
   const client = await db.pool.connect();
@@ -46,7 +46,7 @@ async function setMembershipRole({ accountId, actorUserId, targetUserId, role, i
       const owners = locked.rows.filter((row) => row.role === 'owner').length;
       if (owners <= 1) {
         await client.query('ROLLBACK');
-        return { ok: false, status: 400, error: 'This account needs at least one owner.' };
+        return { ok: false, status: 400, error: 'This agency needs at least one Owner.' };
       }
     }
     await client.query(

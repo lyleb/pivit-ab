@@ -241,7 +241,7 @@ async function main() {
     assert.deepStrictEqual(idsOf(unknown), []);
     const setupUnknown = await request(acmeServer, 'GET', '/api/setup');
     assert.strictEqual(setupUnknown.json.site.install_check.reason, 'wrong');
-    assert.ok(setupUnknown.json.site.install_check.message.includes('did not match this account'));
+    assert.ok(setupUnknown.json.site.install_check.message.includes('did not match this agency'));
 
     const foreignKey = await request(
       publicServer,

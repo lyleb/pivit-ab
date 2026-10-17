@@ -6,10 +6,12 @@ const { publicServerError, PUBLIC_ERROR } = require('../src/public-error');
 const login = fs.readFileSync(path.join(__dirname, '../public/login.html'), 'utf8');
 assert.ok(login.includes('Forgot password?'));
 assert.ok(login.includes('Contact the person who gave you access'));
-assert.ok(login.includes('class="invite-action" href="/signup.html">Got an invite code from pivitlab?<br>Create your account</a>'));
+assert.ok(login.includes('class="invite-action" href="/signup.html">Got an invite code from pivitlab?<br>Create your agency</a>'));
 assert.ok(login.indexOf('Email me a sign-in link') < login.indexOf('class="invite-action"'));
 assert.ok(login.includes('Email me a sign-in link'));
-assert.ok(login.includes('Viewing results for a company? Client login →'));
+assert.ok(login.includes('Viewing results for a company? Viewer login →'));
+assert.ok(login.includes("mode === 'client' ? 'Viewer' : 'Sign in'"));
+assert.ok(login.includes("mode === 'client' ? 'pivitlab — Viewer' : 'pivitlab — Log in'"));
 assert.ok(login.includes('href="/login.html?role=client"'));
 assert.ok(login.includes('Use the username and password your agency gave you.'));
 assert.ok(login.includes("requested === 'client' ? 'client' : 'email'"));
@@ -24,7 +26,7 @@ assert.ok(!/railway/i.test(login));
 
 const checkEmail = fs.readFileSync(path.join(__dirname, '../public/check-email.html'), 'utf8');
 const sentLine = "If that address can be used, we've sent a link.";
-const noEmailHint = 'No email? You need a pivitlab account first. Ask for an invite, or use the address you signed up with.';
+const noEmailHint = 'No email? You need a pivitlab agency first. Ask for an invite, or use the address you signed up with.';
 assert.ok(checkEmail.includes(sentLine));
 assert.strictEqual(checkEmail.split(noEmailHint).length - 1, 1);
 assert.ok(checkEmail.indexOf(sentLine) < checkEmail.indexOf(noEmailHint));
@@ -55,7 +57,9 @@ assert.ok(adminHtml.includes('Next: review the experiment, then start it.'));
 assert.ok(adminHtml.includes('You signed in with the owner password. Day to day, sign in by email at info@heclr.com. This password is only the fallback.'));
 assert.ok(!adminHtml.includes('Once email sign-in is set up'));
 assert.ok(adminHtml.includes('id="emergency-dismiss"'));
-assert.ok(adminHtml.includes("Support view: see another customer's account read-only. Every view is logged."));
+assert.ok(adminHtml.includes('Support view: see another agency read-only. Every view is logged.'));
+assert.ok(adminHtml.includes('id="role-badge"'));
+assert.ok(adminHtml.includes('UI.roleBadgeLabel'));
 assert.ok(!adminHtml.includes('You\'re signed in with the emergency password'));
 assert.ok(!adminHtml.includes('View as another account'));
 assert.ok(!adminHtml.includes('id="status-value"'));
@@ -81,5 +85,116 @@ assert.deepStrictEqual(body, { error: PUBLIC_ERROR });
 assert.ok(!JSON.stringify(body).includes('postgres'));
 assert.ok(!JSON.stringify(body).includes('detail'));
 assert.strictEqual(logs.length, 1);
+
+const signup = fs.readFileSync(path.join(__dirname, '../public/signup.html'), 'utf8');
+assert.ok(signup.includes('<title>pivitlab — Create an agency</title>'));
+assert.ok(signup.includes('<h1>Create your agency</h1>'));
+assert.ok(signup.includes('Already have an agency? Sign in'));
+assert.ok(!signup.includes('Create your account'));
+assert.ok(!signup.includes('Create an account'));
+assert.ok(!signup.includes('have an account'));
+
+const viewerPage = clientHtml;
+assert.ok(viewerPage.includes('<title>pivitlab — Viewer</title>'));
+assert.ok(viewerPage.includes('>Viewer</span>'));
+assert.ok(viewerPage.includes("document.title = 'pivitlab — Viewer'"));
+
+const pinned = [
+  ['public/index.html', [
+    '>Viewers</button>',
+    '>Viewers</h2>',
+    '>Add a viewer</summary>',
+    '>Create viewer</button>',
+    '>Viewer (optional)</label>',
+    'No viewers yet',
+    'Give these to your viewer',
+    'Delete this viewer login?',
+    'data-label="Viewer"',
+    'Viewer · ',
+    '>Viewer</label>',
+    'Only this viewer can see',
+    'Viewers cannot see a draft',
+    'Viewers will not see it',
+    '>Release to viewer</button>',
+    'The viewer can download it',
+    'Viewers can download it',
+    'A viewer asked',
+    "'A viewer'",
+    'Choose an agency',
+    'This agency has more than one site',
+    'What happened in this agency in pivitlab',
+    'Only an owner of this agency',
+    'Nothing has been recorded for this agency yet',
+    'id="role-badge"',
+  ]],
+];
+for (const [file, phrases] of pinned) {
+  const body = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+  for (const phrase of phrases) assert.ok(body.includes(phrase), `${file} missing ${phrase}`);
+}
+
+const oldWords = [
+  'Client login',
+  '>Clients<',
+  'Create client',
+  'Add a client',
+  'Create your account',
+  "customer's account",
+  'Choose an account',
+  'this account',
+  'No clients yet',
+  'your client',
+  'client login',
+  'Release to client',
+  'A client',
+  'Client (optional)',
+  'data-label="Client"',
+  'Only this client',
+  'Clients cannot',
+  'Clients will not',
+  'Clients can download',
+  'The client can download',
+  'pivitlab account',
+  '>Client<',
+];
+const uiFiles = [
+  'public/index.html',
+  'public/login.html',
+  'public/signup.html',
+  'public/check-email.html',
+  'public/client.html',
+  'public/sign-in.html',
+  'src/pages/landing.html',
+];
+for (const file of uiFiles) {
+  const body = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+  for (const phrase of oldWords) {
+    assert.ok(!body.includes(phrase), `${file} still says ${phrase}`);
+  }
+  assert.ok(!body.includes('Pivitlab'), `${file} capitalises pivitlab`);
+  assert.ok(!body.includes('PivitLab'), `${file} capitalises pivitlab`);
+}
+
+const ui = require('../public/admin-ui');
+assert.strictEqual(ui.roleBadgeLabel({ superadmin: true }), 'Platform admin');
+assert.strictEqual(ui.roleBadgeLabel({ membership: 'member' }), 'Member');
+assert.strictEqual(ui.roleBadgeLabel({}), 'Owner');
+assert.strictEqual(ui.roleBadgeLabel({ viewer: true }), 'Viewer');
+assert.ok(ui.clientLoginUrl('https://pivitlab.com').endsWith('/login.html?role=client'));
+
+const mail = fs.readFileSync(path.join(__dirname, '../src/auth-flow.js'), 'utf8');
+assert.ok(mail.includes('Finish creating your pivitlab agency'));
+assert.ok(mail.includes('create your pivitlab agency and sign in'));
+assert.ok(!mail.includes('pivitlab account'));
+
+const docs = ['README.md', 'docs/signup.md', 'docs/tenancy.md', 'docs/how-pivitlab-decides.md'];
+for (const file of docs) {
+  const body = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+  assert.ok(body.includes('Platform admin') || body.includes('platform admin'), file);
+  assert.ok(/[Vv]iewer/.test(body), file);
+  assert.ok(/[Aa]gency/.test(body), file);
+  assert.ok(!body.includes('Client login'), file);
+  assert.ok(!body.includes('Pivitlab'), file);
+}
 
 console.log('copy tests passed');

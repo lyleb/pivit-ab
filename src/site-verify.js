@@ -9,7 +9,7 @@ const { recordAudit } = require('./audit');
 const INSTALL_PROBLEMS = {
   missing: 'the snippet had no site key',
   invalid: 'the site key was not valid',
-  wrong: 'the site key did not match this account',
+  wrong: 'the site key did not match this agency',
 };
 
 // Owner-facing copy. Null when there is nothing to report. The public snippet

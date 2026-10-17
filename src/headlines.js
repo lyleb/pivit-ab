@@ -76,19 +76,19 @@ function readyLabel(projectedEnd, now, { unlikely = false } = {}) {
 
 function ownerNote({ futilityBand, trafficOnly, clientHeadline } = {}) {
   if (futilityBand === 'amber') {
-    return 'May end inconclusive. This note is only on your dashboard. The client is not shown it, and it does not say which version is ahead.';
+    return 'May end inconclusive. This note is only on your dashboard. The viewer is not shown it, and it does not say which version is ahead.';
   }
   if (futilityBand === 'low') {
     return 'Unlikely to reach a decisive result even if the visitors arrive. This note is only on your dashboard. It does not say which version is ahead.';
   }
   if (futilityBand === 'unlikely' && clientHeadline !== 'unlikely') {
-    return 'Futility was flagged today. The client sees “Unlikely to finish in time” only after a second day in a row. It does not say which version is ahead.';
+    return 'Futility was flagged today. The viewer sees “Unlikely to finish in time” only after a second day in a row. It does not say which version is ahead.';
   }
   if (futilityBand === 'unlikely' && clientHeadline === 'unlikely') {
     if (trafficOnly) {
-      return 'At the recent traffic, this runs past the planned window. The client headline is “Unlikely to finish in time”. It does not say which version is ahead.';
+      return 'At the recent traffic, this runs past the planned window. The viewer headline is “Unlikely to finish in time”. It does not say which version is ahead.';
     }
-    return 'The client headline is “Unlikely to finish in time”. It does not say which version is ahead.';
+    return 'The viewer headline is “Unlikely to finish in time”. It does not say which version is ahead.';
   }
   return null;
 }

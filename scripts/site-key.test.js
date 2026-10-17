@@ -112,7 +112,7 @@ assert.strictEqual(missing.text, missingMessage);
 assert.strictEqual(missing.banner, missingMessage);
 assert.ok(!missing.text.includes('Pivit'));
 
-const wrongMessage = 'We saw a visit from example.co.uk, but the site key did not match this account. Copy the snippet from pivitlab and replace the tag on your site.';
+const wrongMessage = 'We saw a visit from example.co.uk, but the site key did not match this agency. Copy the snippet from pivitlab and replace the tag on your site.';
 const wrong = ui.installCheckLine({
   verified: false,
   install_check: { reason: 'wrong', message: wrongMessage },

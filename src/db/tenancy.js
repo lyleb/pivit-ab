@@ -94,7 +94,7 @@ function mismatchLines(before, after) {
   if (!sameJson(before.experiments, after.experiments)) lines.push('experiment rows changed');
   if (!sameJson(before.variants, after.variants)) lines.push('variant rows changed');
   if (!sameJson(before.eventRows, after.eventRows)) lines.push('event rows changed');
-  if (!sameJson(before.clients, after.clients)) lines.push('client logins changed');
+  if (!sameJson(before.clients, after.clients)) lines.push('viewer logins changed');
   return lines;
 }
 
@@ -396,7 +396,7 @@ async function applyTenancy(client) {
     `Tenancy check passed: ${before.totals.experiments} experiments, ` +
     `${before.totals.variants} variants, ${before.totals.events} events, ` +
     `${before.totals.test_events} test events, ${before.totals.excluded_events} excluded events, ` +
-    `${before.totals.audit_rows} audit rows, ${before.totals.clients} client logins.`
+    `${before.totals.audit_rows} audit rows, ${before.totals.clients} viewer logins.`
   );
 }
 

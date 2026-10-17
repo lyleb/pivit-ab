@@ -11,7 +11,7 @@ Basic A/B testing platform: snippet + API + results dashboard.
    node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
    ```
 4. `npm run dev` — starts the server on `http://localhost:3000`. Startup applies any missing database versions (see [docs/tenancy.md](docs/tenancy.md)). A failed migration rolls back and the process exits.
-5. Open `http://localhost:3000` for the public landing page. The admin dashboard is at `http://localhost:3000/index.html` (it asks you to sign in). Logged-in owners and customers who open `/` are sent to the dashboard. Client sessions are sent to `/client.html`.
+5. Open `http://localhost:3000` for the public landing page. The admin dashboard is at `http://localhost:3000/index.html` (it asks you to sign in). Logged-in Owners and Members who open `/` are sent to the dashboard. Viewer sessions are sent to `/client.html`. On screen the roles are Platform admin, Agency (Owner or Member) and Viewer. The database and API names (`accounts`, `clients`, `role=client`) stay as they are.
 
 ## Deploying (recommended: Railway)
 
@@ -19,13 +19,13 @@ Basic A/B testing platform: snippet + API + results dashboard.
 2. Create a new Railway project → "Deploy from GitHub repo" → select this repo
 3. Add a Postgres database: in your Railway project, click "+ New" → "Database" → "Add PostgreSQL". Railway auto-connects it and injects `DATABASE_URL` into your app service.
 4. On your app service, set `NODE_ENV=production`, `ADMIN_API_KEY` (a generated secret — see step 3 in Local setup) and `SESSION_SECRET` (at least 32 characters, any character set — see `.env.example`) in the Variables tab. If `NODE_ENV=production` and `SESSION_SECRET` is missing or shorter than 32 characters, the process exits at startup and the site will not boot. Set it before deploying. Do not rotate an existing secret that is already long enough. Sign-in email also needs `POSTMARK_SERVER_TOKEN`. The from address and reply-to have defaults. See [docs/signup.md](signup.md).
-5. Take a database backup before deploying a migration, and keep it off Railway. Nightly copies upload to Cloudflare R2 from a cron service. See [docs/BACKUPS.md](docs/BACKUPS.md). Deploy — missing database versions run on startup. If a version fails, that version rolls back and the process exits; redeploy the previous release. Do not rotate `SESSION_SECRET` or rename the `pivit.sid` cookie. Account #1 and the site key are described in [docs/tenancy.md](docs/tenancy.md).
+5. Take a database backup before deploying a migration, and keep it off Railway. Nightly copies upload to Cloudflare R2 from a cron service. See [docs/BACKUPS.md](docs/BACKUPS.md). Deploy — missing database versions run on startup. If a version fails, that version rolls back and the process exits; redeploy the previous release. Do not rotate `SESSION_SECRET` or rename the `pivit.sid` cookie. Agency #1 and the site key are described in [docs/tenancy.md](docs/tenancy.md).
 
 ## Search indexing
 
 The public landing page at `/` is the only page that should be indexed, together with `/sitemap.xml`. It sends no `X-Robots-Tag`, and its robots meta is `index, follow`. The canonical link is `https://pivitlab.com/` (or `APP_ORIGIN` when that is set). The title, description and Open Graph tags are on that page. The share image is `/assets/og-pivitlab.png`.
 
-Every other response, including `/index.html` (the dashboard), `/login.html`, `/privacy.html`, `/legal.html`, the client portal, `/owner`, `/api`, `/snippet` and `/health`, sends `X-Robots-Tag: noindex, nofollow`. The app HTML pages repeat that in a robots meta tag. `robots.txt` disallows `/api/`, `/snippet/` and `/owner`, so the HTML stays crawlable and Google can read the noindex. It also has one sitemap line: `Sitemap: https://pivitlab.com/sitemap.xml`. The sitemap lists only `https://pivitlab.com/`.
+Every other response, including `/index.html` (the dashboard), `/login.html`, `/privacy.html`, `/legal.html`, the viewer page (`/client.html`), `/owner`, `/api`, `/snippet` and `/health`, sends `X-Robots-Tag: noindex, nofollow`. The app HTML pages repeat that in a robots meta tag. `robots.txt` disallows `/api/`, `/snippet/` and `/owner`, so the HTML stays crawlable and Google can read the noindex. It also has one sitemap line: `Sitemap: https://pivitlab.com/sitemap.xml`. The sitemap lists only `https://pivitlab.com/`.
 
 The landing page form does not collect anything until `ACCESS_REQUESTS_ENABLED` is set (see `.env.example` and [docs/signup.md](docs/signup.md)). Until then it asks people to email info@pivitlab.com. `/privacy.html` is a placeholder for Lyle's wording.
 
@@ -34,7 +34,7 @@ The landing page form does not collect anything until `ACCESS_REQUESTS_ENABLED` 
 1. **Create an experiment** via the dashboard — give it a name and a `url_match` (a substring the page URL must contain, e.g. `/pricing`).
 2. **Add variants** — each variant has a `traffic_split` (%) and a `changes` array describing DOM edits.
 3. **Set status to `running`.**
-4. **Client adds the snippet** to their site:
+4. **The agency adds the snippet** to their site:
    ```html
    <script src="https://your-app.up.railway.app/snippet/ab.js"
            data-api="https://your-app.up.railway.app"></script>
@@ -70,18 +70,18 @@ Supported `type` values: `text`, `html`, `hide`, `show`, `style`, `attr`, `js`, 
 - `style` sets inline styles from an object. `stylesheet` is raw CSS text injected as its own `<style>` tag — it isn't tied to the matched element (the `selector` is kept for the Changes list's description), so it supports `!important`, `:hover`, media queries, and anything else a stylesheet does. Each `stylesheet` change gets its own tag, so a typo in one block can't break the others. (Named `stylesheet`, not `css`, deliberately: the old form used "css" as a UI label for inline styles.)
 - `remove` deletes the element from the DOM (unlike `hide`, which only sets `display:none`).
 
-**On `js`** (and `html`, `replace`, `insert_*`, which can carry inline handlers): this runs exactly what you type, against the matched element, on the client's live page. There's no sandboxing — treat it like writing to the client's site directly, because that's what it is. Since only you (holder of `ADMIN_API_KEY`) can create variants, the risk is the same as any other code you'd deploy to that site; there's no path for a client's visitors to inject their own JS through this. Use it for genuinely custom behaviour the other types can't cover — most banner/button tests won't need it.
+**On `js`** (and `html`, `replace`, `insert_*`, which can carry inline handlers): this runs exactly what you type, against the matched element, on the live page. There's no sandboxing — treat it like writing to the site directly, because that's what it is. Since only you (holder of `ADMIN_API_KEY`) can create variants, the risk is the same as any other code you'd deploy to that site; there's no path for a visitor to inject their own JS through this. Use it for genuinely custom behaviour the other types can't cover — most banner/button tests won't need it.
 
 ## Finding a selector for a click goal
 
-The easiest way is the visual editor: **🎯 Make Edits → Select element → Set as goal** (see below) — no selector to find or type. The bookmarklet below is only for typing a selector into the dashboard's Add Goals form by hand. Drag its **"Selector Picker"** link to your bookmarks bar once. Then, on the actual client page:
+The easiest way is the visual editor: **🎯 Make Edits → Select element → Set as goal** (see below) — no selector to find or type. The bookmarklet below is only for typing a selector into the dashboard's Add Goals form by hand. Drag its **"Selector Picker"** link to your bookmarks bar once. Then, on the page you are testing:
 
 1. Click the bookmark
 2. Click the element you want to target
 3. Its selector is copied to your clipboard (and shown in a prompt as a fallback if clipboard access is blocked)
 4. Paste it into the goal's Selector field on the dashboard
 
-This is a standalone tool (`snippet/picker-bookmarklet.js`) — it's not part of the tracking snippet and doesn't get deployed to client sites.
+This is a standalone tool (`snippet/picker-bookmarklet.js`) — it's not part of the tracking snippet and doesn't get deployed to the sites you test.
 
 ## Goals (conversion tracking, optional per variant)
 
@@ -107,7 +107,7 @@ The trade-off: instead of a flash of the *original* content before it swaps to t
 
 ## Cookie / consent handling
 
-The snippet writes to `localStorage` to recognize a visitor, which generally isn't "strictly necessary" for a site to function — it exists to support the A/B test — so under UK PECR and UK/EU GDPR it typically needs consent first, the same rule that governs analytics tools like GA4. This is worth checking with a lawyer or the client's DPO for a definitive answer on any given site; the general shape of the requirement is well-established, but I'm not able to certify compliance.
+The snippet writes to `localStorage` to recognize a visitor, which generally isn't "strictly necessary" for a site to function — it exists to support the A/B test — so under UK PECR and UK/EU GDPR it typically needs consent first, the same rule that governs analytics tools like GA4. This is worth checking with a lawyer or the site's data protection officer for a definitive answer on any given site; the general shape of the requirement is well-established, but I'm not able to certify compliance.
 
 Before doing anything, the snippet checks for consent in this order:
 1. A manual `window.pivitConsent = true/false` — set this yourself if a site uses a consent tool not covered below, or a custom banner
@@ -145,7 +145,7 @@ Settings shows **Seen on since last deploy** — hosts that have asked for that 
 
 **Why a new tab, not an embedded frame**: the browser's same-origin policy blocks reading or modifying a cross-origin iframe's DOM entirely. Opening the real page directly means the tracking snippet already running there (`ab.js`) can hand off to the editor with full same-origin access — the same approach tools like Optimizely and VWO use.
 
-**Authentication**: the new tab lives on the client's own domain, not `pivit.click`, so your normal login session (deliberately never sent cross-site) can't travel with it. Clicking "Make Edits" instead mints a signed, time-limited token scoped to that one variant (`src/edit-token.js`) — good for about an hour, useless for anything except saving changes to that specific variant. This is also what makes a future restricted client-side version of this feature straightforward: same mechanism, issued to a client instead of the owner.
+**Authentication**: the new tab lives on the website's own domain, not `pivit.click`, so your normal login session (deliberately never sent cross-site) can't travel with it. Clicking "Make Edits" instead mints a signed, time-limited token scoped to that one variant (`src/edit-token.js`) — good for about an hour, useless for anything except saving changes to that specific variant. This is also what makes a future restricted viewer version of this feature straightforward: same mechanism, issued to a viewer instead of the Owner.
 
 **Re-editing an element's HTML/CSS/JS**: click **Edit** on any of its `replace` / `stylesheet` / `js` entries in the Changes list — or just pick the element again and choose Edit element — and the same three-tab panel opens pre-filled with everything currently saved for that element. Change only the HTML and the CSS and JS entries are left exactly as they were; nothing is re-added. **Clear a tab to remove that part** (clearing HTML puts the page's original element back). Adding a part that didn't exist yet slots it into the right place (replace → stylesheet → js). Entries are matched by selector, one per type; if older data has look-alike duplicates, the tab for the entry you clicked edits that exact entry. Editing existing entries reloads the page onto a clean copy and replays (see above); creating a brand-new set applies live. If no HTML entry exists, the HTML tab shows the element's *live* markup — including the effect of any other changes you've made to it — and says so.
 
@@ -153,7 +153,7 @@ Settings shows **Seen on since last deploy** — hosts that have asked for that 
 
 **Things to know about the JS box**: it runs once per element matching the selector, with no sandboxing, on the real site — the same trust level as any code you'd deploy there. If you change an element's HTML so its id/classes no longer match the selector, the CSS and JS that target that selector won't find it; update the selector in the CSS, or keep the id.
 
-**Owner-only for now**; client-side rollout comes later, reusing the same token mechanism. One thing to settle before that: an edit link can save CSS/JS/HTML that runs for every real visitor of the site, so a client-facing token should probably be restricted to a safer subset (e.g. text and CSS only) rather than carry the full power the owner's does.
+**Owner-only for now**; a viewer rollout comes later, reusing the same token mechanism. One thing to settle before that: an edit link can save CSS/JS/HTML that runs for every real visitor of the site, so a viewer token should probably be restricted to a safer subset (e.g. text and CSS only) rather than carry the full power the Owner's does.
 
 ## The automatic Control variant
 
@@ -225,7 +225,7 @@ Below the results table and charts is a "Bayesian Analysis" panel — the answer
 - **Est. Rate (95% range)** — the likely true conversion rate and how wide the uncertainty around it still is. A wide range (e.g. 4%–64%) means "we genuinely don't know yet," not "the number is wrong."
 - **Probability Best** — the chance that variant is actually the top performer, computed by simulating the posterior distributions against each other 20,000 times (see `src/bayesian.js` for the exact method). A 🏆 marks a variant at 90%+.
 
-A low-traffic warning appears whenever any variant has under 30 visitors, since the estimate is still wide at that point and can swing a lot with the next handful of visitors. This panel loads automatically alongside the main results — no separate button. The client dashboard shows a short one-sentence version of the same model instead of the full table.
+A low-traffic warning appears whenever any variant has under 30 visitors, since the estimate is still wide at that point and can swing a lot with the next handful of visitors. This panel loads automatically alongside the main results — no separate button. The viewer page shows a short one-sentence version of the same model instead of the full table.
 
 ## The trend chart
 
@@ -234,32 +234,32 @@ The line chart under the bar chart plots **conversion rate over time**, not raw 
 - **Cumulative** — running unique visitors and unique converters up to that day (not a sum of each day's uniques, which would count a returning visitor twice)
 - **Daily** — that day's own unique visitors and the ones who also converted that day
 
-Same chart, same toggle, on both the admin dashboard and the client dashboard.
+Same chart, same toggle, on both the admin dashboard and the viewer page.
 
-## Client credentials, on-page
+## Viewer credentials, on-page
 
-Creating a client or resetting their password no longer uses a browser `alert()`/`prompt()` dialog — both show a persistent, copyable box on the page itself (username + password, with a "Copy both" button), since a native dialog disappears the moment you dismiss it and can't be copied cleanly. The password itself is never stored in retrievable form — if you navigate away without copying it, you'd need to reset it again.
+Creating a viewer or resetting their password no longer uses a browser `alert()`/`prompt()` dialog — both show a persistent, copyable box on the page itself (username + password, with a "Copy both" button), since a native dialog disappears the moment you dismiss it and can't be copied cleanly. The password itself is never stored in retrievable form — if you navigate away without copying it, you'd need to reset it again.
 
 ## Owner login
 
 There's a real login screen now at `/login.html` (branded, matching the dashboard), backed by proper sessions instead of a key pasted into a field:
 
-- Customers sign in with an emailed link or a 6-digit code. There is no customer password. Sign-up is invite-only. See [docs/signup.md](signup.md).
+- Agency Owners and Members sign in with an emailed link or a 6-digit code. There is no agency password. Sign-up is invite-only. See [docs/signup.md](docs/signup.md).
 - Day to day, the owner signs in by email at info@heclr.com (a link or a 6-digit code). The owner password is still the existing `ADMIN_API_KEY` value, and it stays available only as a fallback at the unlisted address `/owner` (not linked from the sign-in page). Do not rotate it.
-- Sessions are signed cookies stored in Postgres (not memory), so a later redeploy does not clear them. The cookie is `pivit.sid` locally. In production it is `__Host-pivit.sid` (HttpOnly, Secure, SameSite=Lax). The first deploy of that name signs everyone out once, because the browser will not send the old `pivit.sid` cookie under the new name. Customer sessions idle out after 30 days and end 90 days after sign-in. Superadmin and emergency-password sessions last 12 hours and are not renewed. See [docs/signup.md](docs/signup.md).
+- Sessions are signed cookies stored in Postgres (not memory), so a later redeploy does not clear them. The cookie is `pivit.sid` locally. In production it is `__Host-pivit.sid` (HttpOnly, Secure, SameSite=Lax). The first deploy of that name signs everyone out once, because the browser will not send the old `pivit.sid` cookie under the new name. Agency sessions idle out after 30 days and end 90 days after sign-in. Platform admin and emergency-password sessions last 12 hours and are not renewed. See [docs/signup.md](docs/signup.md).
 - A required env var: `SESSION_SECRET` (see `.env.example`). It must be at least 32 characters. Any character set is accepted — it does not have to be hex or base64. When `NODE_ENV=production`, a missing or shorter secret aborts startup with a log line and the process does not boot. Outside production, a dev-only fallback is used and a warning is logged. Set the production value on the host before deploying, and do not rotate one that is already long enough.
 - 5 failed password attempts locks that IP out for 60 seconds. The lockout is stored in Postgres, so a redeploy does not clear it. The reply is 429 with `Retry-After`.
 - Every admin route now requires an active owner session; the old `x-api-key` header no longer does anything.
 
-## Client login
+## Viewer login
 
-A second, separate login exists for clients — read-only, scoped to only the experiments you've explicitly assigned them.
+A second, separate login exists for viewers — read-only, scoped to only the experiments you've explicitly assigned them. The screen says Viewer. The address is still `/login.html?role=client`, and the page is still `/client.html`.
 
-- **Creating a client**: dashboard → "Clients" section → "Add a client" (display name, username, password). Give them the login URL shown there (your dashboard's own `/login.html`), their username, and the password.
-- **Assigning experiments**: every row in "Your Experiments" has a Client dropdown — pick a client to give them access to that experiment's results, or "— none —" to keep it internal-only. This is manual, per-experiment, on purpose — there's no automatic assignment by domain or URL.
-- **What clients see**: their own branded dashboard at `/client.html`, listing only their assigned experiments (grouped by URL), with results (table + charts) for whichever one they click. No creation, editing, variant management, goals, CSV export, or any other admin control — it's genuinely read-only.
-- **Enforcement is server-side, not just hidden UI**: every client-facing route double-checks that the requested experiment's `client_id` actually matches the logged-in client's session before returning anything. A client can't see another client's data by guessing or editing an experiment ID.
-- Deleting a client account never deletes their experiments or results — it just un-assigns them back to owner-only.
+- **Creating a viewer**: dashboard → **Viewers** → **Add a viewer** (display name, username, password). Give them the login URL shown there (your dashboard's own `/login.html?role=client`), their username, and the password.
+- **Assigning experiments**: the experiment list and Settings have a Viewer field — pick a viewer to give them access to that experiment's results, or leave it internal-only. This is manual, per-experiment, on purpose — there's no automatic assignment by domain or URL.
+- **What viewers see**: their own page at `/client.html`, listing only their assigned experiments (grouped by URL), with results (table + charts) for whichever one they click. No creation, editing, variant management, goals, CSV export, or any other admin control — it's genuinely read-only.
+- **Enforcement is server-side, not just hidden UI**: every viewer route under `/api/client` double-checks that the requested experiment's `client_id` actually matches the logged-in viewer's session before returning anything. A viewer can't see another viewer's data by guessing or editing an experiment ID.
+- Deleting a viewer never deletes their experiments or results — it just un-assigns them back to the agency.
 
 ## Admin authentication
 
@@ -267,7 +267,7 @@ The public snippet endpoints (`GET /api/experiments`, `POST /api/event`, `GET /a
 
 `GET /api/experiments/host-report` and `PATCH /api/experiments/:id/hosts` are owner-only. `GET /api/host-hits` is owner-only too: a daily rollup of hits to the snippet and the public API (`/snippet`, `GET /api/experiments`, `GET /api/experiments/by-ids`, `POST /api/event`), keyed by the request host and the customer-site origin. `/health` and `/robots.txt` are not counted. The counter is an upsert and never blocks or fails the request. The home page shows the last 30 days. Rows are kept until you delete them. Everything else requires an active session with the right role (`owner` or `client`), enforced per-route.
 
-A conversion in results, the Bayesian panel, the client portal, the trend chart and the CSV `unique_conversion` column is a unique visitor per variant (and per goal, when goals are listed separately). Repeat clicks stay visible on the owner results table as **Conversion events**. The rate uses the unique count, so it cannot exceed 100%. The Bayesian calculation itself is unchanged; it is only fed that unique count.
+A conversion in results, the Bayesian panel, the viewer page, the trend chart and the CSV `unique_conversion` column is a unique visitor per variant (and per goal, when goals are listed separately). Repeat clicks stay visible on the owner results table as **Conversion events**. The rate uses the unique count, so it cannot exceed 100%. The Bayesian calculation itself is unchanged; it is only fed that unique count.
 
 ## Test traffic
 
@@ -288,9 +288,9 @@ Example for a direct post:
 { "experiment_id": "…", "variant_id": "…", "visitor_id": "v_pt…", "event_type": "view", "is_test": true }
 ```
 
-Test traffic is excluded from the owner results table, the Bayesian inputs (the maths in `src/bayesian.js` are unchanged), the trend, the sample-ratio check, the client portal, the CSV, and recent activity. The results tab has an owner-only **Include test traffic** control that puts it back. The client portal ignores that flag. The Health panel shows how many test visitors there are and whether they are excluded.
+Test traffic is excluded from the owner results table, the Bayesian inputs (the maths in `src/bayesian.js` are unchanged), the trend, the sample-ratio check, the viewer page, the CSV, and recent activity. The results tab has an owner-only **Include test traffic** control that puts it back. The viewer page ignores that flag. The Health panel shows how many test visitors there are and whether they are excluded.
 
-**Remove test traffic** (owner only) previews the visitor and event counts per variant, then hides the matching rows by setting `excluded_at`. **Restore** clears it. Nothing is deleted. The same actions accept a visitor-id prefix, matched literally, so `v_ptmuyez2tm_` does not treat `_` as a wildcard. Every remove and restore is written to `test_traffic_audit` (who, when, experiment, criteria, counts), shown on the results tab. These routes are not on the client portal. This change does not itself remove the synthetic `v_ptmuyez2tm_` visitors; the owner does that from the new control after deploy.
+**Remove test traffic** (owner only) previews the visitor and event counts per variant, then hides the matching rows by setting `excluded_at`. **Restore** clears it. Nothing is deleted. The same actions accept a visitor-id prefix, matched literally, so `v_ptmuyez2tm_` does not treat `_` as a wildcard. Every remove and restore is written to `test_traffic_audit` (who, when, experiment, criteria, counts), shown on the results tab. These routes are not on the viewer page. This change does not itself remove the synthetic `v_ptmuyez2tm_` visitors; the owner does that from the new control after deploy.
 
 `is_test` is added on startup if the column is missing. Existing rows whose visitor id starts with `v_pt` are flagged in the same startup pass. That update does not set `excluded_at`, and it is safe to run on every boot.
 
@@ -302,10 +302,10 @@ A running test that has a plan shows health, progress and the traffic split unti
 
 ## What's NOT in v1 (by design)
 
-- Single owner account, not per-teammate logins — client accounts exist, but if you ever bring on a co-worker, they'd share the one owner password
+- One Owner per agency on screen today. Viewer logins exist. A colleague cannot yet be added as a Member from the dashboard.
 - 50/50-style manual splits only, no auto traffic allocation
 - No multi-page funnels
-- No password reset flow — if you forget the owner password, it's whatever `ADMIN_API_KEY` is set to in Railway; for a client, you reset it for them from the dashboard
+- No password reset flow — if you forget the owner password, it's whatever `ADMIN_API_KEY` is set to in Railway; for a viewer, you reset it for them from the dashboard
 
 ## Next steps to consider
 
@@ -315,5 +315,5 @@ A running test that has a plan shows health, progress and the traffic split unti
 - An "also set this goal on the other variants" option in the editor. Left out deliberately for now: an edit token is scoped to one variant, and widening it to write to siblings (whose selectors may legitimately differ) is a bigger trust decision than it looks — the shared-goals warning covers the risk meanwhile.
 - A real code editor (e.g. CodeMirror) in place of the plain textareas in the visual editor's panel
 - Edit support in the Changes list for the older `style` / `attr` types (Remove-only today)
-- A restricted, client-facing version of the visual editor, using the same scoped edit-token mechanism
+- A restricted, viewer-facing version of the visual editor, using the same scoped edit-token mechanism
 - Synthetic demo data for show-and-tell purposes on low-traffic sites — scoped out for now to keep things simpler, worth revisiting later
