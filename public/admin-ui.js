@@ -282,8 +282,8 @@
   const SAFE_ORIGIN = /^https?:\/\/(?:(?:[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?)|\[[a-f0-9:]+\])(?::\d+)?$/i;
 
   // Server-configured public origin for the snippet tag and client login link.
-  // Empty or anything that is not an http(s) origin falls back to the page host,
-  // which is what the admin UI used before APP_ORIGIN existed.
+  // Empty or anything that is not an http(s) origin returns fallback.
+  // The dashboard passes null. It must not substitute location.origin.
   function displayOrigin(configured, fallback) {
     if (typeof configured !== 'string') return fallback;
     const value = configured.trim();

@@ -1198,7 +1198,8 @@ function paintFirstRun(setup) {
   if (site) {
     form.hidden = true;
     host.textContent = domain;
-    document.getElementById('first-run-snippet').textContent = snippetTag();
+    if (typeof site.public_key === 'string') snippetSiteKey = site.public_key;
+    document.getElementById('first-run-snippet').textContent = displayedSnippet();
     conflict.hidden = !site.conflict;
     if (site.conflict) conflict.textContent = UI.DOMAIN_IN_USE_WARNING;
   } else if (accountSites.length > 1) {
@@ -4929,14 +4930,15 @@ function openStatusSettings() {
 
 // --- Snippet ---
 
-// APP_ORIGIN, when the server accepts it, replaces location.origin in the
-// snippet tag and the client login link. Unset or invalid keeps today's host.
+// The snippet tag and the client login link use the origin from GET /api/config.
+// That is APP_ORIGIN, or the development fallback. location.origin is not used.
+const ORIGIN_UNAVAILABLE = 'The public address is not available yet.';
 let configuredAppOrigin = null;
 let appOriginRequest = null;
 let snippetSiteKey = '';
 
 function publicOrigin() {
-  return UI.displayOrigin(configuredAppOrigin, location.origin);
+  return UI.displayOrigin(configuredAppOrigin, null);
 }
 
 function loadAppOrigin() {
@@ -4944,9 +4946,7 @@ function loadAppOrigin() {
     appOriginRequest = fetch('/api/config')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data && Object.prototype.hasOwnProperty.call(data, 'appOrigin')) {
-          configuredAppOrigin = data.appOrigin;
-        }
+        if (data && typeof data.appOrigin === 'string') configuredAppOrigin = data.appOrigin;
       })
       .catch(() => {});
   }
@@ -4956,8 +4956,8 @@ function loadAppOrigin() {
 function applyDisplayedOrigins() {
   const origin = publicOrigin();
   const login = document.getElementById('client-login-url');
-  if (login) login.textContent = UI.clientLoginUrl(origin);
-  const tag = accountSitesLoaded ? installSnippetText() : UI.snippetTag(origin, snippetSiteKey);
+  if (login) login.textContent = origin ? UI.clientLoginUrl(origin) : ORIGIN_UNAVAILABLE;
+  const tag = installSnippetText();
   ['wizard-snippet-code', 'snippet-code'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.textContent = tag;
@@ -4965,7 +4965,12 @@ function applyDisplayedOrigins() {
 }
 
 function snippetTag() {
-  return UI.snippetTag(publicOrigin(), snippetSiteKey);
+  const origin = publicOrigin();
+  return origin ? UI.snippetTag(origin, snippetSiteKey) : '';
+}
+
+function displayedSnippet() {
+  return snippetTag() || ORIGIN_UNAVAILABLE;
 }
 
 function antiflickerSnippet() {
@@ -4983,12 +4988,23 @@ function copyText(text, statusId) {
     if (el) el.textContent = ' Could not copy — select the text manually.';
   });
 }
-function copySnippet(statusId) { copyText(snippetTag(), statusId || 'snippet-copied'); }
+function copySnippet(statusId) {
+  const text = installSnippetText();
+  const id = statusId || 'snippet-copied';
+  if (!text || text.indexOf('<script ') !== 0) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = ' ' + (text || ORIGIN_UNAVAILABLE);
+    return;
+  }
+  copyText(text, id);
+}
 function copyAntiflicker(statusId) { copyText(antiflickerSnippet(), statusId || 'antiflicker-copied'); }
 
 function installSnippetText() {
-  if (accountSites.length > 1 && !chosenSiteId) return 'Choose a site to get the snippet.';
-  return snippetTag();
+  if (accountSitesLoaded && accountSites.length > 1 && !chosenSiteId) {
+    return 'Choose a site to get the snippet.';
+  }
+  return displayedSnippet();
 }
 
 function fillInstallSnippets() {
@@ -5109,7 +5125,7 @@ document.getElementById('logout-all').addEventListener('click', async () => {
 });
 
 document.getElementById('first-run-copy').addEventListener('click', () => {
-  copyText(snippetTag(), 'first-run-copied');
+  copySnippet('first-run-copied');
 });
 
 document.getElementById('first-run-create').addEventListener('click', () => {

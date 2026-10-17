@@ -9,7 +9,7 @@ const { sessionLifetime } = require('./session-lifetime');
 const { csrfMiddleware } = require('./csrf');
 
 const { hostScopingMode } = require('./host-scope');
-const { configuredAppOrigin, sendPublicConfig, canonicalHtmlMiddleware } = require('./app-origin');
+const { configuredAppOrigin, publicAppOrigin, sendPublicConfig, canonicalHtmlMiddleware } = require('./app-origin');
 const { robotsTagMiddleware, sendRobotsTxt, sendSitemap } = require('./robots');
 const { hostHitMiddleware } = require('./host-hits');
 const { backfillExperimentGoals } = require('./goals');
@@ -131,9 +131,10 @@ app.use('/api/review-requests', reviewRouter);
 app.use('/api/editor', editorRouter);
 app.use('/api/host-hits', hostHitsRouter);
 
-// Optional public origin for the admin UI. Null when APP_ORIGIN is unset or
-// invalid, in which case the page keeps using location.origin. Does not
-// redirect or change how /snippet, /api, or /health are served.
+// Public origin for the snippet tag and the client login link. APP_ORIGIN
+// when that is valid. In development a missing or invalid value is
+// http://127.0.0.1:<port>. The request Host is not used. Does not redirect
+// or change how /snippet, /api, or /health are served.
 app.get('/api/config', sendPublicConfig);
 
 app.get('/health', (req, res) => res.json({ ok: true }));
@@ -194,11 +195,8 @@ async function logHostScoping() {
 }
 
 function logAppOrigin() {
-  const raw = process.env.APP_ORIGIN;
-  if (raw == null || String(raw).trim() === '') return;
-  const origin = configuredAppOrigin();
-  if (!origin) console.warn('APP_ORIGIN is set but is not a valid http(s) origin; ignoring it.');
-  else console.log(`APP_ORIGIN=${origin}`);
+  const value = publicAppOrigin();
+  if (configuredAppOrigin()) console.log(`APP_ORIGIN=${value}`);
 }
 
 const PORT = process.env.PORT || 3000;

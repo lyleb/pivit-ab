@@ -11,7 +11,7 @@ const { newSiteKey } = require('./db/tenancy');
 const { recordAudit } = require('./audit');
 const { hit, LIMITED_MESSAGE } = require('./rate-limit');
 const { sendEmail } = require('./mailer');
-const { configuredAppOrigin } = require('./app-origin');
+const { appUrl } = require('./app-origin');
 
 const TERMS_VERSION = 'beta-2026-10-09';
 const TOKEN_TTL_MS = 15 * 60 * 1000;
@@ -24,10 +24,6 @@ const CODE_TRIES = 5;
 const LINK_SENT = "If that address can be used, we've sent a link.";
 const INVITE_INVALID = "That invite code from pivitlab isn't valid. It may have expired, or it may already have been used.";
 const INVITE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
-
-function appOrigin() {
-  return configuredAppOrigin() || 'https://pivitlab.com';
-}
 
 function normaliseEmail(raw) {
   const email = String(raw || '').trim().toLowerCase();
@@ -134,7 +130,7 @@ async function issueToken(client, { email, purpose, website, inviteId, termsVers
 }
 
 async function sendLink({ email, token, code, signup }) {
-  const link = `${appOrigin()}/sign-in.html?token=${encodeURIComponent(token)}`;
+  const link = appUrl(`/sign-in.html?token=${encodeURIComponent(token)}`);
   const subject = signup ? 'Finish creating your pivitlab account' : 'Your pivitlab sign-in link';
   return sendEmail({
     to: email,

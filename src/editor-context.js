@@ -3,7 +3,7 @@
 // link back to that test in pivitlab. Status is already on the experiment, so
 // this does not need a new column.
 
-const { configuredAppOrigin } = require('./app-origin');
+const { appUrl } = require('./app-origin');
 
 const STATUS_LABELS = {
   draft: 'Draft',
@@ -59,17 +59,13 @@ function editorFields(status) {
   };
 }
 
-function testPageUrl(req, experimentId) {
+// The request is accepted so existing callers stay the same. The link does
+// not use its Host header or protocol. It uses APP_ORIGIN, or the development
+// fallback when that is unset.
+function testPageUrl(_req, experimentId) {
   const id = String(experimentId || '');
   if (!UUID_RE.test(id)) return '';
-  const configured = configuredAppOrigin();
-  let origin = configured;
-  if (!origin && req) {
-    const host = typeof req.get === 'function' ? req.get('host') : '';
-    if (host) origin = `${req.protocol || 'http'}://${host}`;
-  }
-  if (!origin) return '';
-  return `${String(origin).replace(/\/$/, '')}/index.html#experiment/${id}`;
+  return appUrl(`/index.html#experiment/${id}`);
 }
 
 // message is the sentence the owner reads. test.url is the link to the test

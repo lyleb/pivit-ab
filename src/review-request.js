@@ -6,12 +6,8 @@
 const db = require('./db');
 const { recordAudit } = require('./audit');
 const { sendEmail } = require('./mailer');
-const { configuredAppOrigin } = require('./app-origin');
+const { appUrl } = require('./app-origin');
 const { formatLondonDay, londonDateISO } = require('./clock');
-
-function origin() {
-  return configuredAppOrigin() || 'https://pivitlab.com';
-}
 
 async function ownerEmails(accountId) {
   const { rows } = await db.query(
@@ -39,7 +35,7 @@ async function openRequest(experimentId, accountId) {
 }
 
 async function notifyOwners({ emails, experiment, clientName }) {
-  const link = `${origin()}/`;
+  const link = appUrl('/');
   const subject = `Review requested: ${experiment.name}`;
   const text = [
     `${clientName} asked for a review of "${experiment.name}".`,

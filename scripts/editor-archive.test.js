@@ -40,8 +40,12 @@ assert.ok(!/Pivit(?!lab)/.test(runningEditWarning()));
 assert.ok(runningEditWarning().includes('pivitlab') === false);
 
 const previousOrigin = process.env.APP_ORIGIN;
+const previousNodeEnv = process.env.NODE_ENV;
+const previousPort = process.env.PORT;
+process.env.NODE_ENV = 'test';
 delete process.env.APP_ORIGIN;
-const req = { protocol: 'http', get: () => '127.0.0.1:3000' };
+delete process.env.PORT;
+const req = { protocol: 'https', get: () => 'evil.example' };
 const body = archivedBody(req, {
   id: expId,
   name: 'Checkout step',
@@ -54,6 +58,7 @@ assert.strictEqual(body.test.name, 'Checkout step');
 assert.strictEqual(body.test.status, 'archived');
 assert.strictEqual(body.test.status_label, 'Archived');
 assert.strictEqual(body.test.url, `http://127.0.0.1:3000/index.html#experiment/${expId}`);
+assert.ok(!body.test.url.includes('evil.example'));
 assert.strictEqual(body.test.link_label, 'Open Checkout step in pivitlab');
 assert.strictEqual(body.variant.name, 'Checkout Social proof');
 assert.strictEqual(body.changes, undefined);
@@ -65,6 +70,10 @@ assert.strictEqual(
 );
 if (previousOrigin === undefined) delete process.env.APP_ORIGIN;
 else process.env.APP_ORIGIN = previousOrigin;
+if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+else process.env.NODE_ENV = previousNodeEnv;
+if (previousPort === undefined) delete process.env.PORT;
+else process.env.PORT = previousPort;
 
 const editorSrc = fs.readFileSync(path.join(__dirname, '../snippet/editor.js'), 'utf8');
 const snippetSrc = fs.readFileSync(path.join(__dirname, '../snippet/ab.js'), 'utf8');
@@ -305,8 +314,9 @@ function findLink(node) {
   assert.strictEqual(draft.document.getElementById('pivit-editor-live'), null);
   assert.ok(draft.document.getElementById('pivit-pick-btn'));
 
+  process.env.APP_ORIGIN = 'https://pivitlab.com';
   const archivedPayload = archivedBody(
-    { protocol: 'https', get: () => 'pivitlab.com' },
+    { protocol: 'http', get: () => 'evil.example' },
     { id: expId, name: 'Checkout step', variantId, variantName: 'Checkout Social proof' },
     expiredEditMessage('Checkout step')
   );
