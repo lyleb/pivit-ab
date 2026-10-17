@@ -405,6 +405,10 @@
     domain_conflict: 'Flagged a domain clash',
     invite_created: 'Created an invite',
     invite_revoked: 'Revoked an invite',
+    account_invite_created: 'Created an agency invite',
+    account_invite_resent: 'Resent an agency invite',
+    account_invite_revoked: 'Revoked an agency invite',
+    account_invite_accepted: 'Accepted an agency invite',
     access_request_invite: 'Created an invite from a request',
     view_as: 'Started a support view',
     view_as_stop: 'Stopped a support view',
@@ -432,6 +436,12 @@
       if (detail.label) return String(detail.label);
       if (detail.email) return String(detail.email);
       if (detail.username) return String(detail.username);
+    }
+    if (entry && String(entry.action || '').indexOf('account_invite_') === 0) {
+      const who = detail.email ? String(detail.email) : '';
+      const role = membershipWord(detail.role);
+      if (who && (role === 'Owner' || role === 'Member')) return `${who}, ${role}`;
+      return who || '';
     }
     if (entry && entry.action === 'role_change') {
       const who = detail.email ? `${detail.email}, ` : '';
@@ -876,6 +886,39 @@
     return null;
   }
 
+  function canOpenTeam(me) {
+    if (!me || me.membership !== 'owner') return false;
+    if (me.view_as && me.view_as.id) return false;
+    return true;
+  }
+
+  function teamDeniedMessage(me) {
+    if (me && me.view_as && me.view_as.id) return 'Stop the support view before you invite someone.';
+    return 'Only an Owner can invite someone to this agency.';
+  }
+
+  function teamRoute(hash) {
+    const text = String(hash || '');
+    if (text === '#team' || text.startsWith('#team?')) return { page: 'team' };
+    return null;
+  }
+
+  function teamFreshMessage(result) {
+    const data = result || {};
+    if (data.email_error) return String(data.email_error);
+    if (data.resent === true) {
+      return "We've emailed a new link. It replaces the previous one. The link is shown once.";
+    }
+    if (data.emailed === true) {
+      return "We've emailed the invite. The link is shown once, in case you also want to copy it.";
+    }
+    return 'The link is shown once. It has not been emailed.';
+  }
+
+  function teamSentLabel(row) {
+    return row && row.last_sent_at ? 'Emailed' : 'Link only';
+  }
+
   function demoPlanHtml() {
     return `<div class="demo-plan" data-demo-plan="1">
       <h2>Demo plan</h2>
@@ -957,5 +1000,10 @@
     canOpenUsers,
     usersDeniedMessage,
     usersRoute,
+    canOpenTeam,
+    teamDeniedMessage,
+    teamRoute,
+    teamFreshMessage,
+    teamSentLabel,
   };
 });

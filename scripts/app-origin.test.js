@@ -60,6 +60,7 @@ const emailFiles = [
   'src/access-requests.js',
   'src/review-request.js',
   'src/conclusion.js',
+  'src/account-invite.js',
 ];
 for (const file of emailFiles) {
   const src = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
