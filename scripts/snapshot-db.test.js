@@ -66,6 +66,8 @@ async function main() {
   process.env.DATABASE_URL = pg.databaseUrl(dbName);
   process.env.NODE_ENV = 'test';
   delete process.env.POSTMARK_SERVER_TOKEN;
+  delete process.env.POSTMARK_STREAM;
+  delete process.env.EMAIL_FROM;
   delete process.env.PIVIT_TENANCY_FAULT;
 
   const db = require('../src/db');
@@ -222,6 +224,10 @@ async function main() {
     const mailed = takeLastLoggedEmail();
     assert.ok(mailed);
     assert.ok(mailed.subject.includes('Contact form - Shorter form'));
+    assert.strictEqual(mailed.tag, 'review-request');
+    assert.ok(mailed.html.includes('Contact form - Shorter form'));
+    assert.ok(mailed.html.includes('>Open pivitlab<'));
+    assert.ok(!mailed.html.includes('Pivitlab'));
     const again = await request(server, 'POST', `/api/client/experiments/${blindId}/review-request`, {});
     assert.strictEqual(again.status, 200);
     const openRows = await db.query(

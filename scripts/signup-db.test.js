@@ -111,6 +111,7 @@ async function main() {
   process.env.ADMIN_API_KEY = 'signup-admin-key-value';
   process.env.SESSION_SECRET = 'signup-session-secret-value-32chars';
   delete process.env.POSTMARK_SERVER_TOKEN;
+  delete process.env.POSTMARK_STREAM;
   delete process.env.EMAIL_FROM;
   delete process.env.EMAIL_REPLY_TO;
   delete process.env.APP_ORIGIN;
@@ -172,10 +173,14 @@ async function main() {
     assert.strictEqual(signup.json.message, LINK_SENT);
     const mailed = takeLastLoggedEmail();
     assert.ok(mailed);
-    assert.strictEqual(mailed.from, 'no-reply@pivitlab.com');
+    assert.strictEqual(mailed.from, '"pivitlab" <no-reply@pivitlab.com>');
     assert.strictEqual(mailed.replyTo, 'info@heclr.com');
     assert.strictEqual(mailed.to, 'ada@example.co.uk');
     assert.strictEqual(mailed.subject, 'Finish creating your pivitlab agency');
+    assert.strictEqual(mailed.tag, 'signup-link');
+    assert.ok(mailed.html.includes('pivitlab'));
+    assert.ok(mailed.html.includes('>Sign in<'));
+    assert.ok(!mailed.html.toLowerCase().includes('list-unsubscribe'));
     assert.ok(!mailed.text.includes('<'));
     const first = linkParts(mailed);
 
@@ -300,7 +305,10 @@ async function main() {
 
     const adminMail = await request(server, 'POST', '/api/auth/email', { email: 'info@heclr.com' }, {});
     assert.strictEqual(adminMail.status, 200);
-    const adminLink = linkParts(takeLastLoggedEmail());
+    const adminMessage = takeLastLoggedEmail();
+    assert.strictEqual(adminMessage.tag, 'login-link');
+    assert.ok(adminMessage.html.includes('>Sign in<'));
+    const adminLink = linkParts(adminMessage);
     assert.strictEqual(takeLastLoggedEmail(), null);
     const second = {};
     const adminIn = await request(server, 'POST', '/api/auth/magic', { token: adminLink.token }, second);

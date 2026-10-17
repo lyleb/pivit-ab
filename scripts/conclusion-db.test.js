@@ -97,6 +97,8 @@ async function main() {
   process.env.DATABASE_URL = pg.databaseUrl(dbName);
   process.env.NODE_ENV = 'test';
   delete process.env.POSTMARK_SERVER_TOKEN;
+  delete process.env.POSTMARK_STREAM;
+  delete process.env.EMAIL_FROM;
   delete process.env.PIVIT_TENANCY_FAULT;
 
   const db = require('../src/db');
@@ -301,8 +303,14 @@ async function main() {
     const emailed = await request(viewer, 'POST', `/api/client/experiments/${mailed.rows[0].id}/approve`, {});
     assert.strictEqual(emailed.status, 200);
     assert.strictEqual(posted.body.To, 'info@heclr.com');
+    assert.strictEqual(posted.body.From, '"pivitlab" <no-reply@pivitlab.com>');
+    assert.strictEqual(posted.body.MessageStream, 'outbound');
+    assert.strictEqual(posted.body.Tag, 'conclusion-approved');
     assert.ok(posted.body.Subject.includes('Conclusion approved'));
     assert.ok(posted.body.TextBody.includes('North Shop'));
+    assert.ok(posted.body.HtmlBody.includes('North Shop'));
+    assert.ok(posted.body.HtmlBody.includes('>Open pivitlab<'));
+    assert.ok(!JSON.stringify(posted.body).toLowerCase().includes('list-unsubscribe'));
     const afterEmail = await request(owner, 'GET', '/api/notices');
     assert.strictEqual(afterEmail.json.notices.length, 0);
 

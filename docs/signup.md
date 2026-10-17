@@ -13,8 +13,9 @@ Set this on the app service:
 | Variable | Required | Value |
 |---|---|---|
 | `POSTMARK_SERVER_TOKEN` | Yes, to send mail | The Postmark server API token. With it unset, the app logs the email and does not send it. |
-| `EMAIL_FROM` | No | From address. Default `no-reply@pivitlab.com`. |
-| `EMAIL_REPLY_TO` | No | Reply-To on every message. Default `info@heclr.com`. pivitlab.com has a null MX, so replies cannot go to the from address. |
+| `EMAIL_FROM` | No | From address. A bare address is sent as `"pivitlab" <that address>`. Default `"pivitlab" <no-reply@pivitlab.com>`. |
+| `EMAIL_REPLY_TO` | No | Reply-To on every message. Default `info@heclr.com`. pivitlab.com can receive mail. Replies still go to this address. |
+| `POSTMARK_STREAM` | No | Postmark message stream. Default `outbound`. |
 | `POSTMARK_WEBHOOK_TOKEN` | No | Only if you turn on the bounce webhook. Postmark must send the same value in the `X-Postmark-Token` header. Leave unset and `POST /api/webhooks/postmark` stays closed. |
 | `TURNSTILE_SITE_KEY` | No | Leave unset. Public site key. Turnstile stays off unless this and `TURNSTILE_SECRET_KEY` are both set. |
 | `TURNSTILE_SECRET_KEY` | No | Leave unset. Secret key. Both keys are required before the widget or the check runs. |
@@ -23,13 +24,13 @@ Set this on the app service:
 
 Do not change `SESSION_SECRET` or `DATABASE_URL`. You do not set the cookie name: production sends `__Host-pivit.sid` on its own. Changing `ADMIN_API_KEY` signs out emergency-password sessions. Magic-link and viewer sessions stay.
 
-Mail is sent with Postmark's HTTPS API (`https://api.postmarkapp.com/email`), not SMTP. Railway Hobby blocks outbound SMTP.
+Mail is sent with Postmark's HTTPS API (`https://api.postmarkapp.com/email`), not SMTP. Railway Hobby blocks outbound SMTP. Each message has a plain-text part and a simple HTML part, with the pivitlab name and a button when there is a link. Postmark gets a tag for the email type (`login-link`, `signup-link`, `agency-invite`, `access-request`, `conclusion-approved`, `review-request`). The message stream is `POSTMARK_STREAM`, or `outbound` when that is unset. These messages do not set List-Unsubscribe.
 
 ## DNS
 
 Postmark DKIM and the Return-Path CNAME for pivitlab.com are already live. No new DNS records are needed for this release.
 
-pivitlab.com still has a null MX, so the domain does not receive mail. Every outgoing message sets Reply-To to `EMAIL_REPLY_TO` (default `info@heclr.com`).
+pivitlab.com can receive mail. Every outgoing message still sets Reply-To to `EMAIL_REPLY_TO` (default `info@heclr.com`), so replies land in that inbox.
 
 ## How an agency gets in
 

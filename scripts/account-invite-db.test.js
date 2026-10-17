@@ -79,6 +79,8 @@ async function main() {
   process.env.SESSION_SECRET = 'agency-invite-session-secret-32chars';
   process.env.APP_ORIGIN = 'https://pivitlab.test';
   delete process.env.POSTMARK_SERVER_TOKEN;
+  delete process.env.POSTMARK_STREAM;
+  delete process.env.EMAIL_FROM;
   delete process.env.PIVIT_TENANCY_FAULT;
 
   const db = require('../src/db');
@@ -263,6 +265,10 @@ async function main() {
     assert.ok(mailed.text.includes(emailed.json.link));
     assert.ok(mailed.text.includes('as an Owner'));
     assert.ok(mailed.text.includes('does not create a new agency'));
+    assert.strictEqual(mailed.tag, 'agency-invite');
+    assert.ok(mailed.html.includes('>Join this agency<'));
+    assert.ok(mailed.html.includes('pivitlab'));
+    assert.ok(!mailed.html.includes('Pivitlab'));
     const beaJar = {};
     const beaJoin = await request(server, 'POST', '/api/auth/join', { token: tokenFrom(emailed.json.link) }, beaJar);
     assert.strictEqual(beaJoin.status, 200, beaJoin.text);

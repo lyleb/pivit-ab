@@ -122,6 +122,9 @@ async function deliverAccessAlert(row) {
       to: notifyAddress(),
       subject: 'New pivitlab access request',
       text: alertText(row),
+      tag: 'access-request',
+      buttonLabel: 'Open the dashboard',
+      href: appUrl('/index.html'),
     });
     sent = !!(mailed && mailed.sent);
     if (!sent && mailed && mailed.error) console.error('[access] notification email was not sent');
