@@ -72,7 +72,7 @@
     <label for="email">Work email</label>
     <input id="email" type="email" autocomplete="email" placeholder="you@company.com" required>
     <button id="email-btn" type="submit">Email me a sign-in link</button>
-    <a class="invite-action" href="/signup.html">Got an invite code from pivitlab?<br>Create your account</a>
+    <a class="invite-action" href="/signup.html">Got an invite code from pivitlab?<br>Create your agency</a>
   </form>
 
   <form id="client-form">
@@ -88,7 +88,7 @@
 
   <div id="turnstile-slot"></div>
   <p id="login-error" class="error-msg"></p>
-  <p class="journey-link" id="show-client"><a href="/login.html?role=client">Viewing results for a company? Client login →</a></p>
+  <p class="journey-link" id="show-client"><a href="/login.html?role=client">Viewing results for a company? Viewer login →</a></p>
   <p class="journey-link" id="show-email" hidden><a href="/login.html">Email sign-in</a></p>
 </div>
 
@@ -100,7 +100,8 @@ function applyMode(next, updateUrl) {
   mode = next === 'client' ? 'client' : 'email';
   document.getElementById('email-form').style.display = mode === 'email' ? 'block' : 'none';
   document.getElementById('client-form').style.display = mode === 'client' ? 'block' : 'none';
-  document.getElementById('mode-label').textContent = mode === 'client' ? 'Client' : 'Sign in';
+  document.getElementById('mode-label').textContent = mode === 'client' ? 'Viewer' : 'Sign in';
+  document.title = mode === 'client' ? 'pivitlab — Viewer' : 'pivitlab — Log in';
   document.getElementById('show-email').hidden = mode === 'email';
   document.getElementById('show-client').hidden = mode === 'client';
   document.getElementById('login-logo').style.display = 'block';

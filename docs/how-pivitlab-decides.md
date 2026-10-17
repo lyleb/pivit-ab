@@ -1,6 +1,6 @@
 # How pivitlab decides
 
-A test is read once, when the plan is reached. Until then the owner sees a health check, progress, and the traffic split. Conversion rates, uplift, a winner, and probability best stay hidden. That is what keeps a false win near the 5% the plan was built for.
+A test is read once, when the plan is reached. Until then the Owner sees a health check, progress, and the traffic split. Conversion rates, uplift, a winner, and probability best stay hidden. That is what keeps a false win near the 5% the plan was built for. The person running the test belongs to an agency, as an Owner or a Member. A platform admin can look at another agency. A viewer only sees the result that is meant for them.
 
 Probability best with a flat prior, watched continuously, is a different question. Spotify’s Confidence library found that setup calls a winner about 30% of the time when nothing has changed. A 7 October 2026 fake-traffic run on pivitlab showed 86% “best” on 17 conversions. The verdict below is not that live score.
 
@@ -36,9 +36,9 @@ While a planned test is still short of that moment:
 
 - Health (only while it is running), progress against the visitor target, days against the minimum, and the traffic split
 - No conversion rate, no uplift, no winner, no trend, and no probability best
-- The client portal and the CSV follow the same rule. The CSV in that period is progress only
+- The viewer page and the CSV follow the same rule. The CSV in that period is progress only
 
-Reveal early is an owner-only hatch. It warns that looking early raises the chance of a false win, writes a row to the test-traffic audit (`action` `reveal`), and marks the result peeked. The mark stays. The numbers are then a look, not a verdict. The client portal shows the same numbers and the peeked note. It does not offer the hatch.
+Reveal early is an owner-only hatch. It warns that looking early raises the chance of a false win, writes a row to the test-traffic audit (`action` `reveal`), and marks the result peeked. The mark stays. The numbers are then a look, not a verdict. The viewer page shows the same numbers and the peeked note. It does not offer the hatch.
 
 When the plan is reached, each challenger against Control is one of:
 
@@ -52,9 +52,9 @@ If the traffic split is broken (the health sample-ratio check), the verdict says
 
 A test with no stored plan keeps its numbers. The prompt to set a plan is a nudge. Nothing already stored in `events` is rewritten by saving a plan, revealing early, or reading a verdict.
 
-## What the client sees while the test is blind
+## What the viewer sees while the test is blind
 
-The client portal does not calculate a result when the page loads. A job stores one snapshot per test per London day, at 06:00 Europe/London. Opening the page reads that snapshot. A second run the same day does not write another row.
+The viewer page does not calculate a result when the page loads. A job stores one snapshot per test per London day, at 06:00 Europe/London. Opening the page reads that snapshot. A second run the same day does not write another row.
 
 The headline is one of a fixed list:
 
@@ -72,12 +72,12 @@ Otherwise the job draws about 2,000 futures from the current Beta posteriors, si
 
 - 30% or more: no flag
 - 10% to 30%: an amber note on the owner dashboard only, “may end inconclusive”
-- under 10%, and the projected end is already past the planned date: the client headline can become “Unlikely to finish in time”
-- under 10%, but the visitors will still arrive on time: owner only. The client is not told the test is unlikely to finish
+- under 10%, and the projected end is already past the planned date: the viewer headline can become “Unlikely to finish in time”
+- under 10%, but the visitors will still arrive on time: owner only. The viewer is not told the test is unlikely to finish
 
-The client sees “Unlikely to finish in time” only after that band has been stored on two days in a row. The owner can see the amber note on the first day. An identical A/A (no true difference, traffic on time) lands in the low band, near the usual false-call rate, and the client headline stays “Collecting data, on track”.
+The viewer sees “Unlikely to finish in time” only after that band has been stored on two days in a row. The owner can see the amber note on the first day. An identical A/A (no true difference, traffic on time) lands in the low band, near the usual false-call rate, and the viewer headline stays “Collecting data, on track”.
 
-A client can request a review. That writes an audit row and tells the owner. It does not reveal a result and it does not stop the test. The owner decides, and that decision is logged separately.
+A viewer can request a review. That writes an audit row and tells the Owner. It does not reveal a result and it does not stop the test. The Owner decides, and that decision is logged separately.
 
 ## Simulations
 

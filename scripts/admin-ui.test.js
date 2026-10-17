@@ -135,8 +135,19 @@ assert.strictEqual(ui.showSupportBar({ superadmin: false, viewing: false, otherA
 assert.strictEqual(ui.showSupportBar({ superadmin: true, viewing: true, otherAccounts: 0 }), true);
 assert.strictEqual(
   ui.supportViewCopy(false),
-  'Support view: see another customer\'s account read-only. Every view is logged.'
+  'Support view: see another agency read-only. Every view is logged.'
 );
+assert.ok(ui.supportViewCopy(true, '').includes('this agency'));
+assert.strictEqual(ui.roleBadgeLabel({ superadmin: true }), 'Platform admin');
+assert.strictEqual(ui.roleBadgeLabel({ superadmin: true, membership: 'member' }), 'Platform admin');
+assert.strictEqual(ui.roleBadgeLabel({ membership: 'owner' }), 'Owner');
+assert.strictEqual(ui.roleBadgeLabel({ membership: 'member' }), 'Member');
+assert.strictEqual(ui.roleBadgeLabel({ viewer: true }), 'Viewer');
+assert.strictEqual(ui.auditActorLabel('superadmin'), 'Platform admin');
+assert.strictEqual(ui.auditActorLabel('client'), 'Viewer');
+assert.strictEqual(ui.auditActorLabel('ada@example.co.uk'), 'ada@example.co.uk');
+assert.strictEqual(ui.membershipWord('owner'), 'Owner');
+assert.strictEqual(ui.membershipWord('member'), 'Member');
 assert.ok(ui.supportViewCopy(true, 'Acme').includes('Acme'));
 assert.ok(ui.supportViewCopy(true, 'Acme').includes('read-only'));
 assert.strictEqual(ui.showOwnerPasswordBanner(true, false), true);

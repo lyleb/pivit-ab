@@ -364,7 +364,7 @@ async function main() {
     assert.strictEqual(demoted.json.changed, true);
     const blocked = await request(ownerServer, 'PATCH', `/api/account/members/${alpha.userId}`, { role: 'member' });
     assert.strictEqual(blocked.status, 400);
-    assert.ok(blocked.json.error.includes('at least one owner'));
+    assert.ok(blocked.json.error.includes('at least one Owner'));
     const alphaStill = await db.query(
       `SELECT role FROM memberships WHERE account_id = $1 AND user_id = $2`,
       [alpha.id, alpha.userId]

@@ -152,7 +152,7 @@ async function main() {
   console.log(
     `Restore check passed: ${result.source.experiments} experiments, ` +
     `${result.source.variants} variants, ${result.source.events} events, ` +
-    `${result.source.clients} client logins.`
+    `${result.source.clients} viewer logins.`
   );
 }
 

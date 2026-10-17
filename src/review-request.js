@@ -124,7 +124,7 @@ async function requestReview({ experiment, clientId, clientName, accountId, ip }
       const notice = await notifyOwners({
         emails,
         experiment,
-        clientName: clientName || 'A client',
+        clientName: clientName || 'A viewer',
       });
       emailSent = notice.sent > 0;
       if (!emailSent) emailError = notice.lastError || 'email was not sent';

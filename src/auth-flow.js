@@ -54,7 +54,7 @@ function requestIp(req) {
 
 function signInText({ link, code, signup }) {
   const line = signup
-    ? 'Use this link to create your pivitlab account and sign in. It works once and expires in 15 minutes.'
+    ? 'Use this link to create your pivitlab agency and sign in. It works once and expires in 15 minutes.'
     : 'Use this link to sign in to pivitlab. It works once and expires in 15 minutes.';
   return [
     'Hello,',
@@ -131,7 +131,7 @@ async function issueToken(client, { email, purpose, website, inviteId, termsVers
 
 async function sendLink({ email, token, code, signup }) {
   const link = appUrl(`/sign-in.html?token=${encodeURIComponent(token)}`);
-  const subject = signup ? 'Finish creating your pivitlab account' : 'Your pivitlab sign-in link';
+  const subject = signup ? 'Finish creating your pivitlab agency' : 'Your pivitlab sign-in link';
   return sendEmail({
     to: email,
     subject,

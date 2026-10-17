@@ -29,7 +29,7 @@ assert.strictEqual(customerHost('https://WWW.Example.co.uk/pricing/'), normalise
 
 assert.strictEqual(
   sameAccountDomainMessage('example.co.uk'),
-  'This account already has a site for example.co.uk.'
+  'This agency already has a site for example.co.uk.'
 );
 assert.strictEqual(
   DOMAIN_IN_USE_WARNING,
