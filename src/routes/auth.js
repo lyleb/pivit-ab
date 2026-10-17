@@ -17,6 +17,7 @@ const {
   consumeLink,
   consumeCode,
 } = require('../auth-flow');
+const { previewAccountInvite, acceptAccountInvite } = require('../account-invite');
 const { SIGN_IN_CLOSED, personClosed, refuseClosedSession } = require('../person-state');
 
 const router = express.Router();
@@ -266,6 +267,32 @@ async function beginUserSession(req, result) {
   });
 }
 
+router.get('/join', async (req, res) => {
+  try {
+    const result = await previewAccountInvite(req.query && req.query.token, req);
+    if (sendFlowResult(res, result)) return;
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      agency_name: result.agencyName,
+      role: result.role,
+      email: result.email,
+    });
+  } catch (err) {
+    res.status(500).json(publicServerError(err));
+  }
+});
+
+router.post('/join', async (req, res) => {
+  try {
+    const result = await acceptAccountInvite(req.body && req.body.token, req);
+    if (sendFlowResult(res, result)) return;
+    await beginUserSession(req, result);
+    res.json({ role: 'owner' });
+  } catch (err) {
+    res.status(500).json(publicServerError(err));
+  }
+});
+
 router.post('/magic', async (req, res) => {
   try {
     const result = await consumeLink(req.body && req.body.token, req);
@@ -412,8 +439,18 @@ router.get('/me', async (req, res) => {
         body.view_as = account.viewAs ? { id: account.id, name: account.name } : null;
         body.snippet_site_key = await snippetSiteKey(account.id);
         if (account.userId) {
-          const user = await db.query(`SELECT email FROM users WHERE id = $1`, [account.userId]);
-          if (user.rows[0]) body.email = user.rows[0].email;
+          const user = await db.query(
+            `SELECT u.email, m.role
+             FROM users u
+             LEFT JOIN memberships m
+               ON m.user_id = u.id AND m.account_id = $2 AND m.removed_at IS NULL
+             WHERE u.id = $1`,
+            [account.userId, account.id]
+          );
+          if (user.rows[0]) {
+            body.email = user.rows[0].email;
+            if (user.rows[0].role) body.membership = user.rows[0].role;
+          }
         }
       }
     } catch (err) {

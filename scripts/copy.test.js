@@ -164,6 +164,7 @@ const uiFiles = [
   'public/check-email.html',
   'public/client.html',
   'public/sign-in.html',
+  'public/join.html',
   'src/pages/landing.html',
 ];
 for (const file of uiFiles) {

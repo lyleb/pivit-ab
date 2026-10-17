@@ -22,6 +22,7 @@ const { applyDemoTest } = require('./demo-test');
 const { applyAuditBackfill } = require('./audit-backfill');
 const { applyActiveSite } = require('./active-site');
 const { applyPeopleState } = require('./people-state');
+const { applyAccountInvites } = require('./account-invites');
 
 const LOCK_KEY = 814021;
 
@@ -66,6 +67,9 @@ const VERSIONS = [
   // Suspended, archived and deleted marks, and removed memberships.
   // Nullable, so existing people stay active. Stays out of schema.sql.
   { version: '016', name: 'people-state', run: applyPeopleState },
+  // Invites that add someone to an existing agency. The token is hashed.
+  // Stays out of schema.sql.
+  { version: '017', name: 'account-invites', run: applyAccountInvites },
 ];
 
 async function ensureMigrationsTable(queryable) {

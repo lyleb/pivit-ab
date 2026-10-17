@@ -715,6 +715,12 @@ async function deleteUser({ actorUserId, actorEmail, userId, body, ip }) {
 
     const label = deletedLabel(target.id);
     const email = target.email;
+    const { revokePendingForEmail } = require('./account-invite');
+    await revokePendingForEmail(client, email, {
+      userId: actorId,
+      actorLabel: actorEmail,
+      ip,
+    });
     const memberships = await client.query(
       `SELECT account_id FROM memberships WHERE user_id = $1 ORDER BY account_id`,
       [target.id]

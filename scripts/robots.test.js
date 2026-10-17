@@ -83,6 +83,7 @@ const pagesOnDisk = {
   'signup.html': 'https://pivitlab.com/signup.html',
   'check-email.html': 'https://pivitlab.com/check-email.html',
   'sign-in.html': 'https://pivitlab.com/sign-in.html',
+  'join.html': 'https://pivitlab.com/join.html',
   'legal.html': 'https://pivitlab.com/legal.html',
   'privacy.html': 'https://pivitlab.com/privacy.html',
 };
@@ -195,6 +196,7 @@ function get(port, urlPath, headers) {
       '/signup.html': 'http://127.0.0.1:3000/signup.html',
       '/check-email.html': 'http://127.0.0.1:3000/check-email.html',
       '/sign-in.html': 'http://127.0.0.1:3000/sign-in.html',
+      '/join.html': 'http://127.0.0.1:3000/join.html',
       '/legal.html': 'http://127.0.0.1:3000/legal.html',
       '/privacy.html': 'http://127.0.0.1:3000/privacy.html',
     };

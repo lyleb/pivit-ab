@@ -504,8 +504,60 @@ async function main() {
       assertClean(view, `${who} view as`);
     }
 
+    const agencyInvite = await request(serverA, 'POST', '/api/account/members/invites', {
+      email: 'invited@alpha.example',
+      role: 'member',
+      send: false,
+    });
+    assert.strictEqual(agencyInvite.status, 201, agencyInvite.text);
+    const agencyInviteId = agencyInvite.json.invite.id;
+    assert.ok(String(agencyInvite.json.link).includes('/join.html?token='));
+    assert.strictEqual(agencyInvite.json.invite.email, 'invited@alpha.example');
+    assert.ok(!agencyInvite.text.includes('token_hash'));
+
     await denyOwner(serverB, 'owner B');
     await denyOwner(serverMember, 'member B');
+
+    const listB = await request(serverB, 'GET', '/api/account/members/invites');
+    assert.strictEqual(listB.status, 200, listB.text);
+    assert.ok(!(listB.json.invites || []).some((row) => row.email === 'invited@alpha.example'));
+    assert.ok(!listB.text.includes('invited@alpha.example'));
+    assert.ok(!listB.text.includes(agencyInviteId));
+    const revokeB = await request(serverB, 'POST', `/api/account/members/invites/${agencyInviteId}/revoke`, {});
+    assert.strictEqual(revokeB.status, 404, revokeB.text);
+    const resendB = await request(serverB, 'POST', `/api/account/members/invites/${agencyInviteId}/resend`, {});
+    assert.strictEqual(resendB.status, 404, resendB.text);
+    const memberList = await request(serverMember, 'GET', '/api/account/members/invites');
+    assert.strictEqual(memberList.status, 404, memberList.text);
+    const memberCreate = await request(serverMember, 'POST', '/api/account/members/invites', {
+      email: 'sneak@beta.example',
+      role: 'owner',
+      send: true,
+    });
+    assert.strictEqual(memberCreate.status, 404, memberCreate.text);
+    const clientInvite = await request(serverClientB, 'GET', '/api/account/members/invites');
+    assert.strictEqual(clientInvite.status, 401, clientInvite.text);
+    const stillInvite = await db.query(
+      `SELECT revoked_at, used_at, email FROM account_invites WHERE id = $1`,
+      [agencyInviteId]
+    );
+    assert.strictEqual(stillInvite.rows[0].revoked_at, null);
+    assert.strictEqual(stillInvite.rows[0].used_at, null);
+    assert.strictEqual(stillInvite.rows[0].email, 'invited@alpha.example');
+    const sneak = await db.query(`SELECT id FROM users WHERE email = 'sneak@beta.example'`);
+    assert.strictEqual(sneak.rows.length, 0);
+    const ownInvite = await request(serverB, 'POST', '/api/account/members/invites', {
+      email: 'colleague@beta.example',
+      role: 'member',
+      send: false,
+    });
+    assert.strictEqual(ownInvite.status, 201, ownInvite.text);
+    const ownInvites = await request(serverB, 'GET', '/api/account/members/invites');
+    assert.ok(ownInvites.json.invites.some((row) => row.email === 'colleague@beta.example'));
+    assert.ok(!ownInvites.text.includes('invited@alpha.example'));
+    const alphaList = await request(serverA, 'GET', '/api/account/members/invites');
+    assert.ok(alphaList.json.invites.some((row) => row.email === 'invited@alpha.example'));
+    assert.ok(!alphaList.text.includes('colleague@beta.example'));
     const alphaRole = await db.query(
       `SELECT role FROM memberships WHERE account_id = $1 AND user_id = $2`,
       [alpha.id, alpha.userId]
@@ -570,6 +622,8 @@ async function main() {
       ['GET', '/api/review-requests'],
       ['GET', '/api/setup'],
       ['GET', '/api/goals/popular'],
+      ['GET', '/api/account/members/invites'],
+      ['POST', '/api/account/members/invites'],
     ];
     for (const [method, urlPath] of signedOut) {
       const res = await request(publicServer, method, urlPath);

@@ -37,6 +37,7 @@ const CANONICAL_PAGES = {
   '/signup.html': { file: 'signup.html', pathname: '/signup.html' },
   '/check-email.html': { file: 'check-email.html', pathname: '/check-email.html' },
   '/sign-in.html': { file: 'sign-in.html', pathname: '/sign-in.html' },
+  '/join.html': { file: 'join.html', pathname: '/join.html' },
   '/legal.html': { file: 'legal.html', pathname: '/legal.html' },
   '/privacy.html': { file: 'privacy.html', pathname: '/privacy.html' },
 };

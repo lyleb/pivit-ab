@@ -333,6 +333,7 @@
       <button type="button" class="nav-item" id="nav-page-preview" data-go="#preview">Preview &amp; manage</button>
       <button type="button" class="nav-item" id="nav-page-status" data-go="#status">Start &amp; pause</button>
       <button type="button" class="nav-item" id="nav-page-audit" data-go="#audit">Audit log</button>
+      <button type="button" class="nav-item" id="nav-page-team" data-go="#team" hidden>Team</button>
       <button type="button" class="nav-item" id="nav-page-users" data-go="#users" hidden>Users</button>
     </nav>
     <div class="sidebar-foot">
@@ -716,6 +717,49 @@
       </section>
     </div>
 
+    <div id="page-team" class="page">
+      <div class="page-head">
+        <div>
+          <h1>Team</h1>
+          <p class="hint" style="margin:4px 0 0;">Invite a Member or another Owner to this agency. The link works once, lasts 7 days, and can be revoked. Joining adds them to this agency. It does not create a new agency.</p>
+        </div>
+      </div>
+      <p id="team-denied" class="hint" hidden></p>
+      <section class="card" id="team-card" hidden>
+        <h2>Invite someone</h2>
+        <p class="hint" style="margin-top:0;">Only an Owner can invite. Email the link, or create a link to copy. pivitlab shows the link once.</p>
+        <label for="team-email">Work email</label>
+        <input id="team-email" type="email" maxlength="254" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="colleague@company.com">
+        <label for="team-role">Role</label>
+        <select id="team-role">
+          <option value="member">Member</option>
+          <option value="owner">Owner</option>
+        </select>
+        <div class="inline-actions" style="margin-top:10px;">
+          <button type="button" id="team-email-invite">Email the invite</button>
+          <button type="button" class="btn-ghost" id="team-link-invite">Create a link</button>
+        </div>
+        <p id="team-error" class="error-msg"></p>
+        <div id="team-fresh" hidden>
+          <p class="ok-msg" id="team-fresh-text"></p>
+          <label for="team-link">Invite link</label>
+          <input id="team-link" class="mono" readonly spellcheck="false">
+          <button type="button" class="btn-ghost" id="team-copy" style="margin-top:10px;">Copy link</button>
+        </div>
+        <h2 style="margin-top:28px">Pending invites</h2>
+        <p class="hint" style="margin-top:0;">Resend emails a new link and replaces the previous one.</p>
+        <p id="team-empty" class="hint">No pending invites.</p>
+        <div class="table-scroll" id="team-table-wrap" hidden>
+          <table>
+            <thead>
+              <tr><th>Email</th><th>Role</th><th>Expires</th><th>Sent</th><th></th></tr>
+            </thead>
+            <tbody id="team-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
     <div id="page-users" class="page">
       <div class="page-head">
         <div>
@@ -1007,6 +1051,8 @@ function applySessionChrome() {
   }
   const usersNav = document.getElementById('nav-page-users');
   if (usersNav) usersNav.hidden = !UI.canOpenUsers(me);
+  const teamNav = document.getElementById('nav-page-team');
+  if (teamNav) teamNav.hidden = !UI.canOpenTeam(me);
   const emergency = document.getElementById('emergency-banner');
   if (emergency) {
     const text = document.getElementById('emergency-banner-text');
@@ -1102,6 +1148,82 @@ async function loadAccessRequests() {
       <td>${action}</td>
     </tr>`;
   }).join('');
+}
+
+function showTeamLink(result) {
+  const fresh = document.getElementById('team-fresh');
+  const text = document.getElementById('team-fresh-text');
+  const input = document.getElementById('team-link');
+  if (!fresh || !result || !result.link) return;
+  if (text) text.textContent = UI.teamFreshMessage(result);
+  if (input) input.value = result.link;
+  fresh.hidden = false;
+}
+
+async function loadTeamInvites() {
+  const body = document.getElementById('team-body');
+  const empty = document.getElementById('team-empty');
+  const wrap = document.getElementById('team-table-wrap');
+  if (!body) return;
+  const result = await callApi('/api/account/members/invites');
+  if (!result.ok) {
+    const errorEl = document.getElementById('team-error');
+    if (errorEl && !errorEl.textContent) errorEl.textContent = apiErrorText(result);
+    return;
+  }
+  const rows = result.data.invites || [];
+  if (empty) empty.hidden = rows.length > 0;
+  if (wrap) wrap.hidden = rows.length === 0;
+  body.innerHTML = rows.map((invite) => {
+    const when = new Date(invite.expires_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    const id = UI.escapeHtml(invite.id);
+    return `<tr>
+      <td>${UI.escapeHtml(invite.email)}</td>
+      <td>${UI.escapeHtml(UI.membershipWord(invite.role))}</td>
+      <td>${UI.escapeHtml(when)}</td>
+      <td>${UI.escapeHtml(UI.teamSentLabel(invite))}</td>
+      <td>
+        <button type="button" class="btn-ghost" data-invite-resend="${id}">Resend</button>
+        <button type="button" class="btn-ghost" data-invite-revoke="${id}">Revoke</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadTeam() {
+  const denied = document.getElementById('team-denied');
+  const card = document.getElementById('team-card');
+  const allowed = UI.canOpenTeam(sessionMe);
+  if (denied) {
+    denied.hidden = allowed;
+    denied.textContent = allowed ? '' : UI.teamDeniedMessage(sessionMe);
+  }
+  if (card) card.hidden = !allowed;
+  if (!allowed) return;
+  await loadTeamInvites();
+}
+
+async function createTeamInvite(send) {
+  const errorEl = document.getElementById('team-error');
+  const fresh = document.getElementById('team-fresh');
+  if (errorEl) errorEl.textContent = '';
+  if (fresh) fresh.hidden = true;
+  const result = await callApi('/api/account/members/invites', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({
+      email: document.getElementById('team-email').value,
+      role: document.getElementById('team-role').value,
+      send: send === true,
+    }),
+  });
+  if (!result.ok) {
+    if (errorEl) errorEl.textContent = apiErrorText(result);
+    return;
+  }
+  document.getElementById('team-email').value = '';
+  showTeamLink(result.data);
+  await loadTeamInvites();
 }
 
 async function loadInvites() {
@@ -1413,13 +1535,13 @@ function go(hash) {
 }
 
 function showPage(id) {
-  ['page-home', 'page-detail', 'page-create', 'page-preview', 'page-status', 'page-audit', 'page-users'].forEach((pageId) => {
+  ['page-home', 'page-detail', 'page-create', 'page-preview', 'page-status', 'page-audit', 'page-team', 'page-users'].forEach((pageId) => {
     document.getElementById(pageId).classList.toggle('active', pageId === id);
   });
 }
 
 function setNav(activeId) {
-  ['page-home', 'page-create', 'page-preview', 'page-status', 'page-audit', 'page-users'].forEach((id) => {
+  ['page-home', 'page-create', 'page-preview', 'page-status', 'page-audit', 'page-team', 'page-users'].forEach((id) => {
     const el = document.getElementById('nav-' + id);
     if (el) el.classList.toggle('active', id === activeId);
   });
@@ -1446,6 +1568,13 @@ async function applyRoute() {
     setNav('page-audit');
     setTitle('pivitlab — Audit log');
     await loadAudit(audit, token);
+    return;
+  }
+  if (UI.teamRoute(hash)) {
+    showPage('page-team');
+    setNav('page-team');
+    setTitle('pivitlab — Team');
+    await loadTeam(token);
     return;
   }
   if (UI.usersRoute(hash)) {
@@ -5390,6 +5519,35 @@ document.getElementById('sites-list').addEventListener('submit', async (event) =
     const freshForm = document.querySelector(`[data-site-edit="${siteId}"]`);
     if (freshForm) freshForm.hidden = false;
   }
+});
+
+document.getElementById('team-email-invite').addEventListener('click', () => createTeamInvite(true));
+document.getElementById('team-link-invite').addEventListener('click', () => createTeamInvite(false));
+document.getElementById('team-copy').addEventListener('click', async () => {
+  const input = document.getElementById('team-link');
+  if (!input || !input.value) return;
+  input.focus();
+  input.select();
+  try {
+    await navigator.clipboard.writeText(input.value);
+  } catch (err) { /* the selected link can still be copied */ }
+});
+document.getElementById('team-body').addEventListener('click', async (event) => {
+  const resend = event.target.closest('[data-invite-resend]');
+  const revoke = event.target.closest('[data-invite-revoke]');
+  const button = resend || revoke;
+  if (!button) return;
+  const errorEl = document.getElementById('team-error');
+  if (errorEl) errorEl.textContent = '';
+  const id = button.getAttribute(resend ? 'data-invite-resend' : 'data-invite-revoke');
+  const path = resend ? `/api/account/members/invites/${id}/resend` : `/api/account/members/invites/${id}/revoke`;
+  const result = await callApi(path, { method: 'POST' });
+  if (!result.ok) {
+    if (errorEl) errorEl.textContent = apiErrorText(result);
+    return;
+  }
+  if (resend) showTeamLink(result.data);
+  await loadTeamInvites();
 });
 
 document.getElementById('invite-create').addEventListener('click', async () => {
