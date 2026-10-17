@@ -248,6 +248,27 @@
   .audit-filters label { margin-top: 0; }
   .audit-filter-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 16px; }
   #audit-table td { vertical-align: top; }
+  .users-filters {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.5fr) repeat(3, minmax(0, 1fr));
+    gap: 12px 14px;
+    align-items: end;
+    margin-bottom: 8px;
+  }
+  .users-filters label { margin-top: 0; }
+  .users-toolbar {
+    display: flex; justify-content: space-between; gap: 12px; align-items: center;
+    flex-wrap: wrap; margin: 4px 0 14px;
+  }
+  .users-toolbar .test-toggle { margin: 0; }
+  .users-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .users-actions button { margin: 0; }
+  .users-actions button:disabled,
+  .users-actions button:disabled:hover { background: #3a3e50; color: #9aa0b4; }
+  .users-guard { margin: 6px 0 0; max-width: 32em; }
+  .users-identity .hint { margin: 2px 0 0; }
+  .users-status { display: flex; flex-wrap: wrap; gap: 4px; }
+  #users-table td { vertical-align: top; }
   @media (max-width: 860px) {
     .app-shell { flex-direction: column; }
     .sidebar {
@@ -268,7 +289,9 @@
     }
     .sidebar-nav::-webkit-scrollbar { display: none; }
     .sidebar-nav .nav-item { width: auto; flex: 0 0 auto; min-height: 40px; white-space: nowrap; }
-    .audit-filters { grid-template-columns: 1fr; }
+    .audit-filters, .users-filters { grid-template-columns: 1fr; }
+    .users-actions { width: 100%; }
+    .users-actions button { min-height: 44px; flex: 1 1 calc(50% - 6px); }
     .main-area { padding: 20px 16px 64px; }
     .grid-2, .detail-top, .page-head { grid-template-columns: 1fr; display: flex; flex-direction: column; }
     .goal-row { grid-template-columns: 1fr; }
@@ -307,6 +330,7 @@
       <button type="button" class="nav-item" id="nav-page-preview" data-go="#preview">Preview &amp; manage</button>
       <button type="button" class="nav-item" id="nav-page-status" data-go="#status">Start &amp; pause</button>
       <button type="button" class="nav-item" id="nav-page-audit" data-go="#audit">Audit log</button>
+      <button type="button" class="nav-item" id="nav-page-users" data-go="#users" hidden>Users</button>
     </nav>
     <div class="sidebar-foot">
       <button type="button" class="nav-item" id="logout-all">Sign out everywhere</button>
@@ -688,6 +712,88 @@
         </div>
       </section>
     </div>
+
+    <div id="page-users" class="page">
+      <div class="page-head">
+        <div>
+          <h1>Users</h1>
+          <p class="hint" style="margin:4px 0 0;">Everyone in pivitlab, across every agency. Archived people stay hidden until you show them. Nothing here deletes a person.</p>
+        </div>
+      </div>
+      <p id="users-denied" class="hint" hidden></p>
+      <section class="card" id="admin-users">
+        <form id="users-filters" class="users-filters">
+          <div>
+            <label for="users-search">Search</label>
+            <input id="users-search" type="search" placeholder="Name, email or username" autocomplete="off" spellcheck="false" autocapitalize="off">
+          </div>
+          <div>
+            <label for="users-type">Type</label>
+            <select id="users-type">
+              <option value="">All types</option>
+              <option value="platform_admin">Platform admin</option>
+              <option value="owner">Owner</option>
+              <option value="member">Member</option>
+              <option value="viewer">Viewer</option>
+            </select>
+          </div>
+          <div>
+            <label for="users-status">Status</label>
+            <select id="users-status">
+              <option value="">All statuses</option>
+              <option value="active">Active</option>
+              <option value="suspended">Suspended</option>
+              <option value="archived">Archived</option>
+            </select>
+          </div>
+          <div>
+            <label for="users-agency">Agency</label>
+            <select id="users-agency">
+              <option value="">All agencies</option>
+            </select>
+          </div>
+        </form>
+        <div class="users-toolbar">
+          <label class="test-toggle" for="users-show-archived">
+            <input type="checkbox" id="users-show-archived">
+            Show archived
+          </label>
+          <p id="users-count" class="hint" style="margin:0;"></p>
+        </div>
+        <p id="users-msg" class="hint"></p>
+        <table id="users-table" class="table-cards">
+          <thead>
+            <tr>
+              <th>Person</th>
+              <th>Type</th>
+              <th>Agency</th>
+              <th>Status</th>
+              <th>Last sign-in</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="users-body"></tbody>
+        </table>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div id="users-confirm" class="modal-backdrop">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="users-confirm-title">
+    <div class="modal-head">
+      <h2 id="users-confirm-title">Suspend sign-in?</h2>
+      <button type="button" class="modal-close" id="users-confirm-close" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p id="users-confirm-body" style="margin-top:0;"></p>
+      <p id="users-confirm-error" class="error-msg" hidden></p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn-ghost" id="users-confirm-cancel">Cancel</button>
+      <button type="button" id="users-confirm-go">Suspend</button>
+    </div>
   </div>
 </div>
 
@@ -892,6 +998,8 @@ function applySessionChrome() {
       membership: me.membership,
     });
   }
+  const usersNav = document.getElementById('nav-page-users');
+  if (usersNav) usersNav.hidden = !UI.canOpenUsers(me);
   const emergency = document.getElementById('emergency-banner');
   if (emergency) {
     const text = document.getElementById('emergency-banner-text');
@@ -1298,13 +1406,13 @@ function go(hash) {
 }
 
 function showPage(id) {
-  ['page-home', 'page-detail', 'page-create', 'page-preview', 'page-status', 'page-audit'].forEach((pageId) => {
+  ['page-home', 'page-detail', 'page-create', 'page-preview', 'page-status', 'page-audit', 'page-users'].forEach((pageId) => {
     document.getElementById(pageId).classList.toggle('active', pageId === id);
   });
 }
 
 function setNav(activeId) {
-  ['page-home', 'page-create', 'page-preview', 'page-status', 'page-audit'].forEach((id) => {
+  ['page-home', 'page-create', 'page-preview', 'page-status', 'page-audit', 'page-users'].forEach((id) => {
     const el = document.getElementById('nav-' + id);
     if (el) el.classList.toggle('active', id === activeId);
   });
@@ -1331,6 +1439,13 @@ async function applyRoute() {
     setNav('page-audit');
     setTitle('pivitlab — Audit log');
     await loadAudit(audit, token);
+    return;
+  }
+  if (UI.usersRoute(hash)) {
+    showPage('page-users');
+    setNav('page-users');
+    setTitle('pivitlab — Users');
+    await loadUsers(token);
     return;
   }
   const pages = { '#home': 'page-home', '#create': 'page-create', '#preview': 'page-preview', '#status': 'page-status' };
@@ -1374,9 +1489,10 @@ function syncModalScrollLock() {
   const clientsOpen = document.getElementById('clients-modal').classList.contains('active');
   const testOpen = document.getElementById('test-traffic-modal').classList.contains('active');
   const revealOpen = document.getElementById('reveal-modal').classList.contains('active');
+  const usersOpen = document.getElementById('users-confirm').classList.contains('active');
   const pop = document.getElementById('snippet-popover');
   const snippetSheet = pop.classList.contains('open') && pop.classList.contains('is-sheet');
-  document.body.classList.toggle('modal-open', clientsOpen || testOpen || revealOpen || snippetSheet);
+  document.body.classList.toggle('modal-open', clientsOpen || testOpen || revealOpen || usersOpen || snippetSheet);
 }
 
 function openClientsModal() {
@@ -1444,6 +1560,7 @@ document.addEventListener('keydown', (e) => {
   if (pop.classList.contains('open')) { closeSnippetPopover(); return; }
   if (document.getElementById('reveal-modal').classList.contains('active')) { closeRevealModal(); return; }
   if (document.getElementById('test-traffic-modal').classList.contains('active')) { closeTestTrafficModal(); return; }
+  if (document.getElementById('users-confirm').classList.contains('active')) { closeUsersConfirm(); return; }
   if (document.getElementById('clients-modal').classList.contains('active')) closeClientsModal();
 });
 
@@ -5342,6 +5459,253 @@ document.getElementById('page-status').addEventListener('click', (event) => {
   if (main) runStatusAction(main.dataset.next);
   else if (archive) runStatusAction('archived');
   else if (open) openStatusSettings();
+});
+
+let usersPeople = [];
+let usersFlash = '';
+let usersPending = null;
+
+function usersFilterState() {
+  return {
+    query: document.getElementById('users-search').value,
+    type: document.getElementById('users-type').value,
+    status: document.getElementById('users-status').value,
+    agency: document.getElementById('users-agency').value,
+    showArchived: document.getElementById('users-show-archived').checked,
+  };
+}
+
+function formatUsersWhen(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('en-GB', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC',
+  }) + ' UTC';
+}
+
+function usersStatusHtml(person) {
+  return UI.personStatusKeys(person).map((key) => {
+    const klass = key === 'active' ? 'live' : (key === 'suspended' ? 'draft' : 'archived');
+    const label = key === 'active' ? 'Active' : (key === 'suspended' ? 'Suspended' : 'Archived');
+    return `<span class="badge ${klass}">${label}</span>`;
+  }).join('');
+}
+
+function fillUsersAgencies(people) {
+  const select = document.getElementById('users-agency');
+  if (!select) return;
+  const current = select.value;
+  const options = UI.peopleAgencyOptions(people);
+  const html = ['<option value="">All agencies</option>'];
+  if (options.none) html.push('<option value="none">No agency</option>');
+  options.agencies.forEach((agency) => {
+    html.push(`<option value="${UI.escapeHtml(agency.id)}">${UI.escapeHtml(agency.name || 'Agency')}</option>`);
+  });
+  select.innerHTML = html.join('');
+  if ([...select.options].some((option) => option.value === current)) select.value = current;
+}
+
+function renderUsers() {
+  const msg = document.getElementById('users-msg');
+  const table = document.getElementById('users-table');
+  const body = document.getElementById('users-body');
+  const count = document.getElementById('users-count');
+  if (!msg || !table || !body || !count) return;
+  const state = usersFilterState();
+  const selfEmail = sessionMe && sessionMe.email;
+  const rows = UI.filterPeople(usersPeople, state);
+  const hidden = UI.hiddenArchivedCount(usersPeople, state);
+  const narrowing = !!(String(state.query || '').trim() || state.type || state.status || state.agency);
+  count.textContent = UI.usersSummary({
+    shown: rows.length,
+    total: usersPeople.length,
+    archivedHidden: hidden,
+    filtered: narrowing,
+  });
+  if (usersFlash) {
+    msg.className = 'ok-msg';
+    msg.textContent = usersFlash;
+    usersFlash = '';
+  } else {
+    msg.className = 'hint';
+    msg.textContent = '';
+  }
+  if (!rows.length) {
+    table.classList.remove('is-visible');
+    body.innerHTML = '';
+    return;
+  }
+  body.innerHTML = rows.map((person) => {
+    const identity = UI.personIdentity(person);
+    const secondary = identity.secondary
+      ? `<p class="hint">${UI.escapeHtml(identity.secondary)}</p>`
+      : '';
+    const when = person.last_sign_in ? formatUsersWhen(person.last_sign_in) : 'Not yet';
+    const created = person.created_at ? UI.formatCreated(person.created_at) : '—';
+    const decision = UI.personActions(person, usersPeople, selfEmail);
+    const key = UI.personRowKey(person);
+    const buttons = decision.actions.map((action) => {
+      const klass = action.danger && !action.blocked ? 'btn-danger' : 'btn-ghost';
+      const disabled = action.blocked ? ' disabled' : '';
+      return `<button type="button" class="${klass}" data-user-action="${UI.escapeHtml(action.id)}" data-user-key="${UI.escapeHtml(key)}"${disabled}>${UI.escapeHtml(action.label)}</button>`;
+    }).join('');
+    const reason = decision.reason
+      ? `<p class="hint users-guard">${UI.escapeHtml(decision.reason)}</p>`
+      : '';
+    return `<tr>
+      <td class="card-title users-identity" data-label="Person"><strong>${UI.escapeHtml(identity.primary)}</strong>${secondary}</td>
+      <td data-label="Type">${UI.escapeHtml(UI.personTypeLabel(person))}</td>
+      <td data-label="Agency">${UI.escapeHtml(person.account_name || '—')}</td>
+      <td class="card-status" data-label="Status"><span class="users-status">${usersStatusHtml(person)}</span></td>
+      <td data-label="Last sign-in">${UI.escapeHtml(when || 'Not yet')}</td>
+      <td data-label="Created">${UI.escapeHtml(created || '—')}</td>
+      <td class="card-action" data-label="Actions"><div class="users-actions">${buttons}${reason}</div></td>
+    </tr>`;
+  }).join('');
+  table.classList.add('is-visible');
+}
+
+function setUsersAccess(open) {
+  const denied = document.getElementById('users-denied');
+  const panel = document.getElementById('admin-users');
+  if (denied) {
+    denied.hidden = open;
+    denied.textContent = open ? '' : UI.usersDeniedMessage(sessionMe);
+  }
+  if (panel) panel.hidden = !open;
+}
+
+async function loadUsers(token) {
+  const msg = document.getElementById('users-msg');
+  const table = document.getElementById('users-table');
+  if (!UI.canOpenUsers(sessionMe)) {
+    usersPeople = [];
+    setUsersAccess(false);
+    if (table) table.classList.remove('is-visible');
+    if (msg) msg.textContent = '';
+    const count = document.getElementById('users-count');
+    if (count) count.textContent = '';
+    return;
+  }
+  setUsersAccess(true);
+  if (msg && !usersFlash) {
+    msg.className = 'hint';
+    msg.textContent = usersPeople.length ? '' : 'Loading users…';
+  }
+  const result = await callApi('/api/admin/users');
+  if (token != null && token !== routeToken) return;
+  if (!result.ok) {
+    if (msg) {
+      msg.className = 'error-msg';
+      msg.textContent = 'Could not load users.';
+    }
+    if (table) table.classList.remove('is-visible');
+    return;
+  }
+  usersPeople = (result.data && result.data.people) || [];
+  fillUsersAgencies(usersPeople);
+  renderUsers();
+}
+
+function findUsersPerson(key) {
+  return usersPeople.find((person) => UI.personRowKey(person) === key) || null;
+}
+
+function closeUsersConfirm() {
+  const modal = document.getElementById('users-confirm');
+  if (modal) modal.classList.remove('active');
+  usersPending = null;
+  const error = document.getElementById('users-confirm-error');
+  if (error) {
+    error.hidden = true;
+    error.textContent = '';
+  }
+  syncModalScrollLock();
+}
+
+function openUsersConfirm(person, action) {
+  const copy = UI.personConfirm(action, person);
+  const decision = UI.personActions(person, usersPeople, sessionMe && sessionMe.email);
+  const chosen = decision.actions.find((item) => item.id === action);
+  if (!copy || !chosen || chosen.blocked) return;
+  usersPending = { key: UI.personRowKey(person), action };
+  document.getElementById('users-confirm-title').textContent = copy.title;
+  document.getElementById('users-confirm-body').textContent = copy.body;
+  const go = document.getElementById('users-confirm-go');
+  go.textContent = copy.confirm;
+  go.classList.toggle('btn-danger', copy.danger === true);
+  go.disabled = false;
+  const error = document.getElementById('users-confirm-error');
+  error.hidden = true;
+  error.textContent = '';
+  document.getElementById('users-confirm').classList.add('active');
+  syncModalScrollLock();
+  document.getElementById('users-confirm-cancel').focus();
+}
+
+async function confirmUsersAction() {
+  if (!usersPending) return;
+  const pending = usersPending;
+  const person = findUsersPerson(pending.key);
+  const patch = UI.personAccessPatch(pending.action);
+  const path = person && UI.personAccessPath(person);
+  const go = document.getElementById('users-confirm-go');
+  const error = document.getElementById('users-confirm-error');
+  if (!person || !patch || !path) {
+    error.hidden = false;
+    error.textContent = 'That person is no longer in the list.';
+    return;
+  }
+  if (go) go.disabled = true;
+  const result = await callApi(path, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify(patch),
+  });
+  if (go) go.disabled = false;
+  if (!result.ok) {
+    const message = (result.data && result.data.error) || 'Could not update this person.';
+    error.hidden = false;
+    error.textContent = message;
+    await loadUsers();
+    return;
+  }
+  usersFlash = UI.personDoneMessage(pending.action);
+  closeUsersConfirm();
+  await loadUsers();
+}
+
+document.getElementById('users-filters').addEventListener('submit', (event) => {
+  event.preventDefault();
+  renderUsers();
+});
+document.getElementById('users-search').addEventListener('input', () => renderUsers());
+document.getElementById('users-type').addEventListener('change', () => renderUsers());
+document.getElementById('users-agency').addEventListener('change', () => renderUsers());
+document.getElementById('users-status').addEventListener('change', () => {
+  const status = document.getElementById('users-status');
+  const archived = document.getElementById('users-show-archived');
+  if (status.value === 'archived' && archived && !archived.checked) archived.checked = true;
+  renderUsers();
+});
+document.getElementById('users-show-archived').addEventListener('change', () => {
+  const status = document.getElementById('users-status');
+  const archived = document.getElementById('users-show-archived');
+  if (archived && !archived.checked && status && status.value === 'archived') status.value = '';
+  renderUsers();
+});
+document.getElementById('users-table').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-user-action]');
+  if (!button || button.disabled) return;
+  const person = findUsersPerson(button.getAttribute('data-user-key'));
+  if (!person) return;
+  openUsersConfirm(person, button.getAttribute('data-user-action'));
+});
+document.getElementById('users-confirm-close').addEventListener('click', closeUsersConfirm);
+document.getElementById('users-confirm-cancel').addEventListener('click', closeUsersConfirm);
+document.getElementById('users-confirm-go').addEventListener('click', confirmUsersAction);
+document.getElementById('users-confirm').addEventListener('click', (event) => {
+  if (event.target.id === 'users-confirm') closeUsersConfirm();
 });
 
 document.getElementById('view-as-go').addEventListener('click', async () => {

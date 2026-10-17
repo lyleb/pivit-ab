@@ -507,6 +507,301 @@
     return `Page ${current} of ${pages}`;
   }
 
+  // Users screen. The list comes from GET /api/admin/users. Decisions here
+  // stay free of the DOM so the filters and the guard rails can be tested
+  // without a browser. The sentences match the API.
+
+  const USERS_GUARD_SELF = "You can't change your own access.";
+  const USERS_GUARD_LAST_ADMIN = 'pivitlab needs at least one Platform admin.';
+  const USERS_GUARD_LAST_OWNER = 'This agency needs at least one Owner.';
+
+  const USERS_TYPE_LABELS = {
+    platform_admin: 'Platform admin',
+    owner: 'Owner',
+    member: 'Member',
+    viewer: 'Viewer',
+  };
+
+  const USERS_STATUS_LABELS = {
+    active: 'Active',
+    suspended: 'Suspended',
+    archived: 'Archived',
+  };
+
+  function usersText(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function personOpen(person) {
+    return !!(person && !person.suspended && !person.archived);
+  }
+
+  function personTypes(person) {
+    if (!person) return [];
+    if (person.kind === 'viewer' || person.role === 'viewer') return ['viewer'];
+    const types = [];
+    if (person.superadmin) types.push('platform_admin');
+    if (person.role === 'owner') types.push('owner');
+    if (person.role === 'member') types.push('member');
+    return types;
+  }
+
+  function personTypeLabel(person) {
+    const types = personTypes(person);
+    if (!types.length) return '—';
+    return types.map((type) => USERS_TYPE_LABELS[type] || type).join(' · ');
+  }
+
+  function personStatusKeys(person) {
+    if (!person) return ['active'];
+    const keys = [];
+    if (person.archived) keys.push('archived');
+    if (person.suspended) keys.push('suspended');
+    if (!keys.length) keys.push('active');
+    return keys;
+  }
+
+  function personStatusLabel(person) {
+    return personStatusKeys(person).map((key) => USERS_STATUS_LABELS[key] || key).join(' · ');
+  }
+
+  function personIdentity(person) {
+    if (!person) return { primary: '—', secondary: '' };
+    if (person.kind === 'viewer') {
+      const name = String(person.name || '').trim();
+      const username = String(person.username || '').trim();
+      if (name && username && name.toLowerCase() !== username.toLowerCase()) {
+        return { primary: name, secondary: username };
+      }
+      return { primary: name || username || '—', secondary: '' };
+    }
+    const email = String(person.email || '').trim();
+    return { primary: email || '—', secondary: '' };
+  }
+
+  function personSearchText(person) {
+    const identity = personIdentity(person);
+    return [
+      identity.primary,
+      identity.secondary,
+      person && person.email,
+      person && person.username,
+      person && person.name,
+      person && person.account_name,
+      personTypeLabel(person),
+      personStatusLabel(person),
+    ].filter(Boolean).join(' ').toLowerCase();
+  }
+
+  function activePlatformAdminCount(people) {
+    const ids = new Set();
+    (people || []).forEach((person) => {
+      if (!person || person.kind === 'viewer' || !person.superadmin || !personOpen(person)) return;
+      ids.add(String(person.id).toLowerCase());
+    });
+    return ids.size;
+  }
+
+  // True when suspending or archiving this person would leave an agency
+  // with no active Owner. Checked across every agency they own, not only
+  // the row on screen.
+  function soleOwner(person, people) {
+    if (!person || person.kind === 'viewer') return false;
+    const self = String(person.id).toLowerCase();
+    const accounts = new Set();
+    (people || []).forEach((row) => {
+      if (!row || row.kind === 'viewer') return;
+      if (String(row.id).toLowerCase() !== self) return;
+      if (row.role === 'owner' && row.account_id) accounts.add(String(row.account_id));
+    });
+    for (const accountId of accounts) {
+      const covered = (people || []).some((other) => {
+        if (!other || other.kind === 'viewer') return false;
+        if (String(other.account_id) !== accountId) return false;
+        if (String(other.id).toLowerCase() === self) return false;
+        if (other.role !== 'owner') return false;
+        return personOpen(other);
+      });
+      if (!covered) return true;
+    }
+    return false;
+  }
+
+  // Same order as the API: last Platform admin, then last Owner, then yourself.
+  // A person who is already suspended or archived is not "open", so closing
+  // them further is allowed.
+  function closingBlock(person, people, selfEmail) {
+    if (!person || person.kind === 'viewer' || !personOpen(person)) return '';
+    if (person.superadmin && activePlatformAdminCount(people) < 2) return USERS_GUARD_LAST_ADMIN;
+    if (soleOwner(person, people)) return USERS_GUARD_LAST_OWNER;
+    if (selfEmail && person.email && usersText(person.email) === usersText(selfEmail)) {
+      return USERS_GUARD_SELF;
+    }
+    return '';
+  }
+
+  function personActions(person, people, selfEmail) {
+    const block = closingBlock(person, people, selfEmail);
+    const actions = [];
+    if (!person) return { actions, reason: '' };
+    if (person.suspended) actions.push({ id: 'unsuspend', label: 'Unsuspend', blocked: '' });
+    else actions.push({ id: 'suspend', label: 'Suspend', blocked: block, danger: true });
+    if (person.archived) actions.push({ id: 'restore', label: 'Restore', blocked: '' });
+    else actions.push({ id: 'archive', label: 'Archive', blocked: personOpen(person) ? block : '', danger: true });
+    const reason = actions.map((action) => action.blocked).find(Boolean) || '';
+    return { actions, reason };
+  }
+
+  function personConfirm(action, person) {
+    const who = personIdentity(person).primary;
+    const copy = {
+      suspend: {
+        title: 'Suspend sign-in?',
+        confirm: 'Suspend',
+        danger: true,
+        body: `Suspend sign-in for ${who}? They are signed out of every agency straight away and cannot sign in until you allow it again.`,
+      },
+      unsuspend: {
+        title: 'Allow sign-in again?',
+        confirm: 'Unsuspend',
+        danger: false,
+        body: `Allow ${who} to sign in again?`,
+      },
+      archive: {
+        title: 'Archive this person?',
+        confirm: 'Archive',
+        danger: true,
+        body: `Archive ${who}? They disappear from lists and dropdowns in every agency, including the audit log. They can still sign in until you suspend them. You can restore them later.`,
+      },
+      restore: {
+        title: 'Restore this person?',
+        confirm: 'Restore',
+        danger: false,
+        body: `Restore ${who}? They show in lists and dropdowns again.`,
+      },
+    };
+    return copy[action] || null;
+  }
+
+  function personAccessPatch(action) {
+    if (action === 'suspend') return { suspended: true };
+    if (action === 'unsuspend') return { suspended: false };
+    if (action === 'archive') return { archived: true };
+    if (action === 'restore') return { archived: false };
+    return null;
+  }
+
+  function personAccessPath(person) {
+    if (!person || !person.id) return '';
+    const id = encodeURIComponent(String(person.id));
+    if (person.kind === 'viewer') return `/api/admin/clients/${id}`;
+    return `/api/admin/users/${id}`;
+  }
+
+  function personRowKey(person) {
+    if (!person) return '';
+    return [person.kind || 'user', person.id || '', person.account_id || '', person.role || ''].join(':');
+  }
+
+  function personDoneMessage(action) {
+    return {
+      suspend: 'Sign-in suspended.',
+      unsuspend: 'Sign-in allowed again.',
+      archive: 'Archived. They stay hidden from lists until you restore them.',
+      restore: 'Restored.',
+    }[action] || '';
+  }
+
+  function filterPeople(people, options) {
+    const opts = options || {};
+    const query = String(opts.query || '').trim().toLowerCase();
+    const type = opts.type || '';
+    const status = opts.status || '';
+    const agency = opts.agency == null ? '' : String(opts.agency);
+    const showArchived = opts.showArchived === true || status === 'archived';
+    return (people || []).filter((person) => {
+      if (!person) return false;
+      if (person.archived && !showArchived) return false;
+      if (type && personTypes(person).indexOf(type) === -1) return false;
+      if (status === 'active' && (person.suspended || person.archived)) return false;
+      if (status === 'suspended' && !person.suspended) return false;
+      if (status === 'archived' && !person.archived) return false;
+      if (agency === 'none' && person.account_id) return false;
+      if (agency && agency !== 'none' && String(person.account_id) !== agency) return false;
+      if (query && personSearchText(person).indexOf(query) === -1) return false;
+      return true;
+    });
+  }
+
+  function peopleAgencies(people) {
+    const map = new Map();
+    (people || []).forEach((person) => {
+      if (!person || !person.account_id) return;
+      if (!map.has(String(person.account_id))) {
+        map.set(String(person.account_id), person.account_name || 'Agency');
+      }
+    });
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => {
+      const byName = String(a.name).localeCompare(String(b.name), 'en-GB');
+      if (byName) return byName;
+      return String(a.id).localeCompare(String(b.id));
+    });
+  }
+
+  function peopleAgencyOptions(people) {
+    return {
+      agencies: peopleAgencies(people),
+      none: (people || []).some((person) => person && !person.account_id),
+    };
+  }
+
+  function hiddenArchivedCount(people, options) {
+    const opts = options || {};
+    if (opts.showArchived === true || opts.status === 'archived') return 0;
+    const widened = Object.assign({}, opts, { showArchived: true });
+    return filterPeople(people, widened).length - filterPeople(people, opts).length;
+  }
+
+  function usersSummary({ shown, total, archivedHidden, filtered } = {}) {
+    const visible = Number(shown) || 0;
+    const all = Number(total) || 0;
+    const hidden = Number(archivedHidden) || 0;
+    const narrowing = filtered === true;
+    if (all === 0) return 'No one to show.';
+    if (visible === 0 && hidden > 0 && !narrowing) {
+      return hidden === 1 ? '1 archived person is hidden.' : `${hidden} archived people are hidden.`;
+    }
+    if (visible === 0 && hidden > 0) {
+      const extra = hidden === 1 ? '1 archived person is hidden.' : `${hidden} archived people are hidden.`;
+      return `No one matches. ${extra}`;
+    }
+    if (visible === 0) return 'No one matches these filters.';
+    const noun = visible === 1 ? '1 person' : `${visible} people`;
+    if (hidden > 0) {
+      const extra = hidden === 1 ? '1 archived person is hidden.' : `${hidden} archived people are hidden.`;
+      return `Showing ${noun}. ${extra}`;
+    }
+    if (visible !== all) return `Showing ${noun} of ${all}.`;
+    return `Showing ${noun}.`;
+  }
+
+  function canOpenUsers(me) {
+    if (!me || me.superadmin !== true) return false;
+    if (me.view_as && me.view_as.id) return false;
+    return true;
+  }
+
+  function usersDeniedMessage(me) {
+    if (me && me.view_as && me.view_as.id) return 'Stop the support view before you manage users.';
+    return 'Users is only for a Platform admin.';
+  }
+
+  function usersRoute(hash) {
+    const text = String(hash || '');
+    if (text === '#users' || text.startsWith('#users?')) return { page: 'users' };
+    return null;
+  }
+
   function demoPlanHtml() {
     return `<div class="demo-plan" data-demo-plan="1">
       <h2>Demo plan</h2>
@@ -564,5 +859,26 @@
     auditHash,
     auditQuery,
     auditPageLabel,
+    USERS_GUARD_SELF,
+    USERS_GUARD_LAST_ADMIN,
+    USERS_GUARD_LAST_OWNER,
+    personTypes,
+    personTypeLabel,
+    personStatusKeys,
+    personStatusLabel,
+    personIdentity,
+    personActions,
+    personConfirm,
+    personAccessPatch,
+    personAccessPath,
+    personRowKey,
+    personDoneMessage,
+    filterPeople,
+    peopleAgencyOptions,
+    hiddenArchivedCount,
+    usersSummary,
+    canOpenUsers,
+    usersDeniedMessage,
+    usersRoute,
   };
 });
