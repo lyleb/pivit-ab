@@ -207,16 +207,59 @@ assert.strictEqual(across.reason, LAST_ACCOUNT_OWNER);
 
 const suspendedActions = ui.personActions(mia, people, 'info@heclr.com');
 assert.strictEqual(suspendedActions.reason, '');
-assert.deepStrictEqual(suspendedActions.actions.map((action) => action.id), ['unsuspend', 'archive']);
+assert.deepStrictEqual(suspendedActions.actions.map((action) => action.id), ['unsuspend', 'archive', 'delete']);
 assert.ok(suspendedActions.actions.every((action) => !action.blocked));
 
 const archivedActions = ui.personActions(ivy, people, 'info@heclr.com');
-assert.deepStrictEqual(archivedActions.actions.map((action) => action.id), ['suspend', 'restore']);
+assert.deepStrictEqual(archivedActions.actions.map((action) => action.id), ['suspend', 'restore', 'delete']);
 assert.strictEqual(archivedActions.reason, '');
+assert.strictEqual(archivedActions.actions.find((action) => action.id === 'delete').blocked, '');
 
 const viewerActions = ui.personActions(viewer, [viewer], 'info@heclr.com');
 assert.strictEqual(viewerActions.reason, '');
 assert.deepStrictEqual(viewerActions.actions.map((action) => action.label), ['Suspend', 'Archive']);
+assert.ok(!viewerActions.actions.some((action) => action.id === 'delete'));
+
+const suspendedViewer = Object.assign({}, viewer, { suspended: true });
+const suspendedViewerActions = ui.personActions(suspendedViewer, [suspendedViewer], 'info@heclr.com');
+assert.deepStrictEqual(
+  suspendedViewerActions.actions.map((action) => action.id),
+  ['unsuspend', 'archive', 'delete']
+);
+assert.strictEqual(suspendedViewerActions.actions.find((action) => action.id === 'delete').blocked, '');
+
+const parkedAdmin = Object.assign({}, loneAdmin, { suspended: true });
+const parkedAdminActions = ui.personActions(parkedAdmin, [parkedAdmin], 'someone@heclr.example');
+assert.strictEqual(
+  parkedAdminActions.actions.find((action) => action.id === 'delete').blocked,
+  LAST_PLATFORM_ADMIN
+);
+
+const parkedOwner = Object.assign({}, ada, { suspended: true });
+const parkedOwnerActions = ui.personActions(parkedOwner, [parkedOwner], 'info@heclr.com');
+assert.strictEqual(
+  parkedOwnerActions.actions.find((action) => action.id === 'delete').blocked,
+  LAST_ACCOUNT_OWNER
+);
+const coveredOwner = ui.personActions(parkedOwner, [parkedOwner, {
+  id: '99999999-9999-9999-9999-999999999999',
+  kind: 'user',
+  email: 'noah@alpha.example',
+  role: 'owner',
+  account_id: ada.account_id,
+  account_name: 'Alpha',
+  superadmin: false,
+  suspended: true,
+  archived: false,
+}], 'info@heclr.com');
+assert.strictEqual(coveredOwner.actions.find((action) => action.id === 'delete').blocked, '');
+
+const parkedSelf = Object.assign({}, mia, { email: 'info@heclr.com' });
+const parkedSelfActions = ui.personActions(parkedSelf, [parkedSelf, ben], 'INFO@heclr.com');
+assert.strictEqual(
+  parkedSelfActions.actions.find((action) => action.id === 'delete').blocked,
+  NOT_YOURSELF
+);
 
 const suspendCopy = ui.personConfirm('suspend', ada);
 assert.strictEqual(suspendCopy.title, 'Suspend sign-in?');
@@ -232,7 +275,31 @@ assert.ok(archiveCopy.body.includes('audit log'));
 assert.ok(archiveCopy.body.includes('can still sign in'));
 assert.strictEqual(ui.personConfirm('unsuspend', mia).confirm, 'Unsuspend');
 assert.strictEqual(ui.personConfirm('restore', ivy).confirm, 'Restore');
-assert.strictEqual(ui.personConfirm('delete', ada), null);
+const deleteCopy = ui.personConfirm('delete', mia);
+assert.strictEqual(deleteCopy.title, 'Delete this person?');
+assert.strictEqual(deleteCopy.confirm, 'Delete');
+assert.strictEqual(deleteCopy.danger, true);
+assert.strictEqual(deleteCopy.typed, true);
+assert.strictEqual(deleteCopy.prompt, 'Type their email');
+assert.ok(deleteCopy.body.includes('mia@alpha.example'));
+assert.ok(deleteCopy.body.includes('cannot be undone'));
+assert.ok(deleteCopy.body.includes('audit log'));
+assert.ok(deleteCopy.body.includes('pivitlab'));
+assert.ok(!deleteCopy.body.includes('Pivitlab'));
+assert.ok(!deleteCopy.body.includes('PivitLab'));
+assert.ok(!/behavior|favorite|authorize|anonymize/i.test(deleteCopy.body));
+assert.ok(!deleteCopy.body.toLowerCase().includes('hard delete'));
+const viewerDelete = ui.personConfirm('delete', viewer);
+assert.strictEqual(viewerDelete.prompt, 'Type their username');
+assert.ok(viewerDelete.body.includes('Ada View'));
+assert.strictEqual(ui.personConfirmPhrase(mia), 'mia@alpha.example');
+assert.strictEqual(ui.personConfirmPhrase(viewer), 'ada-view');
+assert.strictEqual(ui.personConfirmReady('delete', mia, '  Mia@Alpha.example '), true);
+assert.strictEqual(ui.personConfirmReady('delete', mia, 'ada-view'), false);
+assert.strictEqual(ui.personConfirmReady('delete', viewer, 'ADA-VIEW'), true);
+assert.strictEqual(ui.personConfirmReady('delete', viewer, 'Ada View'), false);
+assert.strictEqual(ui.personConfirmReady('suspend', mia, ''), true);
+assert.strictEqual(ui.personConfirm('delete', null).typed, true);
 
 assert.deepStrictEqual(ui.personAccessPatch('suspend'), { suspended: true });
 assert.deepStrictEqual(ui.personAccessPatch('unsuspend'), { suspended: false });
@@ -283,22 +350,30 @@ assert.ok(usersPage.includes('Last sign-in'));
 assert.ok(usersPage.includes('>Created</th>'));
 assert.ok(usersPage.includes('class="table-cards"'));
 assert.ok(usersPage.includes('Everyone in pivitlab, across every agency.'));
-assert.ok(usersPage.includes('Nothing here deletes a person.'));
+assert.ok(usersPage.includes('Delete is only for someone already suspended or archived'));
+assert.ok(usersPage.includes('type their email or username'));
+assert.ok(!usersPage.includes('Nothing here deletes a person.'));
 assert.ok(!usersPage.includes('Pivitlab'));
 assert.ok(!usersPage.includes('PivitLab'));
-assert.ok(!/data-user-action="delete"|>\s*Delete\b/.test(usersPage));
+assert.ok(!/data-user-action="delete"/.test(usersPage));
 assert.ok(!/>\s*Hard delete/.test(admin));
+assert.ok(!admin.includes('Hard delete'));
 
 const confirm = admin.slice(usersPageEnd, admin.indexOf('id="snippet-popover"'));
 assert.ok(confirm.includes('Suspend sign-in?'));
 assert.ok(confirm.includes('id="users-confirm-cancel"'));
 assert.ok(confirm.includes('>Cancel</button>'));
-assert.ok(!/data-user-action="delete"|Hard delete/.test(confirm));
+assert.ok(confirm.includes('id="users-confirm-match"'));
+assert.ok(confirm.includes('Type their email or username'));
+assert.ok(!confirm.includes('Hard delete'));
 
 assert.ok(admin.includes('UI.canOpenUsers'));
 assert.ok(admin.includes('UI.filterPeople'));
 assert.ok(admin.includes('UI.personConfirm'));
+assert.ok(admin.includes('UI.personConfirmReady'));
 assert.ok(admin.includes("method: 'PATCH'"));
+assert.ok(admin.includes("method: 'DELETE'"));
+assert.ok(admin.includes("confirm: typed.trim()"));
 assert.ok(admin.includes('.audit-filters, .users-filters { grid-template-columns: 1fr; }'));
 assert.ok(admin.includes('.users-actions button { min-height: 44px;'));
 assert.ok(css.includes('pivitlab-logo-white.svg'));
@@ -309,8 +384,13 @@ assert.ok(!client.includes('id="nav-page-users"'));
 const route = read('src/routes/people.js');
 const state = read('src/person-state.js');
 assert.ok(route.includes("router.get('/users'"));
-assert.ok(!route.includes('router.delete'));
-assert.ok(!route.includes('.delete('));
+assert.ok(route.includes("router.delete('/users/:id'"));
+assert.ok(route.includes("router.delete('/clients/:id'"));
+assert.ok(state.includes('deleteUser'));
+assert.ok(state.includes('deleteViewer'));
+assert.ok(state.includes('DELETE FROM login_tokens'));
+assert.ok(state.includes('DELETE FROM memberships'));
+assert.ok(!state.includes('DELETE FROM audit_log'));
 assert.ok(state.includes('u.created_at'));
 assert.ok(state.includes('c.created_at'));
 assert.ok(state.includes('created_at: row.created_at'));

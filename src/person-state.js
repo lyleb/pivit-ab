@@ -1,9 +1,13 @@
 // Suspended and archived people. Suspension blocks sign-in and existing
-// sessions. Archive hides someone from lists and dropdowns. Deleting a person
-// is a later step; the column already blocks sign-in and the same lists.
-// A platform admin changes the marks. The last platform admin, and the last
-// owner of an account, cannot be suspended or archived.
+// sessions. Archive hides someone from lists and dropdowns. Hard delete is
+// rare, and only for someone already suspended or archived. It anonymises
+// their personal details, removes sessions, sign-in tokens and memberships,
+// and keeps the audit log under a stable label. A platform admin does this.
+// The last platform admin, the last owner of an agency, and you yourself
+// cannot be suspended, archived or deleted.
 
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const db = require('./db');
 const { recordAudit, endUserSessions, endClientSessions } = require('./audit');
 const { clearSessionCookie } = require('./session-cookie');
@@ -14,6 +18,10 @@ const SIGN_IN_CLOSED = "That sign-in isn't available.";
 const LAST_PLATFORM_ADMIN = 'pivitlab needs at least one Platform admin.';
 const LAST_ACCOUNT_OWNER = 'This agency needs at least one Owner.';
 const NOT_YOURSELF = "You can't change your own access.";
+const DELETE_CLOSED = 'Suspend or archive this person before deleting them.';
+const DELETE_CONFIRM = 'Type their email or username to confirm.';
+const DELETE_MISMATCH = "That doesn't match their email or username.";
+const DELETED_LABEL_PREFIX = 'Deleted user ';
 
 const SIGN_IN_POSTS = new Set([
   '/api/auth/login',
@@ -488,17 +496,358 @@ async function listPeople() {
   return people;
 }
 
+// Stable, readable stand-in. The same person always gets the same label, and
+// two deleted people do not share one, so the audit log stays readable.
+function deletedLabel(id) {
+  const compact = String(id || '').replace(/-/g, '').toLowerCase();
+  if (!/^[0-9a-f]{8,}$/.test(compact)) return 'Deleted user';
+  return DELETED_LABEL_PREFIX + compact.slice(0, 8);
+}
+
+function deletedLabelSql(idExpr) {
+  if (!/^[a-z]+\.id$/.test(idExpr)) throw new Error('unsafe id expression');
+  return `('${DELETED_LABEL_PREFIX}' || left(replace(${idExpr}::text, '-', ''), 8))`;
+}
+
+function deletedEmail(id) {
+  return `deleted-${String(id).toLowerCase()}@invalid`;
+}
+
+function deletedUsername(id) {
+  return `deleted-${String(id).toLowerCase()}`;
+}
+
+function parseDeleteBody(body) {
+  const source = body || {};
+  if (!Object.prototype.hasOwnProperty.call(source, 'confirm') || typeof source.confirm !== 'string') {
+    return { ok: false, status: 400, error: DELETE_CONFIRM };
+  }
+  const confirm = source.confirm.trim();
+  if (!confirm || confirm.length > 320) {
+    return { ok: false, status: 400, error: DELETE_CONFIRM };
+  }
+  return { ok: true, confirm };
+}
+
+function confirmMatches(confirm, identifiers) {
+  const typed = String(confirm || '').trim().toLowerCase();
+  if (!typed) return false;
+  return (identifiers || []).some((value) => {
+    if (value == null) return false;
+    const text = String(value).trim().toLowerCase();
+    return text !== '' && text === typed;
+  });
+}
+
+function uniqueAccountIds(rows) {
+  const seen = new Set();
+  const ids = [];
+  for (const row of rows || []) {
+    if (!row || !row.account_id) continue;
+    const key = String(row.account_id);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    ids.push(row.account_id);
+  }
+  return ids;
+}
+
+async function anonymiseAuditRows(client, spec) {
+  const label = spec.label;
+  await client.query(
+    `UPDATE audit_log
+     SET actor_label = CASE
+           WHEN ($1::uuid IS NOT NULL AND actor_user_id = $1::uuid) THEN $7
+           WHEN ($2::text IS NOT NULL AND lower(actor_label) = lower($2::text)) THEN $7
+           WHEN ($3::text IS NOT NULL AND lower(actor_label) = lower($3::text)) THEN $7
+           WHEN (
+             $4::text IS NOT NULL
+             AND actor_label = $4::text
+             AND ($6::uuid IS NULL OR account_id = $6::uuid)
+           ) THEN $7
+           ELSE actor_label
+         END,
+         detail = CASE
+           WHEN jsonb_typeof(detail) = 'object' THEN detail
+             || CASE
+                  WHEN $2::text IS NOT NULL AND lower(detail->>'email') = lower($2::text)
+                  THEN jsonb_build_object('email', $7::text)
+                  ELSE '{}'::jsonb
+                END
+             || CASE
+                  WHEN $3::text IS NOT NULL AND lower(detail->>'username') = lower($3::text)
+                  THEN jsonb_build_object('username', $7::text)
+                  ELSE '{}'::jsonb
+                END
+             || CASE
+                  WHEN $4::text IS NOT NULL AND detail->>'name' = $4::text
+                  THEN jsonb_build_object('name', $7::text)
+                  ELSE '{}'::jsonb
+                END
+           ELSE detail
+         END
+     WHERE ($1::uuid IS NOT NULL AND actor_user_id = $1::uuid)
+        OR ($2::text IS NOT NULL AND (
+              lower(actor_label) = lower($2::text)
+              OR lower(detail->>'email') = lower($2::text)
+            ))
+        OR ($3::text IS NOT NULL AND (
+              lower(actor_label) = lower($3::text)
+              OR lower(detail->>'username') = lower($3::text)
+            ))
+        OR (
+          $4::text IS NOT NULL
+          AND actor_label = $4::text
+          AND ($6::uuid IS NULL OR account_id = $6::uuid)
+        )
+        OR (target_type = $5 AND target_id = $8)`,
+    [
+      spec.userId || null,
+      spec.email || null,
+      spec.username || null,
+      spec.name || null,
+      spec.targetType,
+      spec.accountId || null,
+      label,
+      String(spec.targetId),
+    ]
+  );
+}
+
+async function writeDeletedAudit(client, { accountIds, actorUserId, actorEmail, targetId, kind, label, ip }) {
+  const accounts = accountIds.length ? accountIds : [null];
+  for (const accountId of accounts) {
+    await recordAudit(client, {
+      accountId,
+      userId: actorUserId,
+      actorLabel: actorEmail,
+      action: 'user.deleted',
+      targetType: kind === 'viewer' ? 'client' : 'user',
+      targetId,
+      detail: { kind, label },
+      ip,
+    });
+  }
+}
+
+async function refuseUserDelete(client, actorId, target) {
+  if (target.is_superadmin) {
+    const { rows } = await client.query(
+      `SELECT id FROM users
+       WHERE is_superadmin IS TRUE AND deleted_at IS NULL AND id <> $1`,
+      [target.id]
+    );
+    if (!rows.length) return LAST_PLATFORM_ADMIN;
+  }
+  const owned = await client.query(
+    `SELECT account_id
+     FROM memberships
+     WHERE user_id = $1 AND role = 'owner' AND removed_at IS NULL
+     ORDER BY account_id
+     FOR UPDATE`,
+    [target.id]
+  );
+  const accountIds = owned.rows.map((row) => row.account_id);
+  if (accountIds.length) {
+    await client.query(
+      `SELECT account_id, user_id
+       FROM memberships
+       WHERE account_id = ANY($1::uuid[])
+       ORDER BY account_id, user_id
+       FOR UPDATE`,
+      [accountIds]
+    );
+    const peers = await client.query(
+      `SELECT DISTINCT m.account_id
+       FROM memberships m
+       JOIN users u ON u.id = m.user_id
+       WHERE m.account_id = ANY($1::uuid[])
+         AND m.role = 'owner'
+         AND m.removed_at IS NULL
+         AND m.user_id <> $2
+         AND u.deleted_at IS NULL`,
+      [accountIds, target.id]
+    );
+    const covered = new Set(peers.rows.map((row) => String(row.account_id)));
+    if (accountIds.some((id) => !covered.has(String(id)))) return LAST_ACCOUNT_OWNER;
+  }
+  if (sameId(actorId, target.id)) return NOT_YOURSELF;
+  if (!target.suspended_at && !target.archived_at) return DELETE_CLOSED;
+  return '';
+}
+
+async function deleteUser({ actorUserId, actorEmail, userId, body, ip }) {
+  const actorId = String(actorUserId || '');
+  const targetId = String(userId || '');
+  if (!UUID_RE.test(actorId) || !UUID_RE.test(targetId)) {
+    return { ok: false, status: 404, error: 'not found' };
+  }
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const lockedUsers = await client.query(
+      `SELECT id, email, is_superadmin, suspended_at, archived_at, deleted_at
+       FROM users
+       WHERE is_superadmin IS TRUE OR id = $1
+       ORDER BY id
+       FOR UPDATE`,
+      [targetId]
+    );
+    const target = lockedUsers.rows.find((row) => sameId(row.id, targetId));
+    if (!target || target.deleted_at) {
+      await rollback(client);
+      return { ok: false, status: 404, error: 'not found' };
+    }
+    const blocked = await refuseUserDelete(client, actorId, target);
+    if (blocked) {
+      await rollback(client);
+      return { ok: false, status: 400, error: blocked };
+    }
+    const typed = parseDeleteBody(body);
+    if (!typed.ok) {
+      await rollback(client);
+      return typed;
+    }
+    if (!confirmMatches(typed.confirm, [target.email])) {
+      await rollback(client);
+      return { ok: false, status: 400, error: DELETE_MISMATCH };
+    }
+
+    const label = deletedLabel(target.id);
+    const email = target.email;
+    const memberships = await client.query(
+      `SELECT account_id FROM memberships WHERE user_id = $1 ORDER BY account_id`,
+      [target.id]
+    );
+    const accountIds = uniqueAccountIds(memberships.rows);
+    await anonymiseAuditRows(client, {
+      userId: target.id,
+      email,
+      targetType: 'user',
+      targetId: target.id,
+      label,
+    });
+    await client.query(`DELETE FROM memberships WHERE user_id = $1`, [target.id]);
+    await client.query(
+      `UPDATE users
+       SET email = $2, is_superadmin = false, deleted_at = COALESCE(deleted_at, now())
+       WHERE id = $1`,
+      [target.id, deletedEmail(target.id)]
+    );
+    await client.query(`DELETE FROM login_tokens WHERE lower(email) = lower($1)`, [email]);
+    await endUserSessions(target.id, client);
+    await writeDeletedAudit(client, {
+      accountIds,
+      actorUserId: actorId,
+      actorEmail,
+      targetId: target.id,
+      kind: 'user',
+      label,
+      ip,
+    });
+    await client.query('COMMIT');
+    return { ok: true, id: target.id, kind: 'user', deleted: true, label };
+  } catch (err) {
+    await rollback(client);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function deleteViewer({ actorUserId, actorEmail, clientId, body, ip }) {
+  const actorId = String(actorUserId || '');
+  const targetId = String(clientId || '');
+  if (!UUID_RE.test(actorId) || !UUID_RE.test(targetId)) {
+    return { ok: false, status: 404, error: 'not found' };
+  }
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const locked = await client.query(
+      `SELECT id, name, username, password_hash, account_id, suspended_at, archived_at, deleted_at
+       FROM clients
+       WHERE id = $1
+       FOR UPDATE`,
+      [targetId]
+    );
+    const target = locked.rows[0];
+    if (!target || target.deleted_at) {
+      await rollback(client);
+      return { ok: false, status: 404, error: 'not found' };
+    }
+    if (!target.suspended_at && !target.archived_at) {
+      await rollback(client);
+      return { ok: false, status: 400, error: DELETE_CLOSED };
+    }
+    const typed = parseDeleteBody(body);
+    if (!typed.ok) {
+      await rollback(client);
+      return typed;
+    }
+    if (!confirmMatches(typed.confirm, [target.username])) {
+      await rollback(client);
+      return { ok: false, status: 400, error: DELETE_MISMATCH };
+    }
+
+    const label = deletedLabel(target.id);
+    const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10);
+    await anonymiseAuditRows(client, {
+      username: target.username,
+      name: target.name,
+      accountId: target.account_id,
+      targetType: 'client',
+      targetId: target.id,
+      label,
+    });
+    await client.query(
+      `UPDATE clients
+       SET name = $2, username = $3, password_hash = $4, deleted_at = COALESCE(deleted_at, now())
+       WHERE id = $1`,
+      [target.id, label, deletedUsername(target.id), passwordHash]
+    );
+    await endClientSessions(target.id, client);
+    await writeDeletedAudit(client, {
+      accountIds: target.account_id ? [target.account_id] : [],
+      actorUserId: actorId,
+      actorEmail,
+      targetId: target.id,
+      kind: 'viewer',
+      label,
+      ip,
+    });
+    await client.query('COMMIT');
+    return { ok: true, id: target.id, kind: 'viewer', deleted: true, label };
+  } catch (err) {
+    await rollback(client);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   SIGN_IN_CLOSED,
   LAST_PLATFORM_ADMIN,
   LAST_ACCOUNT_OWNER,
   NOT_YOURSELF,
+  DELETE_CLOSED,
+  DELETE_CONFIRM,
+  DELETE_MISMATCH,
   personClosed,
   parseAccessBody,
+  parseDeleteBody,
+  confirmMatches,
+  deletedLabel,
+  deletedLabelSql,
+  deletedEmail,
+  deletedUsername,
   sessionAllows,
   personAccess,
   refuseClosedSession,
   setUserAccess,
   setViewerAccess,
+  deleteUser,
+  deleteViewer,
   listPeople,
 };

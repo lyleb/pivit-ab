@@ -9,8 +9,17 @@ const {
   LAST_PLATFORM_ADMIN,
   LAST_ACCOUNT_OWNER,
   NOT_YOURSELF,
+  DELETE_CLOSED,
+  DELETE_CONFIRM,
+  DELETE_MISMATCH,
   personClosed,
   parseAccessBody,
+  parseDeleteBody,
+  confirmMatches,
+  deletedLabel,
+  deletedLabelSql,
+  deletedEmail,
+  deletedUsername,
 } = require('../src/person-state');
 
 function read(rel) {
@@ -71,6 +80,12 @@ assert.strictEqual(ui.auditActionLabel('user.suspended'), 'Suspended sign-in');
 assert.strictEqual(ui.auditActionLabel('user.unsuspended'), 'Allowed sign-in again');
 assert.strictEqual(ui.auditActionLabel('user.archived'), 'Archived a person');
 assert.strictEqual(ui.auditActionLabel('user.restored'), 'Restored a person');
+assert.strictEqual(ui.auditActionLabel('user.deleted'), 'Deleted a person');
+assert.ok(!ui.auditActionLabel('user.deleted').includes('Pivit'));
+assert.strictEqual(
+  ui.auditDetailText({ action: 'user.deleted', detail: { label: 'Deleted user 11111111', kind: 'user' } }),
+  'Deleted user 11111111'
+);
 assert.strictEqual(
   ui.auditDetailText({ action: 'user.suspended', detail: { email: 'ada@alpha.example' } }),
   'ada@alpha.example'
@@ -80,8 +95,36 @@ assert.strictEqual(
   'ada-view'
 );
 
+const sampleId = '11111111-1111-4111-8111-111111111111';
+assert.strictEqual(deletedLabel(sampleId), 'Deleted user 11111111');
+assert.strictEqual(deletedLabel(sampleId.toUpperCase()), 'Deleted user 11111111');
+assert.strictEqual(deletedEmail(sampleId), 'deleted-11111111-1111-4111-8111-111111111111@invalid');
+assert.strictEqual(deletedUsername(sampleId), 'deleted-11111111-1111-4111-8111-111111111111');
+assert.strictEqual(deletedLabelSql('u.id'), "('Deleted user ' || left(replace(u.id::text, '-', ''), 8))");
+assert.throws(() => deletedLabelSql('users.email'), /unsafe/);
+assert.strictEqual(DELETE_CLOSED, 'Suspend or archive this person before deleting them.');
+assert.strictEqual(DELETE_CONFIRM, 'Type their email or username to confirm.');
+assert.strictEqual(DELETE_MISMATCH, "That doesn't match their email or username.");
+for (const line of [DELETE_CLOSED, DELETE_CONFIRM, DELETE_MISMATCH]) {
+  assert.ok(!line.includes('Pivitlab'), line);
+  assert.ok(!line.includes('PivitLab'), line);
+  assert.ok(!/behavior|favorite|authorize|anonymize/i.test(line), line);
+}
+const missingConfirm = parseDeleteBody({});
+assert.strictEqual(missingConfirm.ok, false);
+assert.strictEqual(missingConfirm.error, DELETE_CONFIRM);
+const blankConfirm = parseDeleteBody({ confirm: '   ' });
+assert.strictEqual(blankConfirm.ok, false);
+const typedConfirm = parseDeleteBody({ confirm: '  Ada@Alpha.example  ' });
+assert.strictEqual(typedConfirm.ok, true);
+assert.strictEqual(typedConfirm.confirm, 'Ada@Alpha.example');
+assert.strictEqual(confirmMatches(' Ada@Alpha.example ', ['ada@alpha.example']), true);
+assert.strictEqual(confirmMatches('ada-view', ['Ada View']), false);
+assert.strictEqual(confirmMatches('ADA-VIEW', ['ada-view']), true);
+
 const dashboard = read('public/index.html');
 assert.ok(dashboard.includes('id="admin-users"'));
 assert.ok(dashboard.includes('Suspend sign-in'));
+assert.ok(dashboard.includes('id="users-confirm-match"'));
 
 console.log('person state tests passed');
