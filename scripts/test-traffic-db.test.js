@@ -278,6 +278,90 @@ async function main() {
     const csvIncluded = await request(ownerServer, 'GET', `/api/results/${experimentId}/export?include_test=1`);
     assert.ok(csvIncluded.text.includes('v_ptmuyez2tm_a'));
 
+    await track(controlId, 'v_pt_unflagged', 'view', '2026-10-04T10:00:00Z', false);
+    await db.query(`UPDATE events SET is_test = false WHERE visitor_id = 'v_pt_unflagged'`);
+    const unconfirmedClear = await request(ownerServer, 'POST', `/api/experiments/${experimentId}/test-traffic/clear`, {});
+    assert.strictEqual(unconfirmedClear.status, 400);
+    const rejectedAll = await request(ownerServer, 'POST', `/api/experiments/${experimentId}/test-traffic/remove`, {
+      mode: 'all',
+      confirm: true,
+    });
+    assert.strictEqual(rejectedAll.status, 400);
+    const clearPreview = await traffic.previewTestTraffic(experimentId, { mode: 'all' }, 'remove');
+    assert.ok(clearPreview.visitors >= 5);
+    const cleared = await request(ownerServer, 'POST', `/api/experiments/${experimentId}/test-traffic/clear`, { confirm: true });
+    assert.strictEqual(cleared.status, 200);
+    assert.strictEqual(cleared.json.changed, true);
+    assert.strictEqual(cleared.json.mode, 'all');
+    assert.strictEqual(cleared.json.direction, 'remove');
+    const afterClear = await db.query(
+      `SELECT visitor_id, is_test, excluded_at IS NOT NULL AS hidden
+       FROM events WHERE experiment_id = $1 AND visitor_id IN ('v_pt_unflagged', 'v_qa', 'v_real', 'v_ptold')`,
+      [experimentId]
+    );
+    const hiddenByVisitor = Object.fromEntries(afterClear.rows.map((row) => [row.visitor_id, row.hidden]));
+    assert.strictEqual(hiddenByVisitor.v_pt_unflagged, true);
+    assert.strictEqual(hiddenByVisitor.v_qa, true);
+    assert.strictEqual(hiddenByVisitor.v_ptold, true);
+    assert.strictEqual(hiddenByVisitor.v_real, false);
+    const stillStored = await db.query(
+      `SELECT COUNT(*)::int AS n FROM events WHERE experiment_id = $1 AND visitor_id = 'v_pt_unflagged'`,
+      [experimentId]
+    );
+    assert.strictEqual(stillStored.rows[0].n, 1);
+    const clearAudit = await db.query(
+      `SELECT action, actor_label, detail FROM audit_log
+       WHERE target_id = $1 AND action = 'test_traffic_remove'
+       ORDER BY id DESC LIMIT 1`,
+      [experimentId]
+    );
+    assert.strictEqual(clearAudit.rows[0].action, 'test_traffic_remove');
+    assert.strictEqual(clearAudit.rows[0].detail.criteria.mode, 'all');
+    assert.ok(clearAudit.rows[0].detail.event_count >= 1);
+    const memberUser = await db.query(
+      `INSERT INTO users (email, verified_at) VALUES ('member@example.co.uk', now()) RETURNING id`
+    );
+    await db.query(
+      `INSERT INTO memberships (account_id, user_id, role) VALUES ($1, $2, 'member')`,
+      [accountId, memberUser.rows[0].id]
+    );
+    const memberApp = appFor({ role: 'owner', userId: memberUser.rows[0].id, accountId, customer: true });
+    const memberServer = await new Promise((resolve) => {
+      const server = memberApp.listen(0, () => resolve(server));
+    });
+    try {
+      const memberClear = await request(memberServer, 'POST', `/api/experiments/${experimentId}/test-traffic/clear`, { confirm: true });
+      assert.strictEqual(memberClear.status, 404);
+      const memberUndo = await request(memberServer, 'POST', `/api/experiments/${experimentId}/test-traffic/restore`, {
+        mode: 'all',
+        confirm: true,
+      });
+      assert.strictEqual(memberUndo.status, 404);
+    } finally {
+      await new Promise((resolve) => memberServer.close(resolve));
+    }
+    const undone = await request(ownerServer, 'POST', `/api/experiments/${experimentId}/test-traffic/restore`, {
+      mode: 'all',
+      confirm: true,
+    });
+    assert.strictEqual(undone.status, 200);
+    assert.strictEqual(undone.json.changed, true);
+    assert.strictEqual(undone.json.direction, 'restore');
+    const afterUndo = await db.query(
+      `SELECT COUNT(*)::int AS n FROM events
+       WHERE experiment_id = $1 AND visitor_id IN ('v_pt_unflagged', 'v_qa') AND excluded_at IS NOT NULL`,
+      [experimentId]
+    );
+    assert.strictEqual(afterUndo.rows[0].n, 0);
+    const undoAudit = await db.query(
+      `SELECT action, detail FROM audit_log
+       WHERE target_id = $1 AND action = 'test_traffic_restore'
+       ORDER BY id DESC LIMIT 1`,
+      [experimentId]
+    );
+    assert.strictEqual(undoAudit.rows[0].detail.criteria.mode, 'all');
+    await db.query(`UPDATE events SET is_test = true WHERE visitor_id = 'v_pt_unflagged'`);
+
     const clientRow = await db.query(
       `INSERT INTO clients (name, username, password_hash, account_id) VALUES ('Can not say', 'cst', 'x', $1) RETURNING id`,
       [accountId]

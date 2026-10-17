@@ -1,4 +1,5 @@
 const express = require('express');
+const { assertAgencyOwner } = require('../team');
 const {
   parseCriteria,
   parseDirection,
@@ -9,6 +10,18 @@ const {
 } = require('../test-traffic');
 
 const router = express.Router({ mergeParams: true });
+
+// Agency Owners and a platform admin. A Member is missing, the same answer as
+// another agency's test. View as never reaches a POST: it is read-only first.
+async function clearActor(account) {
+  if (!account || !account.id) return { ok: false, status: 404, error: 'not found' };
+  if (account.superadmin === true) {
+    return { ok: true, userId: account.userId || null, actor: 'superadmin' };
+  }
+  const owner = await assertAgencyOwner(account.id, account.userId);
+  if (!owner.ok) return { ok: false, status: owner.status || 404, error: owner.error || 'not found' };
+  return { ok: true, userId: owner.userId, actor: owner.email || 'owner' };
+}
 
 function actorIp(req) {
   const ip = req && req.ip ? String(req.ip) : '';
@@ -46,6 +59,9 @@ router.post('/remove', async (req, res) => {
   }
   const criteria = parseCriteria(req.body);
   if (!criteria.ok) return res.status(400).json({ error: criteria.error });
+  if (criteria.mode === 'all') {
+    return res.status(400).json({ error: 'Use clear test traffic for every pivit_qa, is_test and v_pt visitor.' });
+  }
   try {
     sendResult(res, await applyTestTraffic({
       experimentId: req.params.id,
@@ -70,13 +86,47 @@ router.post('/restore', async (req, res) => {
   const criteria = parseCriteria(req.body);
   if (!criteria.ok) return res.status(400).json({ error: criteria.error });
   try {
+    let actorName = 'owner';
+    let userId = null;
+    if (criteria.mode === 'all') {
+      const actor = await clearActor(req.account);
+      if (!actor.ok) return res.status(actor.status || 404).json({ error: actor.error || 'not found' });
+      actorName = actor.actor;
+      userId = actor.userId;
+    }
     sendResult(res, await applyTestTraffic({
       experimentId: req.params.id,
       criteria,
       direction: 'restore',
-      actor: 'owner',
+      actor: actorName,
       actorIp: actorIp(req),
       accountId: req.account.id,
+      userId,
+    }));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
+// POST /api/experiments/:id/test-traffic/clear
+// One click, after confirm. Soft-excludes every pivit_qa, is_test and v_pt row.
+// Nothing is deleted. Undo is restore with mode all.
+router.post('/clear', async (req, res) => {
+  if (!isConfirmed(req.body)) {
+    return res.status(400).json({ error: 'Confirm clearing test traffic before it is applied.' });
+  }
+  try {
+    const actor = await clearActor(req.account);
+    if (!actor.ok) return res.status(actor.status || 404).json({ error: actor.error || 'not found' });
+    sendResult(res, await applyTestTraffic({
+      experimentId: req.params.id,
+      criteria: { mode: 'all', prefix: null },
+      direction: 'remove',
+      actor: actor.actor,
+      actorIp: actorIp(req),
+      accountId: req.account.id,
+      userId: actor.userId,
     }));
   } catch (err) {
     console.error(err);

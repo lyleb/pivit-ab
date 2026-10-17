@@ -2683,6 +2683,11 @@ function renderDetail() {
           <input type="checkbox" id="include-test-traffic"${includeTestTraffic ? ' checked' : ''}>
           Include test traffic
         </label>`}
+        ${UI.canClearTestTraffic(sessionMe) ? `<div class="inline-actions" style="margin-top:12px;">
+          <button type="button" data-action="test-traffic" data-mode="all" data-direction="remove">Clear test traffic</button>
+          <button type="button" class="btn-ghost" data-action="test-traffic" data-mode="all" data-direction="restore">Undo</button>
+        </div>
+        <p class="hint">Clear test traffic hides every pivit_qa, is_test and v_pt visitor. Nothing is deleted. Undo puts them back.</p>` : ''}
         <div class="inline-actions" style="margin-top:12px;">
           <button type="button" class="btn-ghost" data-action="test-traffic" data-mode="test" data-direction="remove">Remove test traffic</button>
           <button type="button" class="btn-ghost" data-action="test-traffic" data-mode="test" data-direction="restore">Restore test traffic</button>
@@ -4270,6 +4275,7 @@ function auditCriteriaLabel(criteria) {
   if (!criteria) return '';
   if (criteria.kind === 'peek') return 'Early look';
   if (criteria.mode === 'prefix') return `Prefix ${criteria.prefix || ''}`;
+  if (criteria.mode === 'all') return 'All test traffic';
   return 'Test traffic';
 }
 
@@ -4304,7 +4310,7 @@ async function loadTestAudit(expId) {
   msg.textContent = '';
   body.innerHTML = entries.map((entry) => `<tr>
     <td>${UI.escapeHtml(formatAuditWhen(entry.created_at))}</td>
-    <td>${UI.escapeHtml(entry.actor || 'owner')}</td>
+    <td>${UI.escapeHtml(UI.auditActorLabel(entry.actor || 'owner'))}</td>
     <td>${UI.escapeHtml(auditActionLabel(entry.action))}</td>
     <td>${UI.escapeHtml(auditCriteriaLabel(entry.criteria))}</td>
     <td class="num">${entry.visitor_count}</td>
@@ -4390,12 +4396,20 @@ function renderTestTrafficDialog() {
   if (!pending) return;
   const preview = pending.preview || {};
   const restoring = pending.direction === 'restore';
+  const clearingAll = pending.mode === 'all' && !restoring;
+  const undoing = pending.mode === 'all' && restoring;
   const title = document.getElementById('test-traffic-title');
   const confirmBtn = document.getElementById('test-traffic-confirm');
   const prefixBit = pending.mode === 'prefix' ? ` starting with ${pending.prefix}` : '';
-  if (title) title.textContent = restoring ? `Restore visitors${prefixBit}` : `Remove visitors${prefixBit}`;
+  if (title) {
+    title.textContent = clearingAll
+      ? 'Clear test traffic'
+      : undoing
+        ? 'Undo clear'
+        : restoring ? `Restore visitors${prefixBit}` : `Remove visitors${prefixBit}`;
+  }
   if (confirmBtn) {
-    confirmBtn.textContent = restoring ? 'Restore' : 'Remove';
+    confirmBtn.textContent = clearingAll ? 'Clear test traffic' : undoing ? 'Undo' : restoring ? 'Restore' : 'Remove';
     confirmBtn.classList.toggle('btn-danger', !restoring);
     confirmBtn.disabled = !(Number(preview.events) > 0);
   }
@@ -4404,10 +4418,18 @@ function renderTestTrafficDialog() {
     <td class="num">${row.visitors}</td>
     <td class="num">${row.events}</td>
   </tr>`).join('');
-  const intro = restoring
-    ? 'These visitors will count again. Test traffic stays out of the results unless Include test traffic is ticked. Nothing was deleted.'
-    : 'These visitors will be hidden from results, including when Include test traffic is ticked. Nothing is deleted. You can restore them.';
-  const empty = Number(preview.events) > 0 ? '' : `<p class="hint">${restoring ? 'Nothing to restore.' : 'Nothing to remove.'}</p>`;
+  const demo = currentDetail && UI.isDemoTest(currentDetail);
+  const intro = clearingAll
+    ? (demo
+      ? 'This hides every pivit_qa, is_test and v_pt visitor. This demo test counts that traffic, so those visitors drop out of the table. Nothing is deleted. Undo puts them back.'
+      : 'This hides every pivit_qa, is_test and v_pt visitor from the results, including when Include test traffic is ticked. Nothing is deleted. Undo puts them back.')
+    : undoing
+      ? 'Undo puts the hidden pivit_qa, is_test and v_pt visitors back. Nothing was deleted.'
+      : restoring
+        ? 'These visitors will count again. Test traffic stays out of the results unless Include test traffic is ticked. Nothing was deleted.'
+        : 'These visitors will be hidden from results, including when Include test traffic is ticked. Nothing is deleted. You can restore them.';
+  const emptyText = clearingAll ? 'Nothing to clear.' : undoing ? 'Nothing to undo.' : restoring ? 'Nothing to restore.' : 'Nothing to remove.';
+  const empty = Number(preview.events) > 0 ? '' : `<p class="hint">${emptyText}</p>`;
   document.getElementById('test-traffic-body').innerHTML = `
     <p style="margin-top:0;">${UI.escapeHtml(intro)}</p>
     <p><strong>${preview.visitors || 0}</strong> visitors, <strong>${preview.events || 0}</strong> events.</p>
@@ -4444,9 +4466,13 @@ async function confirmTestTraffic() {
   const pending = testTrafficPending;
   const confirmBtn = document.getElementById('test-traffic-confirm');
   if (confirmBtn) confirmBtn.disabled = true;
-  const path = pending.direction === 'restore' ? 'restore' : 'remove';
-  const payload = { mode: pending.mode, confirm: true };
-  if (pending.mode === 'prefix') payload.prefix = pending.prefix;
+  const clearingAll = pending.mode === 'all' && pending.direction !== 'restore';
+  const path = clearingAll ? 'clear' : (pending.direction === 'restore' ? 'restore' : 'remove');
+  const payload = { confirm: true };
+  if (!clearingAll) {
+    payload.mode = pending.mode;
+    if (pending.mode === 'prefix') payload.prefix = pending.prefix;
+  }
   const result = await callApi(`/api/experiments/${currentDetail.id}/test-traffic/${path}`, {
     method: 'POST',
     headers: authHeaders(),

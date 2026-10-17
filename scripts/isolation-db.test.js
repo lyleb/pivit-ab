@@ -284,6 +284,8 @@ async function main() {
       ['POST', `/api/experiments/${bExp.id}/test-traffic/preview`, { mode: 'test', direction: 'remove' }],
       ['POST', `/api/experiments/${bExp.id}/test-traffic/remove`, { mode: 'test', confirm: true }],
       ['POST', `/api/experiments/${bExp.id}/test-traffic/restore`, { mode: 'test', confirm: true }],
+      ['POST', `/api/experiments/${bExp.id}/test-traffic/clear`, { confirm: true }],
+      ['POST', `/api/experiments/${bExp.id}/test-traffic/restore`, { mode: 'all', confirm: true }],
       ['GET', `/api/experiments/${bExp.id}/test-traffic/audit`],
       ['GET', `/api/experiments/${bExp.id}/snapshot-note`],
       ['GET', `/api/experiments/${bExp.id}/conclusion`],
