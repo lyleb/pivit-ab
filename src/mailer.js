@@ -9,6 +9,12 @@ const DEFAULT_FROM_NAME = 'pivitlab';
 const DEFAULT_FROM = `"${DEFAULT_FROM_NAME}" <${DEFAULT_FROM_ADDRESS}>`;
 const DEFAULT_REPLY_TO = 'info@heclr.com';
 const DEFAULT_STREAM = 'outbound';
+// The wordmark already shipped in public/assets/logo.png (1127×409).
+// Hosted so mail clients can load it. Width 140 keeps the heading modest;
+// the height attribute matches that width.
+const LOGO_URL = 'https://pivitlab.com/assets/logo.png';
+const LOGO_WIDTH = 140;
+const LOGO_HEIGHT = 51;
 
 let lastLogged = null;
 
@@ -82,7 +88,7 @@ function brandedHtml({ paragraphs, buttonLabel, href }) {
     <tr><td align="center">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border:1px solid #e4e6ee;border-radius:12px;padding:32px;">
         <tr><td style="font-family:-apple-system,'Segoe UI',Roboto,sans-serif;">
-          <p style="margin:0 0 24px;font-size:20px;font-weight:700;letter-spacing:-0.02em;color:#5635FB;">pivitlab</p>
+          <p style="margin:0 0 24px;"><img src="${LOGO_URL}" alt="pivitlab" width="${LOGO_WIDTH}" height="${LOGO_HEIGHT}" style="display:block;width:${LOGO_WIDTH}px;height:auto;border:0;"></p>
           ${blocks}
           ${button}
           <p style="margin:24px 0 0;font-size:14px;color:#5c6170;">pivitlab</p>
@@ -161,6 +167,9 @@ module.exports = {
   DEFAULT_FROM_ADDRESS,
   DEFAULT_REPLY_TO,
   DEFAULT_STREAM,
+  LOGO_URL,
+  LOGO_WIDTH,
+  LOGO_HEIGHT,
   fromAddress,
   replyToAddress,
   messageStream,
