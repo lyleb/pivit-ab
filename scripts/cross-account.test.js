@@ -388,7 +388,10 @@ async function main() {
         ['DELETE', `/api/experiments/${aRunning.id}/variants/${aSpare.rows[0].id}`],
         ['PUT', `/api/experiments/${aRunning.id}/goals`, { goals: [{ type: 'click', selector: '.nope', name: 'Nope' }] }],
         ['PATCH', `/api/clients/${aClient.rows[0].id}`, { name: 'Hacked' }],
+        ['PATCH', `/api/clients/${aClient.rows[0].id}/access`, { suspended: true }],
+        ['PATCH', `/api/clients/${aClient.rows[0].id}/access`, { archived: true }],
         ['DELETE', `/api/clients/${aClient.rows[0].id}`],
+        ['DELETE', `/api/account/members/${alpha.userId}`],
         ['POST', `/api/review-requests/${aReview.rows[0].id}/decide`, {}],
         ['PATCH', `/api/account/members/${alpha.userId}`, { role: 'member', account_id: beta.id }],
       ];
@@ -517,6 +520,50 @@ async function main() {
 
     await denyOwner(serverB, 'owner B');
     await denyOwner(serverMember, 'member B');
+
+    const peopleB = await request(serverB, 'GET', '/api/account/members');
+    assert.strictEqual(peopleB.status, 200, peopleB.text);
+    assert.ok(peopleB.json.people.some((person) => person.email === 'owner-b@beta.example'));
+    assert.ok(peopleB.json.people.some((person) => person.username === 'beta-client'));
+    assert.ok(!peopleB.text.includes('owner-a@alpha.example'));
+    assert.ok(!peopleB.text.includes('alpha-client'));
+    assert.ok(!peopleB.text.includes('Alpha Client'));
+    assert.ok(!peopleB.text.includes(alpha.userId));
+    assertClean(peopleB, 'owner B team');
+    const peopleMember = await request(serverMember, 'GET', '/api/account/members');
+    assert.strictEqual(peopleMember.status, 200, peopleMember.text);
+    assert.ok(peopleMember.json.people.some((person) => person.email === 'member-b@beta.example'));
+    assert.ok(!peopleMember.text.includes('owner-a@alpha.example'));
+    assert.ok(!peopleMember.text.includes('alpha-client'));
+    assertClean(peopleMember, 'member B team');
+    const memberRemove = await request(serverMember, 'DELETE', `/api/account/members/${beta.userId}`);
+    assert.strictEqual(memberRemove.status, 404, memberRemove.text);
+    const memberAccess = await request(serverMember, 'PATCH', `/api/clients/${bClient.rows[0].id}/access`, {
+      suspended: true,
+    });
+    assert.strictEqual(memberAccess.status, 404, memberAccess.text);
+    const memberCreateViewer = await request(serverMember, 'POST', '/api/clients', {
+      name: 'Sneak viewer',
+      username: 'sneak-viewer',
+      password: 'password1',
+    });
+    assert.strictEqual(memberCreateViewer.status, 404, memberCreateViewer.text);
+    const betaViewer = await db.query(`SELECT suspended_at FROM clients WHERE id = $1`, [bClient.rows[0].id]);
+    assert.strictEqual(betaViewer.rows[0].suspended_at, null);
+    const alphaViewer = await db.query(
+      `SELECT suspended_at, archived_at, name FROM clients WHERE id = $1`,
+      [aClient.rows[0].id]
+    );
+    assert.strictEqual(alphaViewer.rows[0].suspended_at, null);
+    assert.strictEqual(alphaViewer.rows[0].archived_at, null);
+    assert.strictEqual(alphaViewer.rows[0].name, 'Alpha Client');
+    const alphaStill = await db.query(
+      `SELECT removed_at FROM memberships WHERE account_id = $1 AND user_id = $2`,
+      [alpha.id, alpha.userId]
+    );
+    assert.strictEqual(alphaStill.rows[0].removed_at, null);
+    const sneakViewer = await db.query(`SELECT id FROM clients WHERE username = 'sneak-viewer'`);
+    assert.strictEqual(sneakViewer.rows.length, 0);
 
     const listB = await request(serverB, 'GET', '/api/account/members/invites');
     assert.strictEqual(listB.status, 200, listB.text);
@@ -835,6 +882,8 @@ async function main() {
       ['PATCH', `/api/experiments/${aRunning.id}/variants/${aSpare.rows[0].id}`, { name: 'Hacked', traffic_split: 1 }],
       ['PUT', `/api/experiments/${aRunning.id}/goals`, { goals: [{ type: 'click', selector: '.nope', name: 'Nope' }] }],
       ['DELETE', `/api/clients/${aClient.rows[0].id}`],
+      ['PATCH', `/api/clients/${aClient.rows[0].id}/access`, { suspended: true }],
+      ['DELETE', `/api/account/members/${alpha.userId}`],
       ['POST', `/api/experiments/${aRunning.id}/reveal`, { confirm: true }],
       ['PUT', `/api/experiments/${aRunning.id}/plan`, {}],
       ['POST', `/api/experiments/${aRunning.id}/test-traffic/remove`, { mode: 'test', confirm: true }],

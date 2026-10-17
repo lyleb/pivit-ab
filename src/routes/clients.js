@@ -3,9 +3,21 @@ const bcrypt = require('bcryptjs');
 const db = require('../db');
 const { endClientSessions } = require('../audit');
 const { requireAuth } = require('../middleware/auth');
+const { publicServerError } = require('../public-error');
+const { parseAccessBody, setViewerAccess } = require('../person-state');
+const { assertAgencyOwner, recordViewerAudit } = require('../team');
 const router = express.Router();
 
-router.use(requireAuth(['owner'])); // managing client accounts is owner-only
+router.use(requireAuth(['owner'])); // dashboard session. Membership Owner is checked on changes.
+
+async function ownerOr404(req, res) {
+  const actor = await assertAgencyOwner(req.account.id, req.account.userId);
+  if (!actor.ok) {
+    res.status(actor.status).json({ error: actor.error });
+    return null;
+  }
+  return actor;
+}
 
 // GET /api/clients — list, with a count of assigned experiments
 router.get('/', async (req, res) => {
@@ -31,6 +43,8 @@ router.get('/', async (req, res) => {
 // POST /api/clients { name, username, password }
 router.post('/', async (req, res) => {
   try {
+    const actor = await ownerOr404(req, res);
+    if (!actor) return;
     const { name, username, password } = req.body;
     if (!name || !username || !password) return res.status(400).json({ error: 'name, username, and password are required' });
     if (password.length < 8) return res.status(400).json({ error: 'password must be at least 8 characters' });
@@ -41,6 +55,16 @@ router.post('/', async (req, res) => {
        RETURNING id, name, username, created_at`,
       [name, username.trim().toLowerCase(), password_hash, req.account.id]
     );
+    await recordViewerAudit({
+      accountId: req.account.id,
+      userId: actor.userId,
+      actorLabel: actor.email,
+      action: 'viewer.created',
+      targetType: 'client',
+      targetId: rows[0].id,
+      detail: { name: rows[0].name, username: rows[0].username, kind: 'viewer' },
+      ip: req.ip,
+    });
     res.status(201).json(rows[0]);
   } catch (err) {
     console.error(err);
@@ -49,9 +73,40 @@ router.post('/', async (req, res) => {
   }
 });
 
+// PATCH /api/clients/:id/access  { suspended, archived }
+// This agency's Viewers only. It does not change a user's sign-in.
+router.patch('/:id/access', async (req, res) => {
+  try {
+    const flags = parseAccessBody(req.body);
+    if (!flags.ok) return res.status(flags.status).json({ error: flags.error });
+    if (!req.account.userId) return res.status(404).json({ error: 'not found' });
+    const result = await setViewerAccess({
+      actorUserId: req.account.userId,
+      clientId: req.params.id,
+      suspended: flags.suspended,
+      archived: flags.archived,
+      ip: req.ip,
+      accountId: req.account.id,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json({
+      id: result.id,
+      kind: result.kind,
+      suspended: result.suspended,
+      archived: result.archived,
+      changed: result.changed,
+    });
+  } catch (err) {
+    if (err && err.code === '22P02') return res.status(404).json({ error: 'not found' });
+    return res.status(500).json(publicServerError(err));
+  }
+});
+
 // PATCH /api/clients/:id — rename, change username, and/or reset password (all optional)
 router.patch('/:id', async (req, res) => {
   try {
+    const actor = await ownerOr404(req, res);
+    if (!actor) return;
     const { id } = req.params;
     const { name, username, password } = req.body;
     if (!name && !username && !password) return res.status(400).json({ error: 'nothing to update' });
@@ -78,7 +133,38 @@ router.patch('/:id', async (req, res) => {
       [newName, newUsername, newHash, id, req.account.id]
     );
     if (password) await endClientSessions(id);
-    res.json(rows[0]);
+    const saved = rows[0];
+    if (newName !== existing.name || newUsername !== existing.username) {
+      await recordViewerAudit({
+        accountId: req.account.id,
+        userId: actor.userId,
+        actorLabel: actor.email,
+        action: 'viewer.updated',
+        targetType: 'client',
+        targetId: saved.id,
+        detail: {
+          name: saved.name,
+          username: saved.username,
+          from_name: existing.name,
+          from_username: existing.username,
+          kind: 'viewer',
+        },
+        ip: req.ip,
+      });
+    }
+    if (password) {
+      await recordViewerAudit({
+        accountId: req.account.id,
+        userId: actor.userId,
+        actorLabel: actor.email,
+        action: 'viewer.password_reset',
+        targetType: 'client',
+        targetId: saved.id,
+        detail: { name: saved.name, username: saved.username, kind: 'viewer' },
+        ip: req.ip,
+      });
+    }
+    res.json(saved);
   } catch (err) {
     console.error(err);
     if (err.code === '23505') return res.status(400).json({ error: 'that username is already taken' });
@@ -89,16 +175,28 @@ router.patch('/:id', async (req, res) => {
 // DELETE /api/clients/:id — their experiments stay, just unassigned (ON DELETE SET NULL)
 router.delete('/:id', async (req, res) => {
   try {
+    const actor = await ownerOr404(req, res);
+    if (!actor) return;
     const { rows } = await db.query(
       `DELETE FROM clients
        WHERE id = $1 AND account_id = $2
          AND archived_at IS NULL
          AND deleted_at IS NULL
-       RETURNING id`,
+       RETURNING id, name, username`,
       [req.params.id, req.account.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no viewer found with that id' });
     await endClientSessions(req.params.id);
+    await recordViewerAudit({
+      accountId: req.account.id,
+      userId: actor.userId,
+      actorLabel: actor.email,
+      action: 'viewer.deleted',
+      targetType: 'client',
+      targetId: rows[0].id,
+      detail: { name: rows[0].name, username: rows[0].username, kind: 'viewer' },
+      ip: req.ip,
+    });
     res.status(204).end();
   } catch (err) {
     console.error(err);

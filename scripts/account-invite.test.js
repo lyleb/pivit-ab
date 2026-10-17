@@ -72,14 +72,17 @@ assert.strictEqual(
 assert.ok(!ui.auditActionLabel('account_invite_created').includes('Pivit'));
 
 assert.strictEqual(ui.canOpenTeam({ membership: 'owner' }), true);
-assert.strictEqual(ui.canOpenTeam({ membership: 'member' }), false);
+assert.strictEqual(ui.canOpenTeam({ membership: 'member' }), true);
+assert.strictEqual(ui.canManageTeam({ membership: 'owner' }), true);
+assert.strictEqual(ui.canManageTeam({ membership: 'member' }), false);
 assert.strictEqual(ui.canOpenTeam({ membership: 'owner', view_as: { id: 'x' } }), false);
+assert.strictEqual(ui.canManageTeam({ membership: 'owner', view_as: { id: 'x' } }), false);
 assert.strictEqual(ui.canOpenTeam({ superadmin: true }), false);
 assert.strictEqual(ui.canOpenTeam(null), false);
-assert.strictEqual(ui.teamDeniedMessage({}), 'Only an Owner can invite someone to this agency.');
+assert.strictEqual(ui.teamDeniedMessage({}), 'Team is for people in this agency.');
 assert.strictEqual(
   ui.teamDeniedMessage({ view_as: { id: 'x' } }),
-  'Stop the support view before you invite someone.'
+  'Stop the support view before you open Team.'
 );
 assert.deepStrictEqual(ui.teamRoute('#team'), { page: 'team' });
 assert.strictEqual(ui.teamRoute('#team?x=1').page, 'team');

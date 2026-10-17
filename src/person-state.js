@@ -346,21 +346,50 @@ async function setUserAccess({ actorUserId, actorEmail, userId, suspended, archi
   }
 }
 
-async function setViewerAccess({ actorUserId, actorEmail, clientId, suspended, archived, ip }) {
+async function setViewerAccess({ actorUserId, actorEmail, clientId, suspended, archived, ip, accountId }) {
   const actorId = String(actorUserId || '');
   const targetId = String(clientId || '');
   if (!UUID_RE.test(actorId) || !UUID_RE.test(targetId)) {
     return { ok: false, status: 404, error: 'not found' };
   }
+  const scopedAccount = accountId == null || accountId === '' ? null : String(accountId);
+  if (scopedAccount && !UUID_RE.test(scopedAccount)) {
+    return { ok: false, status: 404, error: 'not found' };
+  }
   const client = await db.pool.connect();
   try {
     await client.query('BEGIN');
+    let actorLabel = actorEmail;
+    if (scopedAccount) {
+      // An agency Owner can change only Viewers in their own agency.
+      // Anyone else, including an Owner of another agency, gets the same 404.
+      const owner = await client.query(
+        `SELECT m.role, m.removed_at, u.email, u.suspended_at, u.deleted_at
+         FROM memberships m
+         JOIN users u ON u.id = m.user_id
+         WHERE m.account_id = $1 AND m.user_id = $2
+         FOR UPDATE OF m`,
+        [scopedAccount, actorId]
+      );
+      const actor = owner.rows[0];
+      if (!actor || actor.role !== 'owner' || actor.removed_at || actor.suspended_at || actor.deleted_at) {
+        await rollback(client);
+        return { ok: false, status: 404, error: 'not found' };
+      }
+      actorLabel = actor.email;
+    }
+    const params = [targetId];
+    let where = 'id = $1';
+    if (scopedAccount) {
+      params.push(scopedAccount);
+      where += ' AND account_id = $2';
+    }
     const locked = await client.query(
       `SELECT id, name, username, account_id, suspended_at, archived_at, deleted_at
        FROM clients
-       WHERE id = $1
+       WHERE ${where}
        FOR UPDATE`,
-      [targetId]
+      params
     );
     const target = locked.rows[0];
     if (!target || target.deleted_at) {
@@ -392,7 +421,7 @@ async function setViewerAccess({ actorUserId, actorEmail, clientId, suspended, a
       await recordAudit(client, {
         accountId: target.account_id,
         userId: actorId,
-        actorLabel: actorEmail,
+        actorLabel: actorLabel,
         action: USER_ACTIONS[change],
         targetType: 'client',
         targetId: target.id,

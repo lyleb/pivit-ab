@@ -103,6 +103,20 @@ async function resolveSessionAccount(req) {
         [session.accountId]
       );
       if (!rows[0]) return null;
+      // A removed membership must not keep working on a session that was
+      // already open. Sessions with no user id are the legacy password path.
+      if (session.userId) {
+        const member = await db.query(
+          `SELECT m.role
+           FROM memberships m
+           JOIN users u ON u.id = m.user_id
+           WHERE m.account_id = $1 AND m.user_id = $2
+             AND m.removed_at IS NULL
+             AND u.deleted_at IS NULL`,
+          [session.accountId, session.userId]
+        );
+        if (!member.rows[0]) return null;
+      }
       return accountShape(rows[0], {
         userId: session.userId || null,
         superadmin: !!(actor && actor.is_superadmin),
