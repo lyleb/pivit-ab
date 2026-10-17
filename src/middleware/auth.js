@@ -1,4 +1,5 @@
 const { resolveSessionAccount, sessionActor } = require('../tenant');
+const { refuseClosedSession } = require('../person-state');
 
 const SAFE = new Set(['GET', 'HEAD']);
 
@@ -13,6 +14,7 @@ function requireAuth(allowedRoles) {
       return res.status(401).json({ error: 'not authenticated' });
     }
     try {
+      if (await refuseClosedSession(req, res)) return;
       const account = await resolveSessionAccount(req);
       if (!account) return res.status(401).json({ error: 'not authenticated' });
       req.account = account;
@@ -29,18 +31,20 @@ function requireAuth(allowedRoles) {
 
 // Superadmin-only routes. Anyone else gets 404, the same answer as a missing
 // record, so the route does not advertise itself. View as cannot manage invites.
-function requireSuperadmin(req, res, next) {
-  sessionActor(req).then((actor) => {
+async function requireSuperadmin(req, res, next) {
+  try {
+    if (await refuseClosedSession(req, res)) return;
+    const actor = await sessionActor(req);
     if (!actor || actor.is_superadmin !== true) return res.status(404).json({ error: 'not found' });
     if (req.session && req.session.viewAsAccountId) {
       return res.status(403).json({ error: 'View as is read-only.' });
     }
     req.superadmin = actor;
     return next();
-  }).catch((err) => {
+  } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'internal error' });
-  });
+  }
 }
 
 module.exports = { requireAuth, requireSuperadmin };

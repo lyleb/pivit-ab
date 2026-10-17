@@ -3,9 +3,18 @@
 
 const db = require('./db');
 const { recordAudit } = require('./audit');
+const { LAST_ACCOUNT_OWNER } = require('./person-state');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ROLES = new Set(['owner', 'member']);
+
+function activeOwner(row) {
+  return row.role === 'owner'
+    && !row.removed_at
+    && !row.suspended_at
+    && !row.archived_at
+    && !row.deleted_at;
+}
 
 async function setMembershipRole({ accountId, actorUserId, targetUserId, role, ip }) {
   const actorId = String(actorUserId || '').toLowerCase();
@@ -21,7 +30,8 @@ async function setMembershipRole({ accountId, actorUserId, targetUserId, role, i
   try {
     await client.query('BEGIN');
     const locked = await client.query(
-      `SELECT m.user_id, m.role, u.email
+      `SELECT m.user_id, m.role, m.removed_at, u.email,
+              u.suspended_at, u.archived_at, u.deleted_at
        FROM memberships m
        JOIN users u ON u.id = m.user_id
        WHERE m.account_id = $1
@@ -29,12 +39,12 @@ async function setMembershipRole({ accountId, actorUserId, targetUserId, role, i
       [accountId]
     );
     const actor = locked.rows.find((row) => String(row.user_id).toLowerCase() === actorId);
-    if (!actor || actor.role !== 'owner') {
+    if (!actor || actor.role !== 'owner' || actor.removed_at || actor.suspended_at || actor.deleted_at) {
       await client.query('ROLLBACK');
       return { ok: false, status: 404, error: 'not found' };
     }
     const target = locked.rows.find((row) => String(row.user_id).toLowerCase() === targetId);
-    if (!target) {
+    if (!target || target.removed_at || target.deleted_at) {
       await client.query('ROLLBACK');
       return { ok: false, status: 404, error: 'no user found with that id' };
     }
@@ -42,11 +52,11 @@ async function setMembershipRole({ accountId, actorUserId, targetUserId, role, i
       await client.query('COMMIT');
       return { ok: true, changed: false, role, email: target.email };
     }
-    if (target.role === 'owner' && role !== 'owner') {
-      const owners = locked.rows.filter((row) => row.role === 'owner').length;
-      if (owners <= 1) {
+    if (target.role === 'owner' && role !== 'owner' && activeOwner(target)) {
+      const owners = locked.rows.filter((row) => activeOwner(row) && String(row.user_id).toLowerCase() !== targetId).length;
+      if (owners < 1) {
         await client.query('ROLLBACK');
-        return { ok: false, status: 400, error: 'This agency needs at least one Owner.' };
+        return { ok: false, status: 400, error: LAST_ACCOUNT_OWNER };
       }
     }
     await client.query(

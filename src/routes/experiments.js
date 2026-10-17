@@ -563,7 +563,10 @@ router.post('/', async (req, res) => {
   const accountId = req.account.id;
   if (client_id) {
     const ownedClient = await db.query(
-      `SELECT id FROM clients WHERE id = $1 AND account_id = $2`,
+      `SELECT id FROM clients
+       WHERE id = $1 AND account_id = $2
+         AND archived_at IS NULL
+         AND deleted_at IS NULL`,
       [client_id, accountId]
     );
     if (ownedClient.rows.length === 0) return res.status(404).json({ error: 'no viewer found with that id' });
@@ -621,7 +624,10 @@ router.patch('/:id/client', async (req, res) => {
     const { client_id } = req.body;
     if (client_id) {
       const ownedClient = await db.query(
-        `SELECT id FROM clients WHERE id = $1 AND account_id = $2`,
+        `SELECT id FROM clients
+         WHERE id = $1 AND account_id = $2
+           AND archived_at IS NULL
+           AND deleted_at IS NULL`,
         [client_id, req.account.id]
       );
       if (ownedClient.rows.length === 0) return res.status(404).json({ error: 'no viewer found with that id' });

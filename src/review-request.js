@@ -16,6 +16,9 @@ async function ownerEmails(accountId) {
      JOIN users u ON u.id = m.user_id
      WHERE m.account_id = $1
        AND m.role = 'owner'
+       AND m.removed_at IS NULL
+       AND u.suspended_at IS NULL
+       AND u.deleted_at IS NULL
        AND u.email <> ''`,
     [accountId]
   );

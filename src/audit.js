@@ -30,14 +30,19 @@ async function writeAudit(query, entry) {
   );
 }
 
-async function endUserSessions(userId) {
-  if (!userId) return;
-  await db.query(`DELETE FROM "session" WHERE sess->>'userId' = $1`, [String(userId)]);
+function queryOf(queryable) {
+  const source = queryable && queryable.query ? queryable : db;
+  return source.query.bind(source);
 }
 
-async function endClientSessions(clientId) {
+async function endUserSessions(userId, queryable) {
+  if (!userId) return;
+  await queryOf(queryable)(`DELETE FROM "session" WHERE sess->>'userId' = $1`, [String(userId)]);
+}
+
+async function endClientSessions(clientId, queryable) {
   if (!clientId) return;
-  await db.query(`DELETE FROM "session" WHERE sess->>'clientId' = $1`, [String(clientId)]);
+  await queryOf(queryable)(`DELETE FROM "session" WHERE sess->>'clientId' = $1`, [String(clientId)]);
 }
 
 module.exports = { recordAudit, endUserSessions, endClientSessions };
