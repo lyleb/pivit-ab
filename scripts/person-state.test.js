@@ -81,7 +81,7 @@ assert.strictEqual(
 );
 
 const dashboard = read('public/index.html');
-assert.ok(!dashboard.includes('id="admin-users"'));
-assert.ok(!dashboard.includes('Suspend sign-in'));
+assert.ok(dashboard.includes('id="admin-users"'));
+assert.ok(dashboard.includes('Suspend sign-in'));
 
 console.log('person state tests passed');

@@ -648,8 +648,15 @@ async function main() {
     assert.strictEqual(takeLastLoggedEmail(), null);
     const people = await request(server, 'GET', '/api/admin/users', null, benAgain);
     assert.ok(!people.json.people.some((person) => person.id === miaId));
-    assert.ok(people.json.people.some((person) => person.email === 'ada@alpha.example' && person.role === 'owner'));
-    assert.ok(people.json.people.some((person) => person.id === benId && person.superadmin === true));
+    const adaPerson = people.json.people.find((person) => person.email === 'ada@alpha.example' && person.role === 'owner');
+    assert.ok(adaPerson);
+    assert.ok(adaPerson.created_at);
+    assert.ok(!Number.isNaN(Date.parse(adaPerson.created_at)));
+    assert.ok(adaPerson.last_sign_in);
+    const benPerson = people.json.people.find((person) => person.id === benId && person.superadmin === true);
+    assert.ok(benPerson);
+    assert.ok(benPerson.created_at);
+    assert.ok(people.json.people.some((person) => person.kind === 'viewer' && person.username && person.created_at));
 
     console.log('person state db tests passed');
   } finally {

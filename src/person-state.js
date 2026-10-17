@@ -424,13 +424,14 @@ function personShape(row) {
     suspended: row.suspended_at != null,
     archived: row.archived_at != null,
     last_sign_in: row.last_sign_in || null,
+    created_at: row.created_at || null,
   };
 }
 
 async function listPeople() {
   const [users, viewers] = await Promise.all([
     db.query(
-      `SELECT u.id, u.email, u.is_superadmin, u.suspended_at, u.archived_at,
+      `SELECT u.id, u.email, u.is_superadmin, u.suspended_at, u.archived_at, u.created_at,
               m.role, m.account_id, a.name AS account_name,
               (SELECT MAX(l.created_at) FROM audit_log l
                WHERE l.actor_user_id = u.id AND l.action = 'signin') AS last_sign_in
@@ -440,7 +441,7 @@ async function listPeople() {
        WHERE u.deleted_at IS NULL`
     ),
     db.query(
-      `SELECT c.id, c.name, c.username, c.suspended_at, c.archived_at,
+      `SELECT c.id, c.name, c.username, c.suspended_at, c.archived_at, c.created_at,
               c.account_id, a.name AS account_name,
               (SELECT MAX(l.created_at) FROM audit_log l
                WHERE l.target_type = 'client' AND l.target_id = c.id::text AND l.action = 'signin') AS last_sign_in
@@ -460,6 +461,7 @@ async function listPeople() {
     suspended_at: row.suspended_at,
     archived_at: row.archived_at,
     last_sign_in: row.last_sign_in,
+    created_at: row.created_at,
   })).concat(viewers.rows.map((row) => personShape({
     id: row.id,
     kind: 'viewer',
@@ -472,6 +474,7 @@ async function listPeople() {
     suspended_at: row.suspended_at,
     archived_at: row.archived_at,
     last_sign_in: row.last_sign_in,
+    created_at: row.created_at,
   })));
   people.sort((a, b) => {
     const labelA = a.email || a.username || '';
