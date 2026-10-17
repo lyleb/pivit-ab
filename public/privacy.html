@@ -3,6 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script>
+window.dataLayer=window.dataLayer||[];
+function gtag(){dataLayer.push(arguments);}
+gtag('consent','default',{analytics_storage:'denied',ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied'});
+</script>
 <meta name="robots" content="noindex, nofollow">
 <link rel="canonical" href="https://pivitlab.com/privacy.html">
 <link rel="icon" href="/favicon.ico" sizes="any">
@@ -11,6 +16,7 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>pivitlab — Privacy notice (placeholder)</title>
 <link rel="stylesheet" href="/assets/pivit.css?v=5">
+<link rel="stylesheet" href="/consent.css?v=2">
 </head>
 <body>
 <div class="legal-wrap">
@@ -18,11 +24,97 @@
   <p class="placeholder-mark">Placeholder for Lyle to write</p>
   <h1>Privacy notice</h1>
   <div class="banner">
-    This page is a placeholder for Lyle's wording. It is not a privacy notice. The request-access form stays switched off until this page has the real wording.
+    This page is a placeholder for Lyle's wording, apart from the cookies section below. It is not a complete privacy notice. The request-access form stays switched off until this page has the real wording.
   </div>
   <p>Placeholder. Replace this page with the privacy notice: what is collected (name, work email, website, and test data), where it is stored, how long it is kept, and who it is shared with. Sign-in email is sent through Postmark. The wording here is not that notice.</p>
+
+  <h2 id="cookies">Cookies on the public pages</h2>
+  <p>This section covers the public pivitlab pages: the homepage, this page, and the terms page. The sign-in pages, the dashboard, and the experiment snippet customers paste into their own sites do not show this banner and do not load these tags.</p>
+  <p>Before any Google script runs, those pages set Google Consent Mode to denied for <code>analytics_storage</code>, <code>ad_storage</code>, <code>ad_user_data</code> and <code>ad_personalization</code>. Google Tag Manager, Google Analytics 4 and Microsoft Clarity are not loaded, and nothing is sent to Google or Microsoft, until you click Accept.</p>
+  <p>Accept calls <code>gtag('consent','update',{analytics_storage:'granted'})</code>. Advertising storage stays denied. The browser then loads Google Tag Manager, container <code>GTM-KZCDC3HJ</code>. That container contains Google Analytics 4, measurement id <code>G-NT78JHVHGY</code>, and Microsoft Clarity. Reject loads nothing.</p>
+  <p>The choice is stored in this browser under the localStorage key <code>pivitlab_analytics_consent</code>. That is not a cookie. The values are <code>granted</code> and <code>denied</code>. Nothing is written until you click. The code sets no expiry. It stays until you clear site data for this browser, or you choose again from Cookie settings. Choosing Reject after Accept sets consent back to denied and deletes the <code>_ga</code>, <code>_ga_*</code>, <code>_clck</code> and <code>_clsk</code> cookies where the browser allows.</p>
+  <p>Google is the processor for Tag Manager and Google Analytics 4. Microsoft is the processor for Clarity. TODO: confirm the contracting legal entities and that data-processing terms are signed. TODO: the controller’s legal name is not in this repository. The public site is pivitlab. Do not treat “built by Heclr” as a registered controller name.</p>
+  <p>Tag Manager is the loader. This page does not name a cookie set by Tag Manager itself. TODO: confirm the published container adds no cookies beyond Google Analytics 4 and Microsoft Clarity. TODO: the Clarity project id inside the container is not in this repository. TODO: confirm the Google Analytics 4 and Clarity retention settings, where those events are stored, and the international transfer safeguard.</p>
+
+  <div class="table-scroll">
+    <table class="cookie-table">
+      <caption class="hint">Storage used on the public pages. Analytics cookies are set only after Accept.</caption>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Who sets it</th>
+          <th>Purpose</th>
+          <th>How long</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th><code>pivitlab_analytics_consent</code></th>
+          <td>pivitlab</td>
+          <td>Remembers Accept or Reject. localStorage, not a cookie. Written only after a click.</td>
+          <td>No expiry is set in the code. It stays until site data for this browser is cleared.</td>
+        </tr>
+        <tr>
+          <th><code>_ga</code></th>
+          <td>Google Analytics 4</td>
+          <td>After Accept only. Distinguishes browsers. Set by the Google Analytics 4 tag inside Tag Manager, measurement id <code>G-NT78JHVHGY</code>.</td>
+          <td>About 2 years, the Google Analytics 4 default. TODO: confirm this property has not shortened the cookie expiry.</td>
+        </tr>
+        <tr>
+          <th><code>_ga_*</code></th>
+          <td>Google Analytics 4</td>
+          <td>After Accept only. Keeps session state for that property. The suffix is the measurement id without the <code>G-</code> prefix, so this property’s cookie is <code>_ga_NT78JHVHGY</code>.</td>
+          <td>About 2 years. TODO: confirm this property has not shortened the cookie expiry.</td>
+        </tr>
+        <tr>
+          <th><code>_clck</code></th>
+          <td>Microsoft Clarity</td>
+          <td>After Accept only. Persists the Clarity user id and preferences for this site. First-party. Named on Microsoft’s Clarity cookie list.</td>
+          <td>TODO: the Microsoft page checked on 17 October 2026 names this cookie and does not state a lifetime.</td>
+        </tr>
+        <tr>
+          <th><code>_clsk</code></th>
+          <td>Microsoft Clarity</td>
+          <td>After Accept only. Connects page views into one Clarity session recording. First-party.</td>
+          <td>TODO: lifetime not stated on the Microsoft page checked on 17 October 2026.</td>
+        </tr>
+        <tr>
+          <th><code>CLID</code></th>
+          <td>Microsoft Clarity</td>
+          <td>After Accept only. Identifies the first time Clarity saw this browser on any site using Clarity. Set by Microsoft, not by this site, so pivitlab cannot delete it.</td>
+          <td>TODO: lifetime not stated on the Microsoft page checked on 17 October 2026.</td>
+        </tr>
+        <tr>
+          <th><code>ANONCHK</code></th>
+          <td>Microsoft Clarity</td>
+          <td>After Accept only. Indicates whether MUID is transferred to ANID, a cookie used for advertising. Clarity does not use ANID, so this stays 0. Set by Microsoft. pivitlab cannot delete it.</td>
+          <td>TODO: lifetime not stated on the Microsoft page checked on 17 October 2026.</td>
+        </tr>
+        <tr>
+          <th><code>MR</code></th>
+          <td>Microsoft Clarity</td>
+          <td>After Accept only. Indicates whether to refresh MUID. Set by Microsoft. pivitlab cannot delete it.</td>
+          <td>TODO: lifetime not stated on the Microsoft page checked on 17 October 2026.</td>
+        </tr>
+        <tr>
+          <th><code>MUID</code></th>
+          <td>Microsoft Clarity</td>
+          <td>After Accept only. Identifies the browser on Microsoft sites. Used for advertising, site analytics, and other operations. Set by Microsoft. pivitlab cannot delete it.</td>
+          <td>TODO: lifetime not stated on the Microsoft page checked on 17 October 2026.</td>
+        </tr>
+        <tr>
+          <th><code>SM</code></th>
+          <td>Microsoft Clarity</td>
+          <td>After Accept only. Synchronises MUID across Microsoft domains. Set by Microsoft. pivitlab cannot delete it.</td>
+          <td>TODO: lifetime not stated on the Microsoft page checked on 17 October 2026.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
   <p class="hint">Questions about this placeholder go to Lyle. The address on outgoing mail is a no-reply address; replies are directed to info@heclr.com.</p>
-  <p><a href="/">Back to pivitlab</a> · <a href="/legal.html">Terms</a></p>
+  <p><a href="/">Back to pivitlab</a> · <a href="/legal.html">Terms</a> · <button type="button" class="cookie-settings" data-cookie-settings>Cookie settings</button></p>
 </div>
+<script src="/consent.js?v=1"></script>
 </body>
 </html>

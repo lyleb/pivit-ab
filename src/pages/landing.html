@@ -3,6 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script>
+window.dataLayer=window.dataLayer||[];
+function gtag(){dataLayer.push(arguments);}
+gtag('consent','default',{analytics_storage:'denied',ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied'});
+</script>
 <title>pivitlab: A/B testing without the enterprise baggage</title>
 <meta name="description" content="Self-serve A/B testing for small and growing businesses. Plan the test, let it run, and get an honest Win, Loss or Inconclusive verdict. Built in the UK. Private beta, invite only.">
 <meta name="robots" content="index, follow">
@@ -244,6 +249,7 @@ footer nav{display:flex;gap:22px;flex-wrap:wrap}
   footer .wrap{flex-direction:column;align-items:flex-start}
 }
 </style>
+<link rel="stylesheet" href="/consent.css?v=2">
 </head>
 <body>
 
@@ -604,11 +610,13 @@ footer nav{display:flex;gap:22px;flex-wrap:wrap}
     <nav aria-label="Footer">
       <a href="/privacy.html">Privacy</a>
       <a href="/legal.html">Terms</a>
+      <button type="button" class="cookie-settings" data-cookie-settings>Cookie settings</button>
       <a href="mailto:info@pivitlab.com">info@pivitlab.com</a>
       <a href="/login.html">Sign in</a>
     </nav>
   </div>
 </footer>
+<script src="/consent.js?v=1"></script>
 
 </body>
 </html>

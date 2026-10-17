@@ -1,0 +1,125 @@
+/* Public-page cookie banner. Loaded with the homepage, privacy page, and terms page. */
+
+.pivit-consent {
+  position: fixed;
+  z-index: 40;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  width: min(320px, calc(100vw - 32px));
+  margin: 0;
+  padding: 14px 14px 12px;
+  background: var(--card, #171a22);
+  color: var(--ink, #e8e9f0);
+  border: 1px solid var(--border, #2c3140);
+  border-radius: 14px;
+  box-shadow: 0 16px 40px -24px rgba(0, 0, 0, 0.85);
+  font-family: inherit;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.pivit-consent[hidden] { display: none !important; }
+
+.pivit-consent:focus {
+  outline: 2px solid var(--mint, #02DEB5);
+  outline-offset: 2px;
+}
+
+.pivit-consent p {
+  margin: 0 0 12px;
+}
+
+.pivit-consent-more {
+  margin: -4px 0 12px;
+  font-size: 0.75rem;
+}
+
+.pivit-consent-more a {
+  color: var(--muted, var(--text-muted, #9398ab));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.pivit-consent-more a:hover { color: var(--ink, #e8e9f0); }
+
+.pivit-consent-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  width: 100%;
+  gap: 8px;
+}
+
+.pivit-consent button.pivit-consent-accept,
+.pivit-consent button.pivit-consent-reject {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  justify-self: stretch;
+  min-height: 40px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.pivit-consent button.pivit-consent-accept {
+  background: var(--indigo, #5635FB);
+  color: #fff;
+  border-color: var(--indigo, #5635FB);
+}
+
+.pivit-consent button.pivit-consent-accept:hover {
+  background: var(--indigo-dark, #4527d6);
+  border-color: var(--indigo-dark, #4527d6);
+}
+
+.pivit-consent button.pivit-consent-reject {
+  background: transparent;
+  color: var(--ink, #e8e9f0);
+  border-color: var(--border, #2c3140);
+}
+
+.pivit-consent button.pivit-consent-reject:hover {
+  background: #1b1f29;
+  border-color: #3a4054;
+}
+
+.pivit-consent button:focus-visible {
+  outline: 2px solid var(--mint, #02DEB5);
+  outline-offset: 2px;
+}
+
+button.cookie-settings {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  cursor: pointer;
+  color: var(--muted, var(--text-muted, #9398ab));
+  text-decoration: none;
+}
+
+footer button.cookie-settings:hover,
+button.cookie-settings:hover { color: var(--ink, #e8e9f0); }
+
+.legal-wrap button.cookie-settings {
+  color: var(--mint-dark, #7dffe2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.legal-wrap button.cookie-settings:hover { color: var(--ink, #e8e9f0); }
+
+.legal-wrap .cookie-table td { vertical-align: top; }
+
+.legal-wrap .cookie-table { min-width: 640px; }
