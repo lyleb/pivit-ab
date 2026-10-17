@@ -418,6 +418,7 @@
     'user.unsuspended': 'Allowed sign-in again',
     'user.archived': 'Archived a person',
     'user.restored': 'Restored a person',
+    'user.deleted': 'Deleted a person',
   };
 
   function auditActionLabel(action) {
@@ -428,6 +429,7 @@
   function auditDetailText(entry) {
     const detail = (entry && entry.detail) || {};
     if (entry && String(entry.action || '').indexOf('user.') === 0) {
+      if (detail.label) return String(detail.label);
       if (detail.email) return String(detail.email);
       if (detail.username) return String(detail.username);
     }
@@ -640,6 +642,48 @@
     return '';
   }
 
+  function otherPlatformAdmin(person, people) {
+    const self = String(person.id).toLowerCase();
+    return (people || []).some((other) => {
+      if (!other || other.kind === 'viewer' || !other.superadmin) return false;
+      return String(other.id).toLowerCase() !== self;
+    });
+  }
+
+  // An Owner who is suspended or archived still counts. Delete is permanent,
+  // so the agency must keep someone who can be restored.
+  function soleRemainingOwner(person, people) {
+    if (!person || person.kind === 'viewer') return false;
+    const self = String(person.id).toLowerCase();
+    const accounts = new Set();
+    (people || []).forEach((row) => {
+      if (!row || row.kind === 'viewer') return;
+      if (String(row.id).toLowerCase() !== self) return;
+      if (row.role === 'owner' && row.account_id) accounts.add(String(row.account_id));
+    });
+    for (const accountId of accounts) {
+      const covered = (people || []).some((other) => {
+        if (!other || other.kind === 'viewer') return false;
+        if (String(other.account_id) !== accountId) return false;
+        if (String(other.id).toLowerCase() === self) return false;
+        if (other.role !== 'owner') return false;
+        return true;
+      });
+      if (!covered) return true;
+    }
+    return false;
+  }
+
+  function personDeleteBlock(person, people, selfEmail) {
+    if (!person || person.kind === 'viewer') return '';
+    if (person.superadmin && !otherPlatformAdmin(person, people)) return USERS_GUARD_LAST_ADMIN;
+    if (soleRemainingOwner(person, people)) return USERS_GUARD_LAST_OWNER;
+    if (selfEmail && person.email && usersText(person.email) === usersText(selfEmail)) {
+      return USERS_GUARD_SELF;
+    }
+    return '';
+  }
+
   function personActions(person, people, selfEmail) {
     const block = closingBlock(person, people, selfEmail);
     const actions = [];
@@ -648,6 +692,14 @@
     else actions.push({ id: 'suspend', label: 'Suspend', blocked: block, danger: true });
     if (person.archived) actions.push({ id: 'restore', label: 'Restore', blocked: '' });
     else actions.push({ id: 'archive', label: 'Archive', blocked: personOpen(person) ? block : '', danger: true });
+    if (person.suspended || person.archived) {
+      actions.push({
+        id: 'delete',
+        label: 'Delete',
+        blocked: personDeleteBlock(person, people, selfEmail),
+        danger: true,
+      });
+    }
     const reason = actions.map((action) => action.blocked).find(Boolean) || '';
     return { actions, reason };
   }
@@ -679,8 +731,29 @@
         danger: false,
         body: `Restore ${who}? They show in lists and dropdowns again.`,
       },
+      delete: {
+        title: 'Delete this person?',
+        confirm: 'Delete',
+        danger: true,
+        typed: true,
+        prompt: person && person.kind === 'viewer' ? 'Type their username' : 'Type their email',
+        body: `Delete ${who}? This cannot be undone. pivitlab removes their name, email or username, password and sign-in tokens, and their place in every agency. The audit log stays, under a label that does not name them.`,
+      },
     };
     return copy[action] || null;
+  }
+
+  function personConfirmPhrase(person) {
+    if (!person) return '';
+    if (person.kind === 'viewer') return String(person.username || '').trim();
+    return String(person.email || '').trim();
+  }
+
+  function personConfirmReady(action, person, typed) {
+    if (action !== 'delete') return true;
+    const expected = personConfirmPhrase(person);
+    if (!expected) return false;
+    return usersText(typed) === usersText(expected);
   }
 
   function personAccessPatch(action) {
@@ -709,6 +782,7 @@
       unsuspend: 'Sign-in allowed again.',
       archive: 'Archived. They stay hidden from lists until you restore them.',
       restore: 'Restored.',
+      delete: 'Deleted. The audit log keeps the history without their personal details.',
     }[action] || '';
   }
 
@@ -868,7 +942,10 @@
     personStatusLabel,
     personIdentity,
     personActions,
+    personDeleteBlock,
     personConfirm,
+    personConfirmPhrase,
+    personConfirmReady,
     personAccessPatch,
     personAccessPath,
     personRowKey,

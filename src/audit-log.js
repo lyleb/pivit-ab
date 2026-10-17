@@ -2,6 +2,10 @@
 // A filter cannot widen the query to another account.
 
 const db = require('./db');
+const { deletedLabelSql } = require('./person-state');
+
+const DELETED_USER_LABEL = deletedLabelSql('u.id');
+const DELETED_CLIENT_LABEL = deletedLabelSql('c.id');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACTION_RE = /^[a-z0-9_]{1,80}$/i;
@@ -173,7 +177,10 @@ async function listAccountAudit(accountId, query) {
          AND NOT EXISTS (
            SELECT 1 FROM users u
            WHERE (u.archived_at IS NOT NULL OR u.deleted_at IS NOT NULL)
-             AND lower(u.email) = lower(l.actor_label)
+             AND (
+               lower(u.email) = lower(l.actor_label)
+               OR l.actor_label = ${DELETED_USER_LABEL}
+             )
          )
          AND NOT EXISTS (
            SELECT 1 FROM clients c
@@ -182,6 +189,7 @@ async function listAccountAudit(accountId, query) {
              AND (
                lower(c.username) = lower(l.actor_label)
                OR c.name = l.actor_label
+               OR l.actor_label = ${DELETED_CLIENT_LABEL}
              )
          )
        ORDER BY l.actor_label`,

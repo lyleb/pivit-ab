@@ -266,6 +266,9 @@
   .users-actions button:disabled,
   .users-actions button:disabled:hover { background: #3a3e50; color: #9aa0b4; }
   .users-guard { margin: 6px 0 0; max-width: 32em; }
+  #users-confirm-match-wrap { margin-top: 12px; }
+  #users-confirm-match-wrap[hidden] { display: none; }
+  #users-confirm-match { width: 100%; }
   .users-identity .hint { margin: 2px 0 0; }
   .users-status { display: flex; flex-wrap: wrap; gap: 4px; }
   #users-table td { vertical-align: top; }
@@ -717,7 +720,7 @@
       <div class="page-head">
         <div>
           <h1>Users</h1>
-          <p class="hint" style="margin:4px 0 0;">Everyone in pivitlab, across every agency. Archived people stay hidden until you show them. Nothing here deletes a person.</p>
+          <p class="hint" style="margin:4px 0 0;">Everyone in pivitlab, across every agency. Archived people stay hidden until you show them. Delete is only for someone already suspended or archived, and you have to type their email or username.</p>
         </div>
       </div>
       <p id="users-denied" class="hint" hidden></p>
@@ -788,6 +791,10 @@
     </div>
     <div class="modal-body">
       <p id="users-confirm-body" style="margin-top:0;"></p>
+      <div id="users-confirm-match-wrap" hidden>
+        <label id="users-confirm-match-label" for="users-confirm-match">Type their email or username</label>
+        <input id="users-confirm-match" type="text" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off">
+      </div>
       <p id="users-confirm-error" class="error-msg" hidden></p>
     </div>
     <div class="modal-foot">
@@ -5615,12 +5622,24 @@ function closeUsersConfirm() {
   const modal = document.getElementById('users-confirm');
   if (modal) modal.classList.remove('active');
   usersPending = null;
+  const matchWrap = document.getElementById('users-confirm-match-wrap');
+  const match = document.getElementById('users-confirm-match');
+  if (matchWrap) matchWrap.hidden = true;
+  if (match) match.value = '';
   const error = document.getElementById('users-confirm-error');
   if (error) {
     error.hidden = true;
     error.textContent = '';
   }
   syncModalScrollLock();
+}
+
+function syncUsersConfirmReady() {
+  const go = document.getElementById('users-confirm-go');
+  if (!go || !usersPending) return;
+  const person = findUsersPerson(usersPending.key);
+  const typed = document.getElementById('users-confirm-match').value;
+  go.disabled = !UI.personConfirmReady(usersPending.action, person, typed);
 }
 
 function openUsersConfirm(person, action) {
@@ -5634,40 +5653,66 @@ function openUsersConfirm(person, action) {
   const go = document.getElementById('users-confirm-go');
   go.textContent = copy.confirm;
   go.classList.toggle('btn-danger', copy.danger === true);
-  go.disabled = false;
+  const matchWrap = document.getElementById('users-confirm-match-wrap');
+  const match = document.getElementById('users-confirm-match');
+  const matchLabel = document.getElementById('users-confirm-match-label');
+  match.value = '';
+  if (copy.typed) {
+    matchWrap.hidden = false;
+    matchLabel.textContent = copy.prompt;
+    go.disabled = true;
+  } else {
+    matchWrap.hidden = true;
+    go.disabled = false;
+  }
   const error = document.getElementById('users-confirm-error');
   error.hidden = true;
   error.textContent = '';
   document.getElementById('users-confirm').classList.add('active');
   syncModalScrollLock();
-  document.getElementById('users-confirm-cancel').focus();
+  if (copy.typed) match.focus();
+  else document.getElementById('users-confirm-cancel').focus();
 }
 
 async function confirmUsersAction() {
   if (!usersPending) return;
   const pending = usersPending;
   const person = findUsersPerson(pending.key);
+  const isDelete = pending.action === 'delete';
   const patch = UI.personAccessPatch(pending.action);
   const path = person && UI.personAccessPath(person);
   const go = document.getElementById('users-confirm-go');
   const error = document.getElementById('users-confirm-error');
-  if (!person || !patch || !path) {
+  const typed = document.getElementById('users-confirm-match').value;
+  if (!person || !path || (!isDelete && !patch)) {
     error.hidden = false;
     error.textContent = 'That person is no longer in the list.';
     return;
   }
+  if (isDelete && !UI.personConfirmReady('delete', person, typed)) {
+    error.hidden = false;
+    error.textContent = "That doesn't match their email or username.";
+    return;
+  }
   if (go) go.disabled = true;
-  const result = await callApi(path, {
+  const result = await callApi(path, isDelete ? {
+    method: 'DELETE',
+    headers: authHeaders(),
+    body: JSON.stringify({ confirm: typed.trim() }),
+  } : {
     method: 'PATCH',
     headers: authHeaders(),
     body: JSON.stringify(patch),
   });
-  if (go) go.disabled = false;
   if (!result.ok) {
-    const message = (result.data && result.data.error) || 'Could not update this person.';
+    const message = (result.data && result.data.error) || (isDelete
+      ? 'Could not delete this person.'
+      : 'Could not update this person.');
     error.hidden = false;
     error.textContent = message;
     await loadUsers();
+    if (go && isDelete) syncUsersConfirmReady();
+    else if (go) go.disabled = false;
     return;
   }
   usersFlash = UI.personDoneMessage(pending.action);
@@ -5704,6 +5749,13 @@ document.getElementById('users-table').addEventListener('click', (event) => {
 document.getElementById('users-confirm-close').addEventListener('click', closeUsersConfirm);
 document.getElementById('users-confirm-cancel').addEventListener('click', closeUsersConfirm);
 document.getElementById('users-confirm-go').addEventListener('click', confirmUsersAction);
+document.getElementById('users-confirm-match').addEventListener('input', syncUsersConfirmReady);
+document.getElementById('users-confirm-match').addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  const go = document.getElementById('users-confirm-go');
+  if (go && !go.disabled) confirmUsersAction();
+});
 document.getElementById('users-confirm').addEventListener('click', (event) => {
   if (event.target.id === 'users-confirm') closeUsersConfirm();
 });
