@@ -513,7 +513,7 @@ async function main() {
 
     const demoteAda = await request(server, 'PATCH', `/api/account/members/${adaId}`, { role: 'member' }, adaJar);
     assert.strictEqual(demoteAda.status, 400, demoteAda.text);
-    assert.ok(demoteAda.json.error.includes('at least one owner'));
+    assert.strictEqual(demoteAda.json.error, LAST_ACCOUNT_OWNER);
 
     const noah = await db.query(
       `INSERT INTO users (email, verified_at) VALUES ('noah@alpha.example', now()) RETURNING id`

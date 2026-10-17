@@ -3,6 +3,7 @@
 
 const db = require('./db');
 const { recordAudit } = require('./audit');
+const { LAST_ACCOUNT_OWNER } = require('./person-state');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ROLES = new Set(['owner', 'member']);
@@ -55,7 +56,7 @@ async function setMembershipRole({ accountId, actorUserId, targetUserId, role, i
       const owners = locked.rows.filter((row) => activeOwner(row) && String(row.user_id).toLowerCase() !== targetId).length;
       if (owners < 1) {
         await client.query('ROLLBACK');
-        return { ok: false, status: 400, error: 'This agency needs at least one Owner.' };
+        return { ok: false, status: 400, error: LAST_ACCOUNT_OWNER };
       }
     }
     await client.query(

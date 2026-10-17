@@ -39,8 +39,8 @@ assert.ok(!/\bTRUNCATE\b/i.test(migration));
 assert.ok(!/\bUPDATE\s/i.test(migration));
 
 assert.strictEqual(SIGN_IN_CLOSED, "That sign-in isn't available.");
-assert.strictEqual(LAST_PLATFORM_ADMIN, 'pivitlab needs at least one platform admin.');
-assert.strictEqual(LAST_ACCOUNT_OWNER, 'This account needs at least one owner.');
+assert.strictEqual(LAST_PLATFORM_ADMIN, 'pivitlab needs at least one Platform admin.');
+assert.strictEqual(LAST_ACCOUNT_OWNER, 'This agency needs at least one Owner.');
 assert.strictEqual(NOT_YOURSELF, "You can't change your own access.");
 for (const line of [SIGN_IN_CLOSED, LAST_PLATFORM_ADMIN, LAST_ACCOUNT_OWNER, NOT_YOURSELF]) {
   assert.ok(!line.includes('Pivitlab'), line);

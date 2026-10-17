@@ -11,8 +11,8 @@ const { clearSessionCookie } = require('./session-cookie');
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const SIGN_IN_CLOSED = "That sign-in isn't available.";
-const LAST_PLATFORM_ADMIN = 'pivitlab needs at least one platform admin.';
-const LAST_ACCOUNT_OWNER = 'This account needs at least one owner.';
+const LAST_PLATFORM_ADMIN = 'pivitlab needs at least one Platform admin.';
+const LAST_ACCOUNT_OWNER = 'This agency needs at least one Owner.';
 const NOT_YOURSELF = "You can't change your own access.";
 
 const SIGN_IN_POSTS = new Set([
