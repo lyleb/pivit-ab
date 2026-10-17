@@ -3,6 +3,7 @@ const { requireAuth } = require('../middleware/auth');
 const { publicServerError } = require('../public-error');
 const { tooMany } = require('../rate-limit');
 const { setMembershipRole } = require('../membership-role');
+const { listTeam, removeMembership } = require('../team');
 const {
   createAccountInvite,
   listAccountInvites,
@@ -31,6 +32,21 @@ function sendInviteResult(res, result) {
   if (result.resent) body.resent = true;
   return res.status(result.status || 200).json(body);
 }
+
+// Owners and Members. Another agency's people are not in this list.
+router.get('/', async (req, res) => {
+  try {
+    const result = await listTeam({
+      accountId: req.account.id,
+      actorUserId: req.account.userId,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    res.set('Cache-Control', 'no-store');
+    return res.json({ people: result.people });
+  } catch (err) {
+    return res.status(500).json(publicServerError(err));
+  }
+});
 
 // The account is the session account. Another agency's invite id is missing.
 router.get('/invites', async (req, res) => {
@@ -85,6 +101,23 @@ router.post('/invites/:id/resend', async (req, res) => {
       ip: req.ip,
     });
     return sendInviteResult(res, result);
+  } catch (err) {
+    return res.status(500).json(publicServerError(err));
+  }
+});
+
+// DELETE /api/account/members/:userId
+// Drops the membership for this agency only. The user account stays.
+router.delete('/:userId', async (req, res) => {
+  try {
+    const result = await removeMembership({
+      accountId: req.account.id,
+      actorUserId: req.account.userId,
+      targetUserId: req.params.userId,
+      ip: req.ip,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json({ user_id: result.id, removed: true });
   } catch (err) {
     return res.status(500).json(publicServerError(err));
   }

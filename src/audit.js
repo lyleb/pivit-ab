@@ -40,9 +40,19 @@ async function endUserSessions(userId, queryable) {
   await queryOf(queryable)(`DELETE FROM "session" WHERE sess->>'userId' = $1`, [String(userId)]);
 }
 
+// Sign-out for one agency. A person can belong to several agencies, so the
+// other sessions stay.
+async function endAccountUserSessions(userId, accountId, queryable) {
+  if (!userId || !accountId) return;
+  await queryOf(queryable)(
+    `DELETE FROM "session" WHERE sess->>'userId' = $1 AND sess->>'accountId' = $2`,
+    [String(userId), String(accountId)]
+  );
+}
+
 async function endClientSessions(clientId, queryable) {
   if (!clientId) return;
   await queryOf(queryable)(`DELETE FROM "session" WHERE sess->>'clientId' = $1`, [String(clientId)]);
 }
 
-module.exports = { recordAudit, endUserSessions, endClientSessions };
+module.exports = { recordAudit, endUserSessions, endAccountUserSessions, endClientSessions };

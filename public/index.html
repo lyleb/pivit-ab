@@ -265,6 +265,11 @@
   .users-actions button { margin: 0; }
   .users-actions button:disabled,
   .users-actions button:disabled:hover { background: #3a3e50; color: #9aa0b4; }
+  #team-people-table select { margin: 0; min-width: 8em; }
+  #team-people-table.team-readonly th:last-child,
+  #team-people-table.team-readonly td.card-action { display: none; }
+  .team-edit-panel { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+  .team-edit-panel input { margin-bottom: 8px; }
   .users-guard { margin: 6px 0 0; max-width: 32em; }
   #users-confirm-match-wrap { margin-top: 12px; }
   #users-confirm-match-wrap[hidden] { display: none; }
@@ -721,11 +726,54 @@
       <div class="page-head">
         <div>
           <h1>Team</h1>
-          <p class="hint" style="margin:4px 0 0;">Invite a Member or another Owner to this agency. The link works once, lasts 7 days, and can be revoked. Joining adds them to this agency. It does not create a new agency.</p>
+          <p class="hint" style="margin:4px 0 0;">Everyone in this agency. Owners and Members sign in by email. Viewers use a username and password.</p>
         </div>
       </div>
       <p id="team-denied" class="hint" hidden></p>
+      <section class="card" id="team-people-card" hidden>
+        <h2>People</h2>
+        <p class="hint" id="team-people-hint" style="margin-top:0;"></p>
+        <div class="users-toolbar">
+          <label class="test-toggle" for="team-show-archived">
+            <input type="checkbox" id="team-show-archived">
+            Show archived
+          </label>
+          <p id="team-people-count" class="hint" style="margin:0;"></p>
+        </div>
+        <div id="team-viewer-form" hidden>
+          <h2>Add a Viewer</h2>
+          <p class="hint" style="margin-top:0;">They only see the tests you assign to them. pivitlab shows the password once.</p>
+          <label for="team-viewer-name">Display name</label>
+          <input id="team-viewer-name" maxlength="200" autocomplete="off">
+          <label for="team-viewer-username">Username</label>
+          <input id="team-viewer-username" maxlength="200" autocomplete="off" spellcheck="false" autocapitalize="off">
+          <label for="team-viewer-password">Password</label>
+          <input id="team-viewer-password" type="password" autocomplete="new-password" placeholder="At least 8 characters">
+          <div class="inline-actions" style="margin-top:10px;">
+            <button type="button" id="team-viewer-create">Create viewer</button>
+          </div>
+          <p id="team-viewer-result" class="hint"></p>
+          <div id="team-viewer-credentials"></div>
+        </div>
+        <p id="team-people-error" class="error-msg"></p>
+        <p id="team-people-msg" class="hint"></p>
+        <p id="team-people-empty" class="hint" hidden>No one to show.</p>
+        <div class="table-scroll">
+          <table id="team-people-table" class="table-cards">
+            <thead>
+              <tr>
+                <th>Person</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="team-people-body"></tbody>
+          </table>
+        </div>
+      </section>
       <section class="card" id="team-card" hidden>
+        <p class="hint" style="margin-top:0;">Invite a Member or another Owner to this agency. The link works once, lasts 7 days, and can be revoked. Joining adds them to this agency. It does not create a new agency.</p>
         <h2>Invite someone</h2>
         <p class="hint" style="margin-top:0;">Only an Owner can invite. Email the link, or create a link to copy. pivitlab shows the link once.</p>
         <label for="team-email">Work email</label>
@@ -827,6 +875,23 @@
   </div>
 </div>
 
+<div id="team-confirm" class="modal-backdrop">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="team-confirm-title">
+    <div class="modal-head">
+      <h2 id="team-confirm-title">Remove from this agency?</h2>
+      <button type="button" class="modal-close" id="team-confirm-close" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p id="team-confirm-body" style="margin-top:0;"></p>
+      <p id="team-confirm-error" class="error-msg" hidden></p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn-ghost" id="team-confirm-cancel">Cancel</button>
+      <button type="button" id="team-confirm-go">Remove</button>
+    </div>
+  </div>
+</div>
+
 <div id="users-confirm" class="modal-backdrop">
   <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="users-confirm-title">
     <div class="modal-head">
@@ -911,7 +976,7 @@
     </div>
     <div class="modal-body">
       <p class="hint">Create a login, then assign that viewer on an experiment’s Settings tab. They only see their own results at <code id="client-login-url"></code>.</p>
-      <details>
+      <details id="clients-add">
         <summary>Add a viewer</summary>
         <div class="accordion-body">
           <label for="new-client-name">Display name</label>
@@ -1190,17 +1255,322 @@ async function loadTeamInvites() {
   }).join('');
 }
 
+let teamPeople = [];
+let teamFlash = '';
+let teamPending = null;
+let teamEditor = null;
+
+function teamManageAllowed() {
+  return UI.canManageTeam(sessionMe);
+}
+
 async function loadTeam() {
   const denied = document.getElementById('team-denied');
   const card = document.getElementById('team-card');
+  const peopleCard = document.getElementById('team-people-card');
   const allowed = UI.canOpenTeam(sessionMe);
+  const manage = teamManageAllowed();
   if (denied) {
     denied.hidden = allowed;
     denied.textContent = allowed ? '' : UI.teamDeniedMessage(sessionMe);
   }
-  if (card) card.hidden = !allowed;
+  if (peopleCard) peopleCard.hidden = !allowed;
+  if (card) card.hidden = !manage;
+  const form = document.getElementById('team-viewer-form');
+  if (form) form.hidden = !manage;
+  const hint = document.getElementById('team-people-hint');
+  if (hint) hint.textContent = UI.teamPeopleHint(manage);
   if (!allowed) return;
-  await loadTeamInvites();
+  await loadTeamPeople();
+  if (manage) await loadTeamInvites();
+}
+
+function findTeamPerson(id) {
+  return teamPeople.find((person) => person && String(person.id) === String(id)) || null;
+}
+
+function renderTeamPeople() {
+  const table = document.getElementById('team-people-table');
+  const body = document.getElementById('team-people-body');
+  const empty = document.getElementById('team-people-empty');
+  const count = document.getElementById('team-people-count');
+  const msg = document.getElementById('team-people-msg');
+  if (!table || !body) return;
+  const showArchived = !!(document.getElementById('team-show-archived') && document.getElementById('team-show-archived').checked);
+  const rows = UI.filterTeamPeople(teamPeople, { showArchived });
+  const hidden = teamPeople.filter((person) => person && person.archived).length;
+  if (count) count.textContent = UI.teamSummary({ shown: rows.length, archivedHidden: showArchived ? 0 : hidden });
+  if (msg) {
+    if (teamFlash) {
+      msg.className = 'ok-msg';
+      msg.textContent = teamFlash;
+      teamFlash = '';
+    } else if (!msg.classList.contains('error-msg')) {
+      msg.className = 'hint';
+      if (!msg.textContent) msg.textContent = '';
+    }
+  }
+  if (empty) empty.hidden = rows.length > 0;
+  const manage = teamManageAllowed();
+  table.classList.toggle('team-readonly', !manage);
+  const actionsHead = table.querySelector('thead th:last-child');
+  if (actionsHead) actionsHead.hidden = !manage;
+  if (!rows.length) {
+    table.classList.remove('is-visible');
+    body.innerHTML = '';
+    return;
+  }
+  const selfEmail = sessionMe && sessionMe.email;
+  body.innerHTML = rows.map((person) => {
+    const identity = UI.personIdentity(person);
+    const secondary = identity.secondary
+      ? `<p class="hint">${UI.escapeHtml(identity.secondary)}</p>`
+      : '';
+    const tests = person.kind === 'viewer'
+      ? `<p class="hint">${Number(person.experiment_count) || 0} ${(Number(person.experiment_count) || 0) === 1 ? 'test' : 'tests'} assigned</p>`
+      : '';
+    const decision = UI.teamActions(person, teamPeople, selfEmail, manage);
+    const roleCell = teamRoleCell(person, decision, manage);
+    const buttons = decision.actions.map((action) => {
+      const klass = action.danger && !action.blocked ? 'btn-danger' : 'btn-ghost';
+      const disabled = action.blocked ? ' disabled' : '';
+      return `<button type="button" class="${klass}" data-team-action="${UI.escapeHtml(action.id)}" data-team-id="${UI.escapeHtml(person.id)}"${disabled}>${UI.escapeHtml(action.label)}</button>`;
+    }).join('');
+    const note = manage ? UI.teamStatusNote(person) : '';
+    const reason = decision.reason
+      ? `<p class="hint users-guard">${UI.escapeHtml(decision.reason)}</p>`
+      : '';
+    const statusNote = note && note !== decision.reason
+      ? `<p class="hint users-guard">${UI.escapeHtml(note)}</p>`
+      : '';
+    const editor = teamEditor && String(teamEditor.id) === String(person.id) ? teamEditorHtml(person) : '';
+    const actionCell = manage
+      ? `<td class="card-action" data-label="Actions"><div class="users-actions">${buttons}</div>${reason}${statusNote}${editor}</td>`
+      : '';
+    return `<tr>
+      <td class="card-title users-identity" data-label="Person"><strong>${UI.escapeHtml(identity.primary)}</strong>${secondary}${tests}</td>
+      <td data-label="Role">${roleCell}</td>
+      <td class="card-status" data-label="Status"><span class="users-status">${usersStatusHtml(person)}</span></td>
+      ${actionCell}
+    </tr>`;
+  }).join('');
+  table.classList.add('is-visible');
+}
+
+function teamRoleCell(person, decision, manage) {
+  if (!person || person.kind === 'viewer' || !manage) {
+    return UI.escapeHtml(person && person.kind === 'viewer' ? 'Viewer' : UI.membershipWord(person && person.role));
+  }
+  const locked = decision.roleLocked ? ' disabled' : '';
+  const ownerSel = person.role === 'owner' ? ' selected' : '';
+  const memberSel = person.role === 'member' ? ' selected' : '';
+  const id = UI.escapeHtml(person.id);
+  return `<select data-team-role="${id}" aria-label="Role for ${UI.escapeHtml(UI.personIdentity(person).primary)}"${locked}>
+    <option value="owner"${ownerSel}>Owner</option>
+    <option value="member"${memberSel}>Member</option>
+  </select>`;
+}
+
+function teamEditorHtml(person) {
+  if (!teamEditor || person.kind !== 'viewer') return '';
+  if (teamEditor.mode === 'password') {
+    return `<div class="team-edit-panel">
+      <label for="team-edit-password">New password</label>
+      <input id="team-edit-password" type="password" autocomplete="new-password" placeholder="At least 8 characters">
+      <div class="inline-actions">
+        <button type="button" data-team-action="save-password" data-team-id="${UI.escapeHtml(person.id)}">Save password</button>
+        <button type="button" class="btn-ghost" data-team-action="cancel-edit" data-team-id="${UI.escapeHtml(person.id)}">Cancel</button>
+      </div>
+      <div id="team-edit-credentials"></div>
+    </div>`;
+  }
+  return `<div class="team-edit-panel">
+    <label for="team-edit-name">Display name</label>
+    <input id="team-edit-name" maxlength="200" value="${UI.escapeHtml(person.name || '')}">
+    <label for="team-edit-username">Username</label>
+    <input id="team-edit-username" maxlength="200" spellcheck="false" autocapitalize="off" value="${UI.escapeHtml(person.username || '')}">
+    <div class="inline-actions">
+      <button type="button" data-team-action="save-edit" data-team-id="${UI.escapeHtml(person.id)}">Save</button>
+      <button type="button" class="btn-ghost" data-team-action="cancel-edit" data-team-id="${UI.escapeHtml(person.id)}">Cancel</button>
+    </div>
+  </div>`;
+}
+
+async function loadTeamPeople() {
+  const errorEl = document.getElementById('team-people-error');
+  const result = await callApi('/api/account/members');
+  if (!result.ok) {
+    if (errorEl) errorEl.textContent = apiErrorText(result);
+    return;
+  }
+  if (errorEl) errorEl.textContent = '';
+  teamPeople = (result.data && result.data.people) || [];
+  renderTeamPeople();
+}
+
+function closeTeamConfirm() {
+  const modal = document.getElementById('team-confirm');
+  if (modal) modal.classList.remove('active');
+  teamPending = null;
+  const error = document.getElementById('team-confirm-error');
+  if (error) {
+    error.hidden = true;
+    error.textContent = '';
+  }
+  syncModalScrollLock();
+}
+
+function openTeamConfirm(person, action) {
+  const copy = UI.teamConfirm(action, person);
+  const decision = UI.teamActions(person, teamPeople, sessionMe && sessionMe.email, teamManageAllowed());
+  const chosen = decision.actions.find((item) => item.id === action);
+  if (!copy || !chosen || chosen.blocked) return;
+  teamPending = { id: person.id, action };
+  document.getElementById('team-confirm-title').textContent = copy.title;
+  document.getElementById('team-confirm-body').textContent = copy.body;
+  const go = document.getElementById('team-confirm-go');
+  go.textContent = copy.confirm;
+  go.classList.toggle('btn-danger', copy.danger === true);
+  go.disabled = false;
+  const error = document.getElementById('team-confirm-error');
+  error.hidden = true;
+  error.textContent = '';
+  document.getElementById('team-confirm').classList.add('active');
+  syncModalScrollLock();
+  document.getElementById('team-confirm-cancel').focus();
+}
+
+async function confirmTeamAction() {
+  if (!teamPending) return;
+  const pending = teamPending;
+  const person = findTeamPerson(pending.id);
+  const go = document.getElementById('team-confirm-go');
+  const error = document.getElementById('team-confirm-error');
+  if (!person) {
+    error.hidden = false;
+    error.textContent = 'That person is no longer in the list.';
+    return;
+  }
+  if (go) go.disabled = true;
+  let result;
+  if (pending.action === 'remove') {
+    result = await callApi(`/api/account/members/${encodeURIComponent(person.id)}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+  } else {
+    const patch = UI.personAccessPatch(pending.action);
+    result = await callApi(`/api/clients/${encodeURIComponent(person.id)}/access`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify(patch || {}),
+    });
+  }
+  if (!result.ok) {
+    error.hidden = false;
+    error.textContent = (result.data && result.data.error) || 'Could not update the team.';
+    if (go) go.disabled = false;
+    await loadTeamPeople();
+    return;
+  }
+  teamFlash = UI.teamDoneMessage(pending.action);
+  closeTeamConfirm();
+  await loadTeamPeople();
+  if (pending.action !== 'remove') loadClients();
+}
+
+async function saveTeamViewer() {
+  if (!teamEditor) return;
+  const person = findTeamPerson(teamEditor.id);
+  const errorEl = document.getElementById('team-people-error');
+  if (!person) return;
+  if (errorEl) errorEl.textContent = '';
+  if (teamEditor.mode === 'password') {
+    const password = document.getElementById('team-edit-password').value;
+    if (!password || password.length < 8) {
+      if (errorEl) errorEl.textContent = 'Password must be at least 8 characters.';
+      return;
+    }
+    const result = await callApi(`/api/clients/${encodeURIComponent(person.id)}`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ password }),
+    });
+    if (!result.ok) {
+      if (errorEl) errorEl.textContent = apiErrorText(result);
+      return;
+    }
+    showCredentialBox('team-edit-credentials', person.username, password);
+    const msg = document.getElementById('team-people-msg');
+    if (msg) {
+      msg.className = 'ok-msg';
+      msg.textContent = UI.teamDoneMessage('password');
+    }
+    document.getElementById('team-edit-password').value = '';
+    return;
+  }
+  const name = document.getElementById('team-edit-name').value.trim();
+  const username = document.getElementById('team-edit-username').value.trim();
+  if (!name || !username) {
+    if (errorEl) errorEl.textContent = 'A Viewer needs a display name and a username.';
+    return;
+  }
+  const result = await callApi(`/api/clients/${encodeURIComponent(person.id)}`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ name, username }),
+  });
+  if (!result.ok) {
+    if (errorEl) errorEl.textContent = apiErrorText(result);
+    return;
+  }
+  teamEditor = null;
+  teamFlash = UI.teamDoneMessage('edit');
+  await loadTeamPeople();
+  loadClients();
+}
+
+async function createTeamViewer() {
+  const errorEl = document.getElementById('team-people-error');
+  const resultEl = document.getElementById('team-viewer-result');
+  if (errorEl) errorEl.textContent = '';
+  const name = document.getElementById('team-viewer-name').value.trim();
+  const username = document.getElementById('team-viewer-username').value.trim();
+  const password = document.getElementById('team-viewer-password').value;
+  const result = await callApi('/api/clients', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ name, username, password }),
+  });
+  if (resultEl) {
+    resultEl.className = result.ok ? 'ok-msg' : 'error-msg';
+    resultEl.textContent = result.ok ? UI.teamDoneMessage('create') : apiErrorText(result);
+  }
+  if (!result.ok) return;
+  showCredentialBox('team-viewer-credentials', result.data.username, password);
+  document.getElementById('team-viewer-name').value = '';
+  document.getElementById('team-viewer-username').value = '';
+  document.getElementById('team-viewer-password').value = '';
+  await loadTeamPeople();
+  loadClients();
+}
+
+async function changeTeamRole(person, role) {
+  const errorEl = document.getElementById('team-people-error');
+  if (errorEl) errorEl.textContent = '';
+  if (!person || person.role === role) return;
+  const result = await callApi(`/api/account/members/${encodeURIComponent(person.id)}`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ role }),
+  });
+  if (!result.ok) {
+    if (errorEl) errorEl.textContent = apiErrorText(result);
+    renderTeamPeople();
+    return;
+  }
+  teamFlash = UI.teamDoneMessage('role');
+  await loadTeamPeople();
 }
 
 async function createTeamInvite(send) {
@@ -1626,14 +1996,17 @@ function syncModalScrollLock() {
   const testOpen = document.getElementById('test-traffic-modal').classList.contains('active');
   const revealOpen = document.getElementById('reveal-modal').classList.contains('active');
   const usersOpen = document.getElementById('users-confirm').classList.contains('active');
+  const teamOpen = document.getElementById('team-confirm').classList.contains('active');
   const pop = document.getElementById('snippet-popover');
   const snippetSheet = pop.classList.contains('open') && pop.classList.contains('is-sheet');
-  document.body.classList.toggle('modal-open', clientsOpen || testOpen || revealOpen || usersOpen || snippetSheet);
+  document.body.classList.toggle('modal-open', clientsOpen || testOpen || revealOpen || usersOpen || teamOpen || snippetSheet);
 }
 
 function openClientsModal() {
   clientsReturnFocus = document.activeElement;
   document.getElementById('clients-modal').classList.add('active');
+  const add = document.getElementById('clients-add');
+  if (add) add.hidden = !teamManageAllowed();
   syncModalScrollLock();
   const closeBtn = document.getElementById('clients-close');
   if (closeBtn) closeBtn.focus();
@@ -1697,6 +2070,7 @@ document.addEventListener('keydown', (e) => {
   if (document.getElementById('reveal-modal').classList.contains('active')) { closeRevealModal(); return; }
   if (document.getElementById('test-traffic-modal').classList.contains('active')) { closeTestTrafficModal(); return; }
   if (document.getElementById('users-confirm').classList.contains('active')) { closeUsersConfirm(); return; }
+  if (document.getElementById('team-confirm').classList.contains('active')) { closeTeamConfirm(); return; }
   if (document.getElementById('clients-modal').classList.contains('active')) closeClientsModal();
 });
 
@@ -1726,13 +2100,22 @@ async function loadClients() {
   }
   clientsCache = result.data.clients || [];
   populateClientDropdowns();
+  const manageViewers = teamManageAllowed();
   if (clientsCache.length === 0) {
-    listEl.innerHTML = '<p class="hint">No viewers yet — add one above.</p>';
+    listEl.innerHTML = manageViewers
+      ? '<p class="hint">No viewers yet — add one above.</p>'
+      : '<p class="hint">No viewers yet.</p>';
     return;
   }
   listEl.innerHTML = clientsCache.map((c) => {
     const count = Number(c.experiment_count) || 0;
     const assigned = `${count} experiment${count === 1 ? '' : 's'} assigned`;
+    const actions = manageViewers ? `
+        <div class="vc-actions">
+          <button type="button" class="btn-ghost" data-client-action="rename" data-id="${c.id}" data-name="${UI.escapeHtml(c.name)}">Rename</button>
+          <button type="button" class="btn-ghost" data-client-action="reset" data-id="${c.id}">Reset password</button>
+          <button type="button" class="btn-danger" data-client-action="delete" data-id="${c.id}">Delete</button>
+        </div>` : '';
     return `
     <div class="client-card">
       <div class="client-card-main">
@@ -1740,11 +2123,7 @@ async function loadClients() {
           <strong>${UI.escapeHtml(c.name)}</strong>
           <div class="vc-meta">username: ${UI.escapeHtml(c.username)} · ${assigned}</div>
         </div>
-        <div class="vc-actions">
-          <button type="button" class="btn-ghost" data-client-action="rename" data-id="${c.id}" data-name="${UI.escapeHtml(c.name)}">Rename</button>
-          <button type="button" class="btn-ghost" data-client-action="reset" data-id="${c.id}">Reset password</button>
-          <button type="button" class="btn-danger" data-client-action="delete" data-id="${c.id}">Delete</button>
-        </div>
+        ${actions}
       </div>
       <div id="reset-pw-row-${c.id}" class="reset-pw-row" style="display:none;">
         <div class="reset-pw-actions">
@@ -5916,6 +6295,52 @@ document.getElementById('users-confirm-match').addEventListener('keydown', (even
 });
 document.getElementById('users-confirm').addEventListener('click', (event) => {
   if (event.target.id === 'users-confirm') closeUsersConfirm();
+});
+
+document.getElementById('team-people-table').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-team-action]');
+  if (!button || button.disabled) return;
+  const person = findTeamPerson(button.getAttribute('data-team-id'));
+  if (!person) return;
+  const action = button.getAttribute('data-team-action');
+  if (action === 'edit') {
+    teamEditor = { id: person.id, mode: 'edit' };
+    renderTeamPeople();
+    const field = document.getElementById('team-edit-name');
+    if (field) field.focus();
+    return;
+  }
+  if (action === 'password') {
+    const open = teamEditor && String(teamEditor.id) === String(person.id) && teamEditor.mode === 'password';
+    teamEditor = open ? null : { id: person.id, mode: 'password' };
+    renderTeamPeople();
+    const field = document.getElementById('team-edit-password');
+    if (field) field.focus();
+    return;
+  }
+  if (action === 'cancel-edit') {
+    teamEditor = null;
+    renderTeamPeople();
+    return;
+  }
+  if (action === 'save-edit' || action === 'save-password') {
+    saveTeamViewer();
+    return;
+  }
+  openTeamConfirm(person, action);
+});
+document.getElementById('team-people-table').addEventListener('change', (event) => {
+  const select = event.target.closest('[data-team-role]');
+  if (!select) return;
+  changeTeamRole(findTeamPerson(select.getAttribute('data-team-role')), select.value);
+});
+document.getElementById('team-show-archived').addEventListener('change', () => renderTeamPeople());
+document.getElementById('team-viewer-create').addEventListener('click', createTeamViewer);
+document.getElementById('team-confirm-close').addEventListener('click', closeTeamConfirm);
+document.getElementById('team-confirm-cancel').addEventListener('click', closeTeamConfirm);
+document.getElementById('team-confirm-go').addEventListener('click', confirmTeamAction);
+document.getElementById('team-confirm').addEventListener('click', (event) => {
+  if (event.target.id === 'team-confirm') closeTeamConfirm();
 });
 
 document.getElementById('view-as-go').addEventListener('click', async () => {

@@ -423,6 +423,11 @@
     'user.archived': 'Archived a person',
     'user.restored': 'Restored a person',
     'user.deleted': 'Deleted a person',
+    'membership.removed': 'Removed from the agency',
+    'viewer.created': 'Created a Viewer',
+    'viewer.updated': 'Edited a Viewer',
+    'viewer.password_reset': 'Reset a Viewer password',
+    'viewer.deleted': 'Deleted a Viewer',
   };
 
   function auditActionLabel(action) {
@@ -446,6 +451,18 @@
     if (entry && entry.action === 'role_change') {
       const who = detail.email ? `${detail.email}, ` : '';
       return `${who}from ${membershipWord(detail.from_role)} to ${membershipWord(detail.to_role)}`;
+    }
+    if (entry && entry.action === 'membership.removed') {
+      const who = detail.email ? String(detail.email) : '';
+      const role = membershipWord(detail.role);
+      if (who && (role === 'Owner' || role === 'Member')) return `${who}, ${role}`;
+      return who;
+    }
+    if (entry && String(entry.action || '').indexOf('viewer.') === 0) {
+      const name = detail.name ? String(detail.name) : '';
+      const username = detail.username ? String(detail.username) : '';
+      if (name && username && name.toLowerCase() !== username.toLowerCase()) return `${name} (${username})`;
+      return name || username;
     }
     if (detail.visitor_count != null || detail.event_count != null || (detail.criteria && detail.criteria.kind === 'peek')) {
       const visitors = Number(detail.visitor_count) || 0;
@@ -886,15 +903,164 @@
     return null;
   }
 
-  function canOpenTeam(me) {
+  function canManageTeam(me) {
     if (!me || me.membership !== 'owner') return false;
     if (me.view_as && me.view_as.id) return false;
     return true;
   }
 
+  function canOpenTeam(me) {
+    if (!me) return false;
+    if (me.view_as && me.view_as.id) return false;
+    return me.membership === 'owner' || me.membership === 'member';
+  }
+
   function teamDeniedMessage(me) {
-    if (me && me.view_as && me.view_as.id) return 'Stop the support view before you invite someone.';
-    return 'Only an Owner can invite someone to this agency.';
+    if (me && me.view_as && me.view_as.id) return 'Stop the support view before you open Team.';
+    return 'Team is for people in this agency.';
+  }
+
+  function teamSame(left, right) {
+    return String(left || '').trim().toLowerCase() === String(right || '').trim().toLowerCase();
+  }
+
+  function teamOwners(people, person) {
+    const self = String(person && person.id || '').toLowerCase();
+    return (people || []).filter((row) => {
+      if (!row || row.kind === 'viewer' || row.role !== 'owner') return false;
+      return String(row.id).toLowerCase() !== self;
+    });
+  }
+
+  // The last Owner stays. You cannot remove yourself. A Viewer has no membership.
+  function teamRemoveBlock(person, people, selfEmail) {
+    if (!person || person.kind === 'viewer') return '';
+    if (person.role === 'owner') {
+      const others = teamOwners(people, person);
+      const activeOthers = others.filter((row) => !row.suspended && !row.archived);
+      if (!others.length || (!person.suspended && !person.archived && !activeOthers.length)) {
+        return USERS_GUARD_LAST_OWNER;
+      }
+    }
+    if (selfEmail && person.email && teamSame(person.email, selfEmail)) return USERS_GUARD_SELF;
+    return '';
+  }
+
+  function teamRoleLocked(person, people) {
+    if (!person || person.kind === 'viewer' || person.role !== 'owner') return false;
+    const others = teamOwners(people, person);
+    if (!others.length) return true;
+    if (person.suspended || person.archived) return false;
+    return !others.some((row) => !row.suspended && !row.archived);
+  }
+
+  function teamActions(person, people, selfEmail, canManage) {
+    if (!canManage || !person) return { actions: [], reason: '', roleLocked: false };
+    if (person.kind === 'viewer') {
+      const actions = [];
+      if (person.archived) {
+        actions.push({ id: 'restore', label: 'Restore' });
+      } else {
+        actions.push({ id: 'edit', label: 'Edit' });
+        actions.push({ id: 'password', label: 'Reset password' });
+        if (person.suspended) actions.push({ id: 'unsuspend', label: 'Unsuspend' });
+        else actions.push({ id: 'suspend', label: 'Suspend', danger: true });
+        actions.push({ id: 'archive', label: 'Archive', danger: true });
+      }
+      return { actions, reason: '', roleLocked: false };
+    }
+    const removeBlock = teamRemoveBlock(person, people, selfEmail);
+    const roleLocked = teamRoleLocked(person, people);
+    const reason = removeBlock || (roleLocked ? USERS_GUARD_LAST_OWNER : '');
+    return {
+      actions: [{ id: 'remove', label: 'Remove', danger: true, blocked: removeBlock }],
+      reason,
+      roleLocked,
+    };
+  }
+
+  function teamConfirm(action, person) {
+    const who = personIdentity(person).primary;
+    const copy = {
+      remove: {
+        title: 'Remove from this agency?',
+        confirm: 'Remove',
+        danger: true,
+        body: `Remove ${who} from this agency? Their pivitlab account stays, and any other agency they belong to is left as it is. They lose access here.`,
+      },
+      suspend: {
+        title: 'Suspend this Viewer?',
+        confirm: 'Suspend',
+        danger: true,
+        body: `Suspend sign-in for ${who}? They are signed out straight away and cannot sign in until you allow it again.`,
+      },
+      unsuspend: {
+        title: 'Allow sign-in again?',
+        confirm: 'Unsuspend',
+        danger: false,
+        body: `Allow ${who} to sign in again?`,
+      },
+      archive: {
+        title: 'Archive this Viewer?',
+        confirm: 'Archive',
+        danger: true,
+        body: `Archive ${who}? They disappear from lists in this agency. They can still sign in until you suspend them. You can restore them later.`,
+      },
+      restore: {
+        title: 'Restore this Viewer?',
+        confirm: 'Restore',
+        danger: false,
+        body: `Restore ${who}? They show in lists again.`,
+      },
+    };
+    return copy[action] || null;
+  }
+
+  function teamDoneMessage(action) {
+    return {
+      remove: 'Removed from this agency. Their pivitlab account stays.',
+      suspend: 'Viewer sign-in suspended.',
+      unsuspend: 'Viewer sign-in allowed again.',
+      archive: 'Archived. They stay hidden until you restore them.',
+      restore: 'Restored.',
+      edit: 'Viewer updated.',
+      password: 'Password reset. It is shown once.',
+      create: 'Viewer created. The password is shown once.',
+      role: 'Role updated.',
+    }[action] || '';
+  }
+
+  function filterTeamPeople(people, options) {
+    const showArchived = !!(options && options.showArchived);
+    return (people || []).filter((person) => person && (showArchived || !person.archived));
+  }
+
+  function teamSummary({ shown, archivedHidden } = {}) {
+    const visible = Number(shown) || 0;
+    const hidden = Number(archivedHidden) || 0;
+    if (visible === 0 && hidden > 0) {
+      return hidden === 1 ? '1 archived person is hidden.' : `${hidden} archived people are hidden.`;
+    }
+    if (visible === 0) return 'No one to show.';
+    const noun = visible === 1 ? '1 person' : `${visible} people`;
+    if (hidden > 0) {
+      const extra = hidden === 1 ? '1 archived person is hidden.' : `${hidden} archived people are hidden.`;
+      return `Showing ${noun}. ${extra}`;
+    }
+    return `Showing ${noun}.`;
+  }
+
+  function teamPeopleHint(canManage) {
+    if (canManage) {
+      return 'Change a role, or remove someone from this agency. Removing someone does not delete their pivitlab account. Viewers can be edited, suspended, archived or restored here.';
+    }
+    return 'You can see everyone in this agency. Only an Owner can make changes.';
+  }
+
+  function teamStatusNote(person) {
+    if (!person || person.kind === 'viewer') return '';
+    if (!person.suspended && !person.archived) return '';
+    return 'A Platform admin manages their sign-in. You can remove them from this agency.';
   }
 
   function teamRoute(hash) {
@@ -1000,8 +1166,18 @@
     canOpenUsers,
     usersDeniedMessage,
     usersRoute,
+    canManageTeam,
     canOpenTeam,
     teamDeniedMessage,
+    teamRemoveBlock,
+    teamRoleLocked,
+    teamActions,
+    teamConfirm,
+    teamDoneMessage,
+    filterTeamPeople,
+    teamSummary,
+    teamPeopleHint,
+    teamStatusNote,
     teamRoute,
     teamFreshMessage,
     teamSentLabel,
