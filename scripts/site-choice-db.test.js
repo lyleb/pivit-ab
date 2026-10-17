@@ -117,6 +117,10 @@ async function main() {
     const otherUser = await db.query(
       `INSERT INTO users (email, verified_at) VALUES ('owner@south.example', now()) RETURNING id`
     );
+    await db.query(
+      `INSERT INTO memberships (account_id, user_id, role) VALUES ($1, $2, 'owner')`,
+      [otherId, otherUser.rows[0].id]
+    );
     const otherKey = newSiteKey();
     const otherSite = await db.query(
       `INSERT INTO sites (account_id, name, domains, public_key, verified_at)
