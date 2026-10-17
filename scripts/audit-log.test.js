@@ -45,17 +45,17 @@ assert.ok(admin.includes('id="audit-next"'));
 assert.ok(admin.includes('class="brand-logo"'));
 assert.ok(admin.includes('aria-label="pivitlab"'));
 assert.ok(css.includes('pivitlab-logo-white.svg'));
-assert.ok(admin.includes('What happened on this account in pivitlab. Newest first.'));
+assert.ok(admin.includes('What happened in this agency in pivitlab. Newest first.'));
 assert.ok(!admin.includes('Pivitlab'));
 assert.ok(!admin.includes('PivitLab'));
 assert.ok(!client.includes('id="page-audit"'));
 assert.ok(!client.includes('id="nav-page-audit"'));
 
-const hintAt = admin.indexOf('What happened on this account in pivitlab.');
+const hintAt = admin.indexOf('What happened in this agency in pivitlab.');
 assert.ok(hintAt > 0);
 const hint = admin.slice(hintAt, hintAt + 180);
 assert.ok(!/behavior|favorite|organize|color\b/i.test(hint));
-assert.ok(hint.includes('Only an owner of this account can see these events.'));
+assert.ok(hint.includes('Only an owner of this agency can see these events.'));
 
 assert.strictEqual(ui.auditActionLabel('role_change'), 'Changed a role');
 assert.strictEqual(ui.auditActionLabel('test_traffic_remove'), 'Removed test traffic');
@@ -67,7 +67,7 @@ assert.strictEqual(
     action: 'role_change',
     detail: { email: 'ada@example.co.uk', from_role: 'member', to_role: 'owner' },
   }),
-  'ada@example.co.uk, from member to owner'
+  'ada@example.co.uk, from Member to Owner'
 );
 assert.strictEqual(
   ui.auditDetailText({

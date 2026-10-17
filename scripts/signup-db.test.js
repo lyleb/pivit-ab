@@ -23,7 +23,7 @@ function pageChecks() {
   assert.ok(check.includes('6-digit code'));
   assert.ok(check.includes('Resend in'));
   assert.ok(check.includes("If that address can be used, we've sent a link."));
-  assert.ok(check.includes('No email? You need a pivitlab account first. Ask for an invite, or use the address you signed up with.'));
+  assert.ok(check.includes('No email? You need a pivitlab agency first. Ask for an invite, or use the address you signed up with.'));
   assert.ok(check.includes("if (purpose === 'signup')"));
   assert.ok(interstitial.includes('>Sign in<'));
   assert.ok(interstitial.indexOf("addEventListener('submit'") < interstitial.indexOf("fetch('/api/auth/magic'"));
@@ -175,7 +175,7 @@ async function main() {
     assert.strictEqual(mailed.from, 'no-reply@pivitlab.com');
     assert.strictEqual(mailed.replyTo, 'info@heclr.com');
     assert.strictEqual(mailed.to, 'ada@example.co.uk');
-    assert.strictEqual(mailed.subject, 'Finish creating your pivitlab account');
+    assert.strictEqual(mailed.subject, 'Finish creating your pivitlab agency');
     assert.ok(!mailed.text.includes('<'));
     const first = linkParts(mailed);
 

@@ -28,7 +28,7 @@ function normaliseSiteDomain(raw) {
 }
 
 function sameAccountDomainMessage(host) {
-  return `This account already has a site for ${host}.`;
+  return `This agency already has a site for ${host}.`;
 }
 
 function isUuid(value) {

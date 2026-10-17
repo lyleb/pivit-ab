@@ -78,7 +78,7 @@ pg_restore --no-owner --no-acl --exit-on-error --dbname "$NEW_DATABASE_URL" pivi
 
 Restore into a new empty database. `pg_restore` exits 1 when it only printed warnings. Compare row counts before you point the app at the restored database.
 
-A local custom-format file can also be loaded into a scratch database on the same server. This compares experiment, variant, event, and client counts with the source, then drops the scratch database. It does not write to the source database's tables. The role in `DATABASE_URL` needs permission to create a database.
+A local custom-format file can also be loaded into a scratch database on the same server. This compares experiment, variant, event, and viewer (`clients`) counts with the source, then drops the scratch database. It does not write to the source database's tables. The role in `DATABASE_URL` needs permission to create a database.
 
 ```bash
 DATABASE_URL='postgres://…' node scripts/restore-check.js /path/to/pivitlab-YYYYMMDD-HHMM.dump

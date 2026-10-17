@@ -203,10 +203,31 @@
 
   function supportViewCopy(viewing, name) {
     if (viewing) {
-      const label = name ? String(name) : 'this account';
+      const label = name ? String(name) : 'this agency';
       return `Support view: you are looking at ${label}, read-only. This view is logged.`;
     }
-    return 'Support view: see another customer\'s account read-only. Every view is logged.';
+    return 'Support view: see another agency read-only. Every view is logged.';
+  }
+
+  // Visible role names. The session role and the database columns stay as they are.
+  function roleBadgeLabel({ superadmin, membership, viewer } = {}) {
+    if (viewer === true) return 'Viewer';
+    if (superadmin === true) return 'Platform admin';
+    if (membership === 'member') return 'Member';
+    return 'Owner';
+  }
+
+  function membershipWord(role) {
+    if (role === 'owner') return 'Owner';
+    if (role === 'member') return 'Member';
+    return role || 'unknown';
+  }
+
+  function auditActorLabel(label) {
+    const text = label == null ? '' : String(label);
+    if (text === 'superadmin') return 'Platform admin';
+    if (text === 'client') return 'Viewer';
+    return text || 'Unknown';
   }
 
   const OWNER_PASSWORD_BANNER = 'You signed in with the owner password. Day to day, sign in by email at info@heclr.com. This password is only the fallback.';
@@ -281,7 +302,7 @@
   // break out of the snippet tag's src and data-api attributes.
   const SAFE_ORIGIN = /^https?:\/\/(?:(?:[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?)|\[[a-f0-9:]+\])(?::\d+)?$/i;
 
-  // Server-configured public origin for the snippet tag and client login link.
+  // Server-configured public origin for the snippet tag and viewer login link.
   // Empty or anything that is not an http(s) origin returns fallback.
   // The dashboard passes null. It must not substitute location.origin.
   function displayOrigin(configured, fallback) {
@@ -412,7 +433,7 @@
     }
     if (entry && entry.action === 'role_change') {
       const who = detail.email ? `${detail.email}, ` : '';
-      return `${who}from ${detail.from_role || 'unknown'} to ${detail.to_role || 'unknown'}`;
+      return `${who}from ${membershipWord(detail.from_role)} to ${membershipWord(detail.to_role)}`;
     }
     if (detail.visitor_count != null || detail.event_count != null || (detail.criteria && detail.criteria.kind === 'peek')) {
       const visitors = Number(detail.visitor_count) || 0;
@@ -512,6 +533,9 @@
     plannerSelectionAfterEdit,
     showSupportBar,
     supportViewCopy,
+    roleBadgeLabel,
+    membershipWord,
+    auditActorLabel,
     OWNER_PASSWORD_BANNER,
     showOwnerPasswordBanner,
     describeGoal,

@@ -24,6 +24,11 @@
   }
   .sidebar-nav { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
   .brand { padding: 2px 8px 14px; margin: 0 4px 8px; }
+  .role-badge {
+    display: inline-block; margin-top: 10px; padding: 3px 10px; border-radius: 999px;
+    background: rgba(86,53,251,0.16); color: #c4b6ff; font-size: 0.72em; font-weight: 700;
+    letter-spacing: 0.02em;
+  }
   .nav-item {
     display: flex; align-items: center; width: 100%; text-align: left; gap: 10px;
     padding: 10px 12px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.9em;
@@ -294,6 +299,7 @@
   <aside class="sidebar">
     <div class="brand">
       <span class="brand-logo" role="img" aria-label="pivitlab"></span>
+      <span id="role-badge" class="role-badge" hidden></span>
     </div>
     <nav class="sidebar-nav">
       <button type="button" class="nav-item active" id="nav-page-home" data-go="#home">Home</button>
@@ -315,7 +321,7 @@
         <button type="button" class="btn-ghost" id="emergency-dismiss">Dismiss</button>
       </div>
       <div id="view-as-bar" class="banner support-bar" hidden>
-        <span id="view-as-text">Support view: see another customer's account read-only. Every view is logged.</span>
+        <span id="view-as-text">Support view: see another agency read-only. Every view is logged.</span>
         <span class="support-controls">
           <select id="view-as-select"></select>
           <button type="button" class="btn-ghost" id="view-as-go">View as</button>
@@ -336,7 +342,7 @@
           <select id="setup-site">
             <option value="">Choose a site</option>
           </select>
-          <p class="hint">This account has more than one site. Choose which site the snippet and the first test are for. pivitlab remembers the choice.</p>
+          <p class="hint">This agency has more than one site. Choose which site the snippet and the first test are for. pivitlab remembers the choice.</p>
         </div>
         <ol class="setup-list">
           <li id="step-site">
@@ -414,7 +420,7 @@
       </div>
       <div class="card" id="review-requests-card" hidden>
         <h2>Review requests</h2>
-        <p class="hint" style="margin-top:0;">A client asked you to look at a test. You decide whether to stop. Marking it seen does not stop the test or reveal a result.</p>
+        <p class="hint" style="margin-top:0;">A viewer asked you to look at a test. You decide whether to stop. Marking it seen does not stop the test or reveal a result.</p>
         <div id="review-requests-list"></div>
       </div>
       <div class="card" id="owner-notices-card" hidden>
@@ -428,7 +434,7 @@
           <p class="hint" style="margin:4px 0 0;">Open a test for variants, goals and results. New tests stay draft until you start them.</p>
         </div>
         <div class="page-actions">
-          <button type="button" class="btn-ghost" onclick="openClientsModal()">Clients</button>
+          <button type="button" class="btn-ghost" onclick="openClientsModal()">Viewers</button>
           <button type="button" class="btn-ghost" data-snippet-toggle>Copy snippet</button>
           <button type="button" id="new-experiment-btn" onclick="startNewExperiment()">New experiment</button>
         </div>
@@ -438,7 +444,7 @@
         <table id="exp-list-table" class="table-cards">
           <thead>
             <tr>
-              <th>Name</th><th>Status</th><th>URL match</th><th>Client</th><th>Variants</th><th>Signal</th><th></th>
+              <th>Name</th><th>Status</th><th>URL match</th><th>Viewer</th><th>Variants</th><th>Signal</th><th></th>
             </tr>
           </thead>
           <tbody id="exp-list-body"></tbody>
@@ -503,7 +509,7 @@
           <select id="wizard-site">
             <option value="">Choose a site</option>
           </select>
-          <p class="hint">This account has more than one site. Choose the site for this test, its snippet and its goals. pivitlab remembers the choice.</p>
+          <p class="hint">This agency has more than one site. Choose the site for this test, its snippet and its goals. pivitlab remembers the choice.</p>
         </div>
         <p id="wizard-domain-warning" class="banner" role="status" hidden></p>
         <div id="wizard-step-1" class="wizard-step">
@@ -531,9 +537,9 @@
           <label for="wizard-hosts">Site domain(s)</label>
           <textarea id="wizard-hosts" class="hosts" placeholder="example.com" spellcheck="false"></textarea>
           <p class="hint">Sites this experiment may run on. Separate extra domains with a comma or a new line. www and the bare domain count as the same.</p>
-          <label for="wizard-client">Client (optional)</label>
+          <label for="wizard-client">Viewer (optional)</label>
           <select id="wizard-client"><option value="">None — internal only</option></select>
-          <p id="wizard-lock-hint" class="hint" hidden>Name, URL and test type are fixed once the draft exists. A demo test cannot be switched to live. Match, the element rule, client and site domains can still be changed. Match and the element rule can also be changed later in Settings.</p>
+          <p id="wizard-lock-hint" class="hint" hidden>Name, URL and test type are fixed once the draft exists. A demo test cannot be switched to live. Match, the element rule, the viewer and site domains can still be changed. Match and the element rule can also be changed later in Settings.</p>
         </div>
 
         <div id="wizard-step-2" class="wizard-step" hidden>
@@ -638,7 +644,7 @@
       <div class="page-head">
         <div>
           <h1>Audit log</h1>
-          <p class="hint" style="margin:4px 0 0;">What happened on this account in pivitlab. Newest first. Only an owner of this account can see these events.</p>
+          <p class="hint" style="margin:4px 0 0;">What happened in this agency in pivitlab. Newest first. Only an owner of this agency can see these events.</p>
         </div>
       </div>
       <section class="card">
@@ -743,13 +749,13 @@
 <div id="clients-modal" class="modal-backdrop">
   <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="clients-title">
     <div class="modal-head">
-      <h2 id="clients-title">Clients</h2>
+      <h2 id="clients-title">Viewers</h2>
       <button type="button" class="modal-close" id="clients-close" aria-label="Close">✕</button>
     </div>
     <div class="modal-body">
-      <p class="hint">Create a login, then assign that client on an experiment’s Settings tab. They only see their own results at <code id="client-login-url"></code>.</p>
+      <p class="hint">Create a login, then assign that viewer on an experiment’s Settings tab. They only see their own results at <code id="client-login-url"></code>.</p>
       <details>
-        <summary>Add a client</summary>
+        <summary>Add a viewer</summary>
         <div class="accordion-body">
           <label for="new-client-name">Display name</label>
           <input id="new-client-name" placeholder="Can't Say That?">
@@ -757,7 +763,7 @@
           <input id="new-client-username" placeholder="cantsaythat">
           <label for="new-client-password">Password</label>
           <input id="new-client-password" type="password" placeholder="At least 8 characters">
-          <div style="margin-top:12px;"><button type="button" onclick="createClient()">Create client</button></div>
+          <div style="margin-top:12px;"><button type="button" onclick="createClient()">Create viewer</button></div>
           <p id="client-result" class="hint"></p>
           <div id="new-client-credentials"></div>
         </div>
@@ -878,6 +884,14 @@ function ownerBannerDismissed() {
 
 function applySessionChrome() {
   const me = sessionMe || {};
+  const badge = document.getElementById('role-badge');
+  if (badge) {
+    badge.hidden = false;
+    badge.textContent = UI.roleBadgeLabel({
+      superadmin: me.superadmin === true,
+      membership: me.membership,
+    });
+  }
   const emergency = document.getElementById('emergency-banner');
   if (emergency) {
     const text = document.getElementById('emergency-banner-text');
@@ -929,7 +943,7 @@ async function loadViewAsAccounts() {
     select.innerHTML = '';
     return;
   }
-  select.innerHTML = '<option value="">Choose an account</option>' + accounts.map((account) =>
+  select.innerHTML = '<option value="">Choose an agency</option>' + accounts.map((account) =>
     `<option value="${UI.escapeHtml(account.id)}">${UI.escapeHtml(account.name)}</option>`
   ).join('');
   bar.hidden = false;
@@ -1352,7 +1366,7 @@ document.querySelector('.sidebar').addEventListener('click', (e) => {
 
 window.addEventListener('hashchange', () => applyRoute());
 
-// --- Clients ---
+// --- Viewers ---
 
 let clientsReturnFocus = null;
 
@@ -1460,7 +1474,7 @@ async function loadClients() {
   clientsCache = result.data.clients || [];
   populateClientDropdowns();
   if (clientsCache.length === 0) {
-    listEl.innerHTML = '<p class="hint">No clients yet — add one above.</p>';
+    listEl.innerHTML = '<p class="hint">No viewers yet — add one above.</p>';
     return;
   }
   listEl.innerHTML = clientsCache.map((c) => {
@@ -1510,7 +1524,7 @@ function showCredentialBox(containerId, username, password) {
   const container = document.getElementById(containerId);
   container.innerHTML = `
     <div style="background:#221c3d; border:1px solid var(--indigo); border-radius:8px; padding:12px; margin-top:10px;">
-      <div class="hint" style="margin-bottom:6px;">Give these to your client — the password can't be shown again once you leave this page.</div>
+      <div class="hint" style="margin-bottom:6px;">Give these to your viewer — the password can't be shown again once you leave this page.</div>
       <div style="font-family:'SF Mono', Menlo, monospace; font-size:0.9em;">Username: <strong>${UI.escapeHtml(username)}</strong><br>Password: <strong>${UI.escapeHtml(password)}</strong></div>
       <button type="button" class="btn-ghost" style="margin-top:8px;" id="${containerId}-copy">Copy both</button>
       <span id="${containerId}-copied" class="hint"></span>
@@ -1551,7 +1565,7 @@ async function createClient() {
     method: 'POST', headers: authHeaders(), body: JSON.stringify({ name, username, password })
   });
   el.className = result.ok ? 'ok-msg' : 'error-msg';
-  el.textContent = result.ok ? `Client "${result.data.name}" created.` : `Error: ${result.message}`;
+  el.textContent = result.ok ? `Viewer "${result.data.name}" created.` : `Error: ${result.message}`;
   if (result.ok) {
     showCredentialBox('new-client-credentials', result.data.username, password);
     document.getElementById('new-client-name').value = '';
@@ -1572,7 +1586,7 @@ async function renameClient(id, currentName) {
 }
 
 async function deleteClient(id, btn) {
-  if (!confirm('Delete this client login? Their experiments are kept, just unassigned from any client.')) return;
+  if (!confirm('Delete this viewer login? Their experiments are kept, just unassigned from any viewer.')) return;
   btn.disabled = true;
   const result = await callApi(`/api/clients/${id}`, { method: 'DELETE', headers: authHeaders() });
   btn.disabled = false;
@@ -1649,7 +1663,7 @@ async function loadExperimentList() {
       <td class="card-title" data-label="Name"><button type="button" class="name-btn" data-open="${exp.id}">${UI.escapeHtml(exp.name)}</button>${UI.isDemoTest(exp) ? ' ' + UI.demoBadgeHtml() : ''}</td>
       <td class="card-status" data-label="Status"><span class="badge ${STATUS_CLASS[exp.status] || 'paused'}">${UI.escapeHtml(exp.status)}</span></td>
       <td class="mono" data-label="URL match" title="${UI.escapeHtml(exp.url_match || '')}">${UI.escapeHtml(UI.shortUrl(exp.url_match))}${matchBadge(exp)}${noDomainBadge(exp)}</td>
-      <td data-label="Client">${UI.escapeHtml(client)}</td>
+      <td data-label="Viewer">${UI.escapeHtml(client)}</td>
       <td data-label="Variants">${exp.variant_count}</td>
       <td class="hint" data-label="Signal" data-signal-for="${exp.id}">${exp.status === 'draft' ? 'No data yet' : '…'}</td>
       <td class="card-action" data-label="Open"><button type="button" class="btn-ghost" data-open="${exp.id}">Open</button></td>
@@ -1682,7 +1696,7 @@ async function loadReviewRequests() {
   }
   card.hidden = false;
   list.innerHTML = result.data.requests.map((row) => `<div class="activity-row">
-      <span><strong>${UI.escapeHtml(row.client_name || 'A client')}</strong> asked for a review of <button type="button" class="name-btn" data-open="${row.experiment_id}">${UI.escapeHtml(row.experiment_name || 'a test')}</button><span class="hint"> · ${UI.escapeHtml(row.requested_label || '')}</span></span>
+      <span><strong>${UI.escapeHtml(row.client_name || 'A viewer')}</strong> asked for a review of <button type="button" class="name-btn" data-open="${row.experiment_id}">${UI.escapeHtml(row.experiment_name || 'a test')}</button><span class="hint"> · ${UI.escapeHtml(row.requested_label || '')}</span></span>
       <button type="button" class="btn-ghost" data-review-seen="${row.id}">Seen</button>
     </div>`).join('');
 }
@@ -1939,7 +1953,7 @@ function renderDetail() {
           ${exp.element_selector ? `<span class="mono" title="Only runs when this element is on the page">${UI.escapeHtml(exp.element_selector)}</span>` : ''}
           ${matchBadge(exp)}
           ${noDomainBadge(exp)}
-          <span>Client · ${UI.escapeHtml(client)}</span>
+          <span>Viewer · ${UI.escapeHtml(client)}</span>
           <span>${variants.length} variant${variants.length === 1 ? '' : 's'}</span>
         </div>
       </div>
@@ -2127,9 +2141,9 @@ function renderDetail() {
         <textarea id="settings-hosts" class="hosts" spellcheck="false" placeholder="example.com">${UI.escapeHtml((exp.allowed_hosts || []).join('\n'))}</textarea>
         <p class="hint">The experiment only runs on these sites. www and the bare domain are the same. Other subdomains must be listed.</p>
         <p class="hint" id="settings-seen">Seen on since last deploy: checking…</p>
-        <label for="settings-client">Client</label>
+        <label for="settings-client">Viewer</label>
         <select id="settings-client"></select>
-        <p class="hint">Only this client can see the experiment on their results page.</p>
+        <p class="hint">Only this viewer can see the experiment on their results page.</p>
         <label for="settings-status">Status</label>
         <select id="settings-status">
           ${statusOptions}
@@ -3332,14 +3346,14 @@ async function loadConclusionCard(expId) {
   if (!report && !data.available) {
     body = `<p>${UI.escapeHtml(data.unavailable_reason || 'No stored result yet.')}</p>`;
   } else if (!report) {
-    body = `<p>Generate a conclusion from the stored result. The figures are not recalculated. Clients cannot see a draft. Release it when you are happy for them to read it.</p>
+    body = `<p>Generate a conclusion from the stored result. The figures are not recalculated. Viewers cannot see a draft. Release it when you are happy for them to read it.</p>
       <div class="inline-actions"><button type="button" data-action="conclusion-generate">Generate conclusion</button></div>
       <p id="conclusion-msg" class="hint"></p>`;
   } else if (report.status === 'draft') {
-    body = `<p>Draft. Only you can see this. Clients will not see it until you release it.</p>
+    body = `<p>Draft. Only you can see this. Viewers will not see it until you release it.</p>
       <div class="inline-actions">
         <button type="button" class="btn-ghost" data-action="conclusion-download">Download PDF</button>
-        <button type="button" data-action="conclusion-release">Release to client</button>
+        <button type="button" data-action="conclusion-release">Release to viewer</button>
         <button type="button" class="btn-ghost" data-action="conclusion-generate">Generate again</button>
       </div>
       <p id="conclusion-msg" class="hint"></p>`;
@@ -3347,9 +3361,9 @@ async function loadConclusionCard(expId) {
     const approval = data.approval
       ? `<p>${UI.escapeHtml(data.approval.approver_name)} approved it on ${UI.escapeHtml(data.approval.approved_label)}.</p>
          <p><button type="button" class="btn-ghost" data-action="conclusion-approval">Download approval record</button></p>`
-      : '<p class="hint">Released. The client can download it and approve it with a click.</p>';
+      : '<p class="hint">Released. The viewer can download it and approve it with a click.</p>';
     const when = report.released_label ? ` on ${UI.escapeHtml(report.released_label)}` : '';
-    body = `<p>Released${when}. Clients can download it.</p>
+    body = `<p>Released${when}. Viewers can download it.</p>
       ${approval}
       <div class="inline-actions"><button type="button" class="btn-ghost" data-action="conclusion-download">Download PDF</button></div>`;
   }
@@ -3708,14 +3722,14 @@ async function loadAudit(state, token) {
     msg.className = 'hint';
     msg.textContent = filtered
       ? 'No events match these filters.'
-      : 'Nothing has been recorded for this account yet.';
+      : 'Nothing has been recorded for this agency yet.';
     table.hidden = true;
     body.innerHTML = '';
   } else {
     msg.textContent = '';
     body.innerHTML = entries.map((entry) => `<tr>
       <td>${UI.escapeHtml(formatAuditWhen(entry.created_at))}</td>
-      <td>${UI.escapeHtml(entry.actor_label || 'Unknown')}</td>
+      <td>${UI.escapeHtml(UI.auditActorLabel(entry.actor_label))}</td>
       <td>${UI.escapeHtml(UI.auditActionLabel(entry.action))}</td>
       <td>${UI.escapeHtml(entry.experiment_name || '—')}</td>
       <td>${UI.escapeHtml(UI.auditDetailText(entry))}</td>
@@ -4220,7 +4234,7 @@ function renderWizardSummary() {
     <dt>Where it runs</dt><dd>${UI.escapeHtml(window.PivitUrl ? PivitUrl.pageMatchHint(wizard.match || 'contains', wizard.url) : '')}</dd>
     <dt>Element</dt><dd class="mono">${wizard.elementSelector ? UI.escapeHtml(wizard.elementSelector) : 'Any page that matches the URL rule'}</dd>
     <dt>Site domain(s)</dt><dd class="mono">${UI.escapeHtml(wizard.hosts || '—')}</dd>
-    <dt>Client</dt><dd>${UI.escapeHtml(client)}</dd>
+    <dt>Viewer</dt><dd>${UI.escapeHtml(client)}</dd>
     <dt>Variants</dt><dd>${UI.escapeHtml(variants)}</dd>
     <dt>Goals</dt><dd>${goals.length ? UI.escapeHtml(goals.join(' · ')) : 'None yet'}</dd>
     <dt>Status after save</dt><dd><span class="badge draft">Draft</span> — start when you’re ready to collect traffic</dd>
@@ -4930,7 +4944,7 @@ function openStatusSettings() {
 
 // --- Snippet ---
 
-// The snippet tag and the client login link use the origin from GET /api/config.
+// The snippet tag and the viewer login link use the origin from GET /api/config.
 // That is APP_ORIGIN, or the development fallback. location.origin is not used.
 const ORIGIN_UNAVAILABLE = 'The public address is not available yet.';
 let configuredAppOrigin = null;

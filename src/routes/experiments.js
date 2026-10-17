@@ -569,7 +569,7 @@ router.post('/', async (req, res) => {
          AND deleted_at IS NULL`,
       [client_id, accountId]
     );
-    if (ownedClient.rows.length === 0) return res.status(404).json({ error: 'no client found with that id' });
+    if (ownedClient.rows.length === 0) return res.status(404).json({ error: 'no viewer found with that id' });
   }
 
   let client;
@@ -609,7 +609,7 @@ router.post('/', async (req, res) => {
     const status = routeStatus(err);
     if (status) return res.status(status).json({ error: err.message });
     console.error(err);
-    if (err.code === '23503') return res.status(400).json({ error: 'no client found with that id' });
+    if (err.code === '23503') return res.status(400).json({ error: 'no viewer found with that id' });
     res.status(500).json({ error: 'internal error', detail: err.message });
   } finally {
     if (client) client.release();
@@ -630,7 +630,7 @@ router.patch('/:id/client', async (req, res) => {
            AND deleted_at IS NULL`,
         [client_id, req.account.id]
       );
-      if (ownedClient.rows.length === 0) return res.status(404).json({ error: 'no client found with that id' });
+      if (ownedClient.rows.length === 0) return res.status(404).json({ error: 'no viewer found with that id' });
     }
     const { rows } = await db.query(
       `UPDATE experiments SET client_id = $1 WHERE id = $2 AND account_id = $3 RETURNING *`,
@@ -640,7 +640,7 @@ router.patch('/:id/client', async (req, res) => {
     res.json(rows[0]);
   } catch (err) {
     console.error(err);
-    if (err.code === '23503') return res.status(400).json({ error: 'no client found with that id' });
+    if (err.code === '23503') return res.status(400).json({ error: 'no viewer found with that id' });
     res.status(500).json({ error: 'internal error', detail: err.message });
   }
 });

@@ -326,7 +326,7 @@ async function approveConclusion({ clientId, accountId, experimentId, ip }) {
     `SELECT name FROM clients WHERE id = $1 AND account_id = $2`,
     [clientId, accountId]
   );
-  const approverName = client.rows[0] ? client.rows[0].name : 'Client';
+  const approverName = client.rows[0] ? client.rows[0].name : 'Viewer';
   const existing = await approvalFor(accountId, report.id, clientId);
   if (existing) {
     return {

@@ -64,7 +64,7 @@ router.patch('/:id', async (req, res) => {
          AND deleted_at IS NULL`,
       [id, req.account.id]
     );
-    if (existingRows.length === 0) return res.status(404).json({ error: 'no client found with that id' });
+    if (existingRows.length === 0) return res.status(404).json({ error: 'no viewer found with that id' });
     const existing = existingRows[0];
 
     const newName = name || existing.name;
@@ -97,7 +97,7 @@ router.delete('/:id', async (req, res) => {
        RETURNING id`,
       [req.params.id, req.account.id]
     );
-    if (rows.length === 0) return res.status(404).json({ error: 'no client found with that id' });
+    if (rows.length === 0) return res.status(404).json({ error: 'no viewer found with that id' });
     await endClientSessions(req.params.id);
     res.status(204).end();
   } catch (err) {

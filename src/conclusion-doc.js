@@ -219,12 +219,12 @@ function approvalLines({ experimentName, approverName, approvedAt, releasedAt, d
       gapBefore: 12,
     });
   }
-  push(items, `Approved by: ${approverName || 'Client'}`, 12, false, 8);
+  push(items, `Approved by: ${approverName || 'Viewer'}`, 12, false, 8);
   push(items, `Approved on: ${longStamp(approvedAt)}`, 12, false, 6);
   if (releasedAt) push(items, `Conclusion released: ${longStamp(releasedAt)}`, 11, false, 6);
   push(
     items,
-    'The account owner released the conclusion before this approval. A draft conclusion is not shown in the client portal.',
+    'The agency Owner released the conclusion before this approval. A draft conclusion is not shown to viewers.',
     10,
     false,
     14

@@ -9,7 +9,7 @@
 <link rel="icon" type="image/svg+xml" href="/assets/pivitlab-icon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<title>pivitlab — Your tests</title>
+<title>pivitlab — Viewer</title>
 <link rel="stylesheet" href="/assets/pivit.css?v=7">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="/admin-ui.js"></script>
@@ -24,6 +24,11 @@
   .portal-top-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 14px; color: var(--text-muted); font-size: 0.92em; }
   .portal-top-actions button { background: none; border: none; color: var(--mint); padding: 0; font-weight: 650; }
   .portal-top-actions button:hover { background: none; color: var(--mint-dark); }
+  .role-badge {
+    display: inline-block; padding: 3px 10px; border-radius: 999px;
+    background: rgba(86,53,251,0.16); color: #c4b6ff; font-size: 0.78em; font-weight: 700;
+    letter-spacing: 0.02em;
+  }
   .portal-wrap { max-width: 1180px; margin: 0 auto; padding: 28px 28px 64px; }
   .portal-wrap h1 { font-size: 1.7em; margin: 0 0 4px; }
   .group-title { margin: 28px 0 10px; font-size: 1.15em; }
@@ -109,6 +114,7 @@
 <header class="portal-top">
   <span class="brand-logo" role="img" aria-label="pivitlab"></span>
   <div class="portal-top-actions">
+    <span id="role-badge" class="role-badge">Viewer</span>
     <span id="welcome-msg"></span>
     <button type="button" id="logout-all-btn">Sign out everywhere</button>
     <button type="button" id="logout-btn">Sign out</button>
@@ -214,7 +220,7 @@ async function callApi(path, options) {
   try {
     res = await fetch(path, options || {});
   } catch (err) {
-    console.error('Client API error', path, err);
+    console.error('Viewer page error', path, err);
     return { ok: false, message: "Couldn't reach pivitlab. Check your connection and try again." };
   }
   if (res.status === 401) {
@@ -225,7 +231,7 @@ async function callApi(path, options) {
   let data = null;
   try { data = raw ? JSON.parse(raw) : null; } catch (e) {}
   if (!res.ok) {
-    console.error('Client API error', path, res.status, data && data.error);
+    console.error('Viewer page error', path, res.status, data && data.error);
     return { ok: false, message: LOAD_ERROR };
   }
   return { ok: true, data };
@@ -234,7 +240,7 @@ async function callApi(path, options) {
 function showList() {
   document.getElementById('view-list').hidden = false;
   document.getElementById('view-detail').hidden = true;
-  document.title = 'pivitlab — Your tests';
+  document.title = 'pivitlab — Viewer';
 }
 
 function showDetail() {

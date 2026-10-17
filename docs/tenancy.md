@@ -1,8 +1,10 @@
-# Accounts migration (Sprint 1a)
+# Agencies migration (Sprint 1a)
 
-This is the foundations half of customer accounts. There is no sign-up screen, no magic-link email, and no Stripe. The owner still signs in with `ADMIN_API_KEY`. The session cookie is still `pivit.sid`. `SESSION_SECRET` is not rotated.
+On screen, an account is an **agency**. The person who can see every agency is a **platform admin** (`users.is_superadmin`). People in an agency are an **Owner** or a **Member** (`memberships.role` is still `owner` or `member`). A view-only login is a **viewer**. The table is still `clients`, the session role is still `client`, and the page is still `/client.html`.
 
-Account #1 is named **Heclr**. The superadmin user is **info@heclr.com**, with `verified_at` left empty because email sign-in is Sprint 1b. The membership role is owner. `accounts.legacy` is true, and only one legacy account is allowed.
+This is the foundations half of agencies. There is no sign-up screen, no magic-link email, and no Stripe. The Owner still signs in with `ADMIN_API_KEY`. The session cookie is still `pivit.sid`. `SESSION_SECRET` is not rotated.
+
+Agency #1 is named **Heclr**. The platform admin is **info@heclr.com**, with `verified_at` left empty because email sign-in is Sprint 1b. The membership role is `owner`. `accounts.legacy` is true, and only one legacy agency is allowed.
 
 ## What runs on startup
 
@@ -29,7 +31,7 @@ Once every version above is recorded, startup logs `Database schema is up to dat
 - events with `is_test`, events with `excluded_at`
 - events per experiment
 - experiment identity: id, name, status, url_match, allowed_hosts, client_id
-- variant identity, event identity, and each client's username and password hash
+- variant identity, event identity, and each viewer's username and password hash
 
 If any of those differ, it throws and the transaction rolls back. Password hashes are not written to the log. The check message only contains the counts that disagreed.
 
@@ -41,11 +43,11 @@ Child rows (variants, events, event drops, test-traffic audit) copy `account_id`
 - Distinct host lists become distinct sites, so one test cannot widen another test's serve list.
 - An experiment with an empty list stays on Heclr with `site_id` null and `needs_site` true. Nothing is dropped.
 - A verified site named `cantsaythat.co.uk` is always created, including when no current test uses only that host.
-- Client logins keep their username, password hash and experiment assignments. They gain `account_id` for Heclr.
+- Viewer logins (rows in `clients`) keep their username, password hash and experiment assignments. They gain `account_id` for Heclr.
 - Existing snippet tags, including ones that still point at pivit.click and send no site key, resolve only to Heclr, then use the same host rules as today. A missing, invalid or unknown key does not fall back to Heclr. A real `site_…` key serves that site only.
 - Edit and preview tokens that were minted before this change keep working until they expire. New tokens also carry the account id and the site id.
 
-Public snippet calls that do not match an account return an empty experiment list, or `204` for an event. They do not return 404. That is the same shape as a host that is not on the list, so an installed tag does not start erroring. Owner and client routes return **404** for another account's id (`no experiment found with that id`, or the same wording already used for a missing client). They do not return 403.
+Public snippet calls that do not match an agency return an empty experiment list, or `204` for an event. They do not return 404. That is the same shape as a host that is not on the list, so an installed tag does not start erroring. Owner and viewer routes return **404** for another agency's id (`no experiment found with that id`, or `no viewer found with that id`). They do not return 403. The routes are still `/api/clients` and `/api/client`.
 
 ## What you do on Railway
 
@@ -61,19 +63,19 @@ If 001 **committed** and you need to undo it, restore the backup. Rolling only t
 
 ## New route checklist
 
-Isolation has to live in the query. A new owner, client or public route should:
+Isolation has to live in the query. A new Owner, viewer or public route should:
 
 - take the account from `req.account.id` (set by `requireAuth`), not from the body or the query string
 - use `ownedExperiment` or an `account_id = $n` predicate, and return 404 when the row is missing
 - for a public snippet call, use `publicScope` and serve nothing when the key is invalid or unknown
 - put `account_id` and `site_id` on any new edit or preview token
-- add a case to `scripts/isolation-db.test.js` (legacy account) or `scripts/cross-account.test.js` (two customer accounts)
+- add a case to `scripts/isolation-db.test.js` (legacy agency) or `scripts/cross-account.test.js` (two agencies)
 
 `src/metrics.js` is still unscoped. The HTTP results routes check ownership before they call it. A new caller must do the same.
 
 ## Judgement calls, where the plan and the code differ
 
-- **View as, and the audit log.** PIV-022's audited superadmin view is Sprint 1b, because it depends on PIV-108. The user row stores `is_superadmin`. There is no view-as screen, so the owner login response and the dashboard do not change.
+- **View as, and the audit log.** PIV-022's audited platform-admin view is Sprint 1b, because it depends on PIV-108. The user row stores `is_superadmin`. There is no view-as screen, so the owner login response and the dashboard do not change.
 - **Install check blocks Start.** A snippet call with the site key, from an Origin on that site's domain list, sets `verified_at`. Starting is refused until then. Migrated sites, including cantsaythat.co.uk, are marked verified because they already have traffic. A new site may have `verified_at` null. Starting still requires a non-empty `allowed_hosts` list. A duplicate domain sets `sites.conflict` and an audit row. A separate notice to Lyle is not built.
 - **`allowed_hosts` is not copied from the site.** The plan says a site drives `allowed_hosts`. Overwriting that column during the migration could add a host the experiment does not serve today, or drop one it does. Site domains are the normalised host set used to group tests. Serving still uses the experiment's own list plus the existing host check.
 - **`host_hits` stays one row per day, host and origin.** The primary key is unchanged, so the existing upsert and the metrics tests keep working. `account_id` is `NOT NULL` with a default of Heclr, and the admin reading filters on it. The box-tester exclusion windows are shown only to the legacy account. Hits for a later account cannot be told apart until the snippet sends a site key and the primary key includes the account. That is a Sprint 1b change, not this one.

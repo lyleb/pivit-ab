@@ -135,7 +135,7 @@ app.use('/api/review-requests', reviewRouter);
 app.use('/api/editor', editorRouter);
 app.use('/api/host-hits', hostHitsRouter);
 
-// Public origin for the snippet tag and the client login link. APP_ORIGIN
+// Public origin for the snippet tag and the viewer login link. APP_ORIGIN
 // when that is valid. In development a missing or invalid value is
 // http://127.0.0.1:<port>. The request Host is not used. Does not redirect
 // or change how /snippet, /api, or /health are served.
