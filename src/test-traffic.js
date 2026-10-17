@@ -93,6 +93,9 @@ function normalisePrefix(raw) {
 function parseCriteria(body) {
   const mode = body && (body.mode || body.type);
   if (mode === 'test') return { ok: true, mode: 'test', prefix: null };
+  // One-click clear: pivit_qa is stored as is_test, and v_pt is included
+  // even when that flag was never set.
+  if (mode === 'all') return { ok: true, mode: 'all', prefix: null };
   if (mode === 'prefix') {
     const parsed = normalisePrefix(body && body.prefix);
     if (!parsed.ok) return parsed;
@@ -115,6 +118,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 function matchSql(criteria, params) {
   if (criteria.mode === 'test') return 'e.is_test = true';
+  if (criteria.mode === 'all') {
+    params.push(TEST_VISITOR_PREFIX);
+    return `(e.is_test = true OR left(e.visitor_id, char_length($${params.length})) = $${params.length})`;
+  }
   params.push(criteria.prefix);
   return `left(e.visitor_id, char_length($${params.length})) = $${params.length}`;
 }
@@ -205,7 +212,7 @@ function countsFromUpdated(rows) {
   return { visitors: visitors.size, events: rows.length, variants };
 }
 
-async function applyTestTraffic({ experimentId, criteria, direction, actor, actorIp, queryPool = db.pool, accountId }) {
+async function applyTestTraffic({ experimentId, criteria, direction, actor, actorIp, queryPool = db.pool, accountId, userId }) {
   if (!UUID_RE.test(experimentId)) return { ok: false, status: 400, error: 'experiment id must be a UUID' };
   const client = await queryPool.connect();
   try {
@@ -266,6 +273,7 @@ async function applyTestTraffic({ experimentId, criteria, direction, actor, acto
     }
     await recordAudit(client, {
       accountId: scopedAccount,
+      userId: userId || null,
       actorLabel: actor || 'owner',
       action: direction === 'restore' ? 'test_traffic_restore' : 'test_traffic_remove',
       targetType: 'experiment',

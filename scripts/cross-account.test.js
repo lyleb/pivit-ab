@@ -368,6 +368,8 @@ async function main() {
         ['POST', `/api/experiments/${aRunning.id}/test-traffic/preview`, { mode: 'test', direction: 'remove' }],
         ['POST', `/api/experiments/${aRunning.id}/test-traffic/remove`, { mode: 'test', direction: 'remove', confirm: true }],
         ['POST', `/api/experiments/${aRunning.id}/test-traffic/restore`, { mode: 'test', direction: 'restore', confirm: true }],
+        ['POST', `/api/experiments/${aRunning.id}/test-traffic/clear`, { confirm: true }],
+        ['POST', `/api/experiments/${aRunning.id}/test-traffic/restore`, { mode: 'all', confirm: true }],
         ['GET', `/api/experiments/${aRunning.id}/test-traffic/audit`],
         ['GET', `/api/experiments/${aRunning.id}/plan`],
         ['POST', `/api/experiments/${aRunning.id}/plan/preview`, {}],
@@ -856,6 +858,9 @@ async function main() {
     const home = await request(viewServer, 'GET', `/api/experiments/${aRunning.id}`);
     assert.strictEqual(home.status, 404);
     assertClean(home, 'superadmin without view as');
+    const adminClear = await request(viewServer, 'POST', `/api/experiments/${aRunning.id}/test-traffic/clear`, { confirm: true });
+    assert.strictEqual(adminClear.status, 404);
+    assertClean(adminClear, 'platform admin clearing another agency');
     const directory = await request(viewServer, 'GET', '/api/admin/accounts');
     assert.strictEqual(directory.status, 200);
     assert.ok(directory.json.accounts.some((account) => account.id === alpha.id));
@@ -887,6 +892,8 @@ async function main() {
       ['POST', `/api/experiments/${aRunning.id}/reveal`, { confirm: true }],
       ['PUT', `/api/experiments/${aRunning.id}/plan`, {}],
       ['POST', `/api/experiments/${aRunning.id}/test-traffic/remove`, { mode: 'test', confirm: true }],
+      ['POST', `/api/experiments/${aRunning.id}/test-traffic/clear`, { confirm: true }],
+      ['POST', `/api/experiments/${aRunning.id}/test-traffic/restore`, { mode: 'all', confirm: true }],
       ['POST', `/api/review-requests/${aReview.rows[0].id}/decide`, {}],
       ['POST', '/api/sites', { website: 'evil.example' }],
       ['PATCH', `/api/account/members/${alpha.userId}`, { role: 'member' }],
@@ -962,7 +969,13 @@ async function main() {
         `SELECT visitor_id FROM events WHERE experiment_id = $1 ORDER BY visitor_id`,
         [aRunning.id]
       );
-      assert.deepStrictEqual(visitors.rows.map((row) => row.visitor_id), ['alpha-secret-visitor', 'stored-on-alpha']);
+      assert.deepStrictEqual(visitors.rows.map((row) => row.visitor_id), [
+        'alpha-secret-visitor',
+        'qa_alpha',
+        'real_alpha',
+        'stored-on-alpha',
+        'v_pt_alpha',
+      ]);
 
       const client = await db.query(`SELECT name, username FROM clients WHERE id = $1`, [aClient.rows[0].id]);
       assert.strictEqual(client.rows[0].name, 'Alpha Client');
@@ -984,6 +997,72 @@ async function main() {
       const created = await db.query(`SELECT id FROM experiments WHERE name = 'should-not-create'`);
       assert.strictEqual(created.rows.length, 0);
     }
+    await db.query(
+      `INSERT INTO events (experiment_id, variant_id, visitor_id, event_type, is_test)
+       VALUES
+         ($1, $2, 'v_pt_alpha', 'view', false),
+         ($1, $2, 'qa_alpha', 'view', true),
+         ($1, $2, 'real_alpha', 'view', false)`,
+      [aRunning.id, aRunning.variantId]
+    );
+    await db.query(
+      `INSERT INTO events (experiment_id, variant_id, visitor_id, event_type, is_test)
+       VALUES ($1, $2, 'v_pt_beta', 'view', false)`,
+      [bRunning.id, bRunning.variantId]
+    );
+    const memberOwn = await request(serverMember, 'POST', `/api/experiments/${bRunning.id}/test-traffic/clear`, { confirm: true });
+    assert.strictEqual(memberOwn.status, 404);
+    const betaStill = await db.query(
+      `SELECT excluded_at FROM events WHERE experiment_id = $1 AND visitor_id = 'v_pt_beta'`,
+      [bRunning.id]
+    );
+    assert.strictEqual(betaStill.rows[0].excluded_at, null);
+    const ownClear = await request(serverA, 'POST', `/api/experiments/${aRunning.id}/test-traffic/clear`, { confirm: true });
+    assert.strictEqual(ownClear.status, 200, ownClear.text);
+    assert.strictEqual(ownClear.json.changed, true);
+    assert.strictEqual(ownClear.json.mode, 'all');
+    const alphaRows = await db.query(
+      `SELECT visitor_id, excluded_at IS NOT NULL AS hidden
+       FROM events WHERE experiment_id = $1 AND visitor_id IN ('v_pt_alpha', 'qa_alpha', 'real_alpha')
+       ORDER BY visitor_id`,
+      [aRunning.id]
+    );
+    const alphaHidden = Object.fromEntries(alphaRows.rows.map((row) => [row.visitor_id, row.hidden]));
+    assert.strictEqual(alphaHidden.v_pt_alpha, true);
+    assert.strictEqual(alphaHidden.qa_alpha, true);
+    assert.strictEqual(alphaHidden.real_alpha, false);
+    const betaAfter = await db.query(
+      `SELECT excluded_at FROM events WHERE experiment_id = $1 AND visitor_id = 'v_pt_beta'`,
+      [bRunning.id]
+    );
+    assert.strictEqual(betaAfter.rows[0].excluded_at, null);
+    const clearLog = await db.query(
+      `SELECT account_id, action, actor_label, detail
+       FROM audit_log WHERE action = 'test_traffic_remove' AND target_id = $1
+       ORDER BY id DESC LIMIT 1`,
+      [aRunning.id]
+    );
+    assert.strictEqual(clearLog.rows[0].account_id, alpha.id);
+    assert.strictEqual(clearLog.rows[0].actor_label, 'owner-a@alpha.example');
+    assert.strictEqual(clearLog.rows[0].detail.criteria.mode, 'all');
+    const betaLog = await db.query(
+      `SELECT COUNT(*)::int AS n FROM audit_log WHERE account_id = $1 AND action = 'test_traffic_remove'`,
+      [beta.id]
+    );
+    assert.strictEqual(betaLog.rows[0].n, 0);
+    const ownUndo = await request(serverA, 'POST', `/api/experiments/${aRunning.id}/test-traffic/restore`, {
+      mode: 'all',
+      confirm: true,
+    });
+    assert.strictEqual(ownUndo.status, 200, ownUndo.text);
+    assert.strictEqual(ownUndo.json.direction, 'restore');
+    const restored = await db.query(
+      `SELECT COUNT(*)::int AS n FROM events
+       WHERE experiment_id = $1 AND visitor_id IN ('v_pt_alpha', 'qa_alpha') AND excluded_at IS NOT NULL`,
+      [aRunning.id]
+    );
+    assert.strictEqual(restored.rows[0].n, 0);
+
     await untouched();
 
     console.log('cross-account tests passed');

@@ -76,6 +76,13 @@ assert.strictEqual(
   }),
   'Prefix v_pt_. 1 visitor, 2 events.'
 );
+assert.strictEqual(
+  ui.auditDetailText({
+    action: 'test_traffic_remove',
+    detail: { criteria: { mode: 'all' }, visitor_count: 2, event_count: 3 },
+  }),
+  'All test traffic. 2 visitors, 3 events.'
+);
 
 assert.strictEqual(ui.auditRoute('#home'), null);
 assert.deepStrictEqual(ui.auditRoute('#audit'), { test: '', user: '', action: '', page: 1 });

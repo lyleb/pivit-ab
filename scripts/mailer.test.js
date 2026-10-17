@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { buildPayload, sendEmail, takeLastLoggedEmail, brandedHtml, DEFAULT_FROM, DEFAULT_REPLY_TO } = require('../src/mailer');
+const { buildPayload, sendEmail, takeLastLoggedEmail, brandedHtml, DEFAULT_FROM, DEFAULT_REPLY_TO, LOGO_URL, LOGO_WIDTH, LOGO_HEIGHT } = require('../src/mailer');
 
 async function main() {
   delete process.env.POSTMARK_SERVER_TOKEN;
@@ -38,6 +38,13 @@ async function main() {
   assert.strictEqual(payload.MessageStream, 'outbound');
   assert.strictEqual(payload.Tag, 'login-link');
   assert.ok(payload.HtmlBody.includes('pivitlab'));
+  assert.ok(payload.HtmlBody.includes(`src="${LOGO_URL}"`));
+  assert.strictEqual(LOGO_URL, 'https://pivitlab.com/assets/logo.png');
+  assert.ok(payload.HtmlBody.includes('alt="pivitlab"'));
+  assert.ok(payload.HtmlBody.includes(`width="${LOGO_WIDTH}"`));
+  assert.ok(payload.HtmlBody.includes(`height="${LOGO_HEIGHT}"`));
+  assert.ok(LOGO_WIDTH >= 120 && LOGO_WIDTH <= 160);
+  assert.ok(!payload.HtmlBody.includes('letter-spacing:-0.02em'));
   assert.ok(payload.HtmlBody.includes('>Sign in<'));
   assert.ok(payload.HtmlBody.includes('lang="en-GB"'));
   assert.ok(payload.HtmlBody.includes('&lt;script&gt;'));

@@ -470,6 +470,7 @@
       const criteria = detail.criteria || {};
       let what = 'Test traffic';
       if (criteria.kind === 'peek') what = 'Early look';
+      else if (criteria.mode === 'all') what = 'All test traffic';
       else if (criteria.mode === 'prefix' && criteria.prefix) what = `Prefix ${criteria.prefix}`;
       const visitorWord = visitors === 1 ? 'visitor' : 'visitors';
       const eventWord = events === 1 ? 'event' : 'events';
@@ -909,6 +910,16 @@
     return true;
   }
 
+  // Clear test traffic is for an agency Owner or a platform admin.
+  // A support view is read-only, and a Member does not get the button.
+  function canClearTestTraffic(me) {
+    if (!me || me.role === 'client') return false;
+    if (me.view_as && me.view_as.id) return false;
+    if (me.superadmin === true) return true;
+    if (me.emergency === true) return true;
+    return me.membership === 'owner';
+  }
+
   function canOpenTeam(me) {
     if (!me) return false;
     if (me.view_as && me.view_as.id) return false;
@@ -1167,6 +1178,7 @@
     usersDeniedMessage,
     usersRoute,
     canManageTeam,
+    canClearTestTraffic,
     canOpenTeam,
     teamDeniedMessage,
     teamRemoveBlock,
