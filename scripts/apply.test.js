@@ -409,4 +409,116 @@ function styleTags(doc) {
   assert.strictEqual(next.body.getAttribute('data-offer'), '1');
 }
 
+// page_css is one style tag. A second apply, a mutation, and a new applier
+// on the same document do not add another. A removed tag is put back once.
+// A new document (a device frame loading again) gets its own tag.
+{
+  const doc = createDocument();
+  addBadge(doc, 'A');
+  const applier = applierFor(doc);
+  const css = { type: 'page_css', value: 'body{background:#fff}' };
+  applier.applyAll([css], 'page');
+  applier.applyAll([css], 'page');
+  doc.notify([doc.body]);
+  addBadge(doc, 'B');
+  const pageStyles = () => styleTags(doc).filter((tag) => tag.getAttribute('data-pivit-page-css') != null);
+  assert.strictEqual(pageStyles().length, 1);
+  assert.strictEqual(pageStyles()[0].textContent, 'body{background:#fff}');
+  applier.applyAll([{ type: 'page_css', value: 'body{background:#111}' }], 'page');
+  assert.strictEqual(pageStyles().length, 1);
+  assert.strictEqual(pageStyles()[0].textContent, 'body{background:#111}');
+  pageStyles()[0].remove();
+  applier.applyAll([css], 'page');
+  assert.strictEqual(pageStyles().length, 1);
+  assert.strictEqual(pageStyles()[0].textContent, 'body{background:#fff}');
+  applierFor(doc).applyAll([css], 'page');
+  assert.strictEqual(pageStyles().length, 1);
+  const fresh = createDocument();
+  applierFor(fresh).applyAll([css], 'page');
+  assert.strictEqual(styleTags(fresh).filter((tag) => tag.getAttribute('data-pivit-page-css') != null).length, 1);
+}
+
+// page_js runs once per page view, not once per matching element. A second
+// apply, the mutation observer, and a new applier on the same document (an
+// SPA re-render) do not run it again. A new document does.
+{
+  const doc = createDocument();
+  addBadge(doc, 'A');
+  addBadge(doc, 'B');
+  const source = 'document.documentElement.setAttribute("data-runs", String(Number(document.documentElement.getAttribute("data-runs") || 0) + 1))';
+  const change = { type: 'page_js', selector: 'span.badge', value: source };
+  const applier = applierFor(doc);
+  applier.applyAll([change], 'page');
+  applier.applyAll([change], 'page');
+  doc.notify(doc.querySelectorAll('span.badge'));
+  addBadge(doc, 'C');
+  assert.strictEqual(doc.documentElement.getAttribute('data-runs'), '1');
+  assert.strictEqual(doc.querySelectorAll('span.badge').length, 3);
+  applierFor(doc).applyAll([change], 'page');
+  assert.strictEqual(doc.documentElement.getAttribute('data-runs'), '1');
+  const fresh = createDocument();
+  addBadge(fresh, 'A');
+  applierFor(fresh).applyAll([change], 'page');
+  assert.strictEqual(fresh.documentElement.getAttribute('data-runs'), '1');
+}
+
+// A thrown page_js is caught. Later page CSS and element changes still apply,
+// and a second pass does not throw or run the script again.
+{
+  const doc = createDocument();
+  const badge = addBadge(doc, 'A');
+  const applier = applierFor(doc);
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (...args) => { warnings.push(args.map(String).join(' ')); };
+  let threw = false;
+  try {
+    applier.applyAll([
+      { type: 'page_js', value: 'throw new Error("boom")' },
+      { type: 'page_css', value: '.ok{color:red}' },
+      { selector: 'span.badge', type: 'text', value: 'Sale' },
+      { selector: 'span.badge', type: 'html', value: '<b>Sale</b>' },
+      { selector: 'span.badge', type: 'js', value: 'el.setAttribute("data-el", "1")' },
+    ], 'safe');
+    applier.applyAll([{ type: 'page_js', value: 'throw new Error("boom")' }], 'safe');
+  } catch (err) {
+    threw = true;
+  } finally {
+    console.warn = original;
+  }
+  assert.strictEqual(threw, false);
+  assert.ok(warnings.some((line) => line.indexOf('page JS change failed') !== -1));
+  assert.strictEqual(badge.textContent, 'Sale');
+  assert.strictEqual(badge.getAttribute('data-el'), '1');
+  assert.ok(styleTags(doc).some((tag) => tag.textContent.indexOf('.ok{color:red}') !== -1));
+  assert.strictEqual(styleTags(doc).filter((tag) => tag.getAttribute('data-pivit-page-css') != null).length, 1);
+}
+
+// Page CSS and page JS are not element checks. An element change beside them
+// is still checked on its own. A stylesheet change is still injected as before.
+{
+  const doc = createDocument();
+  addBadge(doc, 'A');
+  const applier = applierFor(doc);
+  const mixed = applier.applyAll([
+    { type: 'page_css', value: '.page{color:blue}' },
+    { type: 'page_js', value: 'document.documentElement.setAttribute("data-page", "1")' },
+    { type: 'stylesheet', selector: 'span.badge', value: 'span.badge{color:red}' },
+    { selector: 'span.badge', type: 'text', value: 'Kept' },
+  ], 'mixpage');
+  assert.strictEqual(mixed.checked, 1);
+  assert.strictEqual(mixed.ok, true);
+  assert.strictEqual(doc.documentElement.getAttribute('data-page'), '1');
+  assert.strictEqual(doc.querySelectorAll('span.badge')[0].textContent, 'Kept');
+  const css = styleTags(doc).map((tag) => tag.textContent).join('\n');
+  assert.ok(css.indexOf('.page{color:blue}') !== -1);
+  assert.ok(css.indexOf('span.badge{color:red}') !== -1);
+  const pageOnly = applier.applyAll([
+    { type: 'page_css', value: '.only{color:red}' },
+    { type: 'page_js', value: 'document.documentElement.setAttribute("data-only", "1")' },
+  ], 'only');
+  assert.strictEqual(pageOnly.ok, null);
+  assert.strictEqual(pageOnly.checked, 0);
+}
+
 console.log('apply.test.js ok');
