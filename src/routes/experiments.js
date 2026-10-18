@@ -16,7 +16,7 @@ const { planProgress, describeReading, listSignal } = require('../reading');
 const { visibleEventSql } = require('../metrics');
 const { utcDay, windowStartDay } = require('../host-hits');
 const { createEditToken } = require('../edit-token');
-const { authorisePreview, buildPublicExperimentList, createPreviewToken, previewUrl, editUrl, cacheControlForExperimentsQuery } = require('../preview-access');
+const { authorisePreview, buildPublicExperimentList, createPreviewToken, previewUrl, editUrl, cacheControlForExperimentsQuery, pageUrlError } = require('../preview-access');
 const {
   checkHost,
   pageHostFromRequest,
@@ -812,7 +812,8 @@ router.put('/:id/goals', async (req, res) => {
 router.post('/:id/variants/:variantId/preview-link', async (req, res) => {
   try {
     const { page_url } = req.body || {};
-    if (!page_url) return res.status(400).json({ error: 'page_url is required' });
+    const pageProblem = pageUrlError(page_url);
+    if (pageProblem) return res.status(400).json({ error: pageProblem });
 
     const { rows } = await db.query(
       `SELECT v.id, v.name AS variant_name, e.account_id, e.site_id, e.status, e.name AS experiment_name, e.id AS experiment_id
@@ -851,8 +852,9 @@ router.post('/:id/variants/:variantId/preview-link', async (req, res) => {
 // a pattern, so it is not used as the address to open.
 router.post('/:id/variants/:variantId/edit-link', async (req, res) => {
   try {
-    const { page_url } = req.body;
-    if (!page_url) return res.status(400).json({ error: 'page_url is required' });
+    const { page_url } = req.body || {};
+    const pageProblem = pageUrlError(page_url);
+    if (pageProblem) return res.status(400).json({ error: pageProblem });
 
     const { rows } = await db.query(
       `SELECT v.id, v.name AS variant_name, e.account_id, e.site_id, e.status, e.name AS experiment_name, e.id AS experiment_id
