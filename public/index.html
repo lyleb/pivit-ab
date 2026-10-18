@@ -323,6 +323,113 @@
     .variant-card .vc-actions { justify-content: flex-start; }
     .variant-card .vc-actions button { min-height: 44px; flex: 1 1 auto; }
   }
+  /* Phone: Team people are one column each. The shared sideways-scroll table
+     keeps a sticky narrow first column and a vertical rule, which crushes
+     names. Emails may break anywhere; names and usernames stay whole words. */
+  @media (max-width: 640px) {
+    .sidebar {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "brand" "logout" "nav";
+      row-gap: 8px;
+    }
+    .brand { min-width: 0; }
+    .sidebar-foot {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-self: stretch;
+      min-width: 0;
+    }
+    .sidebar-foot .nav-item {
+      flex: 1 1 100%;
+      justify-content: center;
+      text-align: center;
+      white-space: normal;
+    }
+    #page-team .team-people-scroll { overflow: visible; }
+    #team-people-table { min-width: 0; width: 100%; }
+    .table-scroll #team-people-table th:first-child,
+    .table-scroll #team-people-table td:first-child {
+      position: static;
+      left: auto;
+      z-index: auto;
+      max-width: none;
+      box-shadow: none;
+      overflow-wrap: normal;
+      word-break: normal;
+      background: transparent;
+    }
+    #team-people-table.is-visible tr {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+    }
+    #team-people-table.is-visible td {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      padding: 0;
+    }
+    #team-people-table.is-visible td.card-title {
+      order: 1;
+      padding-right: 0;
+      overflow-wrap: normal;
+      word-break: normal;
+    }
+    #team-people-table.is-visible td.card-status {
+      order: 2;
+      position: static;
+      top: auto;
+      right: auto;
+      width: 100%;
+      padding: 0;
+    }
+    #team-people-table.is-visible td[data-label="Role"] {
+      order: 3;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 6px;
+    }
+    #team-people-table.is-visible td[data-label="Role"]::before {
+      display: block;
+      min-width: 0;
+      margin: 0;
+    }
+    #team-people-table.is-visible td.card-action {
+      order: 4;
+      margin-top: 0;
+    }
+    #team-people-table .team-email { overflow-wrap: anywhere; }
+    #team-people-table select { width: 100%; min-width: 0; margin: 0; }
+    #team-people-table.is-visible td.card-action .users-actions {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr));
+      gap: 8px;
+      width: 100%;
+    }
+    #team-people-table.is-visible td.card-action .users-actions button {
+      width: 100%;
+      min-width: 0;
+      min-height: 44px;
+      margin: 0;
+      white-space: normal;
+    }
+    #page-team .inline-actions {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 8px;
+      width: 100%;
+    }
+    #page-team .inline-actions button,
+    #team-viewer-form input,
+    #team-people-table .team-edit-panel input {
+      width: 100%;
+      min-width: 0;
+    }
+    #page-team .inline-actions button { min-height: 44px; margin: 0; }
+  }
 </style>
 </head>
 <body>
@@ -759,7 +866,7 @@
         <p id="team-people-error" class="error-msg"></p>
         <p id="team-people-msg" class="hint"></p>
         <p id="team-people-empty" class="hint" hidden>No one to show.</p>
-        <div class="table-scroll">
+        <div class="table-scroll team-people-scroll">
           <table id="team-people-table" class="table-cards">
             <thead>
               <tr>
@@ -1327,6 +1434,9 @@ function renderTeamPeople() {
     const secondary = identity.secondary
       ? `<p class="hint">${UI.escapeHtml(identity.secondary)}</p>`
       : '';
+    const primary = person.kind === 'viewer'
+      ? `<strong>${UI.escapeHtml(identity.primary)}</strong>`
+      : `<strong class="team-email">${UI.escapeHtml(identity.primary)}</strong>`;
     const tests = person.kind === 'viewer'
       ? `<p class="hint">${Number(person.experiment_count) || 0} ${(Number(person.experiment_count) || 0) === 1 ? 'test' : 'tests'} assigned</p>`
       : '';
@@ -1349,7 +1459,7 @@ function renderTeamPeople() {
       ? `<td class="card-action" data-label="Actions"><div class="users-actions">${buttons}</div>${reason}${statusNote}${editor}</td>`
       : '';
     return `<tr>
-      <td class="card-title users-identity" data-label="Person"><strong>${UI.escapeHtml(identity.primary)}</strong>${secondary}${tests}</td>
+      <td class="card-title users-identity" data-label="Person">${primary}${secondary}${tests}</td>
       <td data-label="Role">${roleCell}</td>
       <td class="card-status" data-label="Status"><span class="users-status">${usersStatusHtml(person)}</span></td>
       ${actionCell}

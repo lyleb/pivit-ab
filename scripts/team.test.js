@@ -101,6 +101,7 @@ const teamStart = admin.indexOf('id="page-team"');
 const teamEnd = admin.indexOf('id="page-users"');
 const teamPage = admin.slice(teamStart, teamEnd);
 assert.ok(teamPage.includes('id="team-people-table"'));
+assert.ok(teamPage.includes('class="table-scroll team-people-scroll"'));
 assert.ok(teamPage.includes('id="team-viewer-create"'));
 assert.ok(teamPage.includes('>Create viewer</button>'));
 assert.ok(teamPage.includes('Show archived'));
@@ -113,5 +114,9 @@ assert.ok(!/behavior|favorite|organize|color\b/i.test(teamPage));
 assert.ok(!teamPage.includes('Pivitlab'));
 assert.ok(!teamPage.includes('PivitLab'));
 assert.ok(!teamPage.includes('Client login'));
+assert.ok(admin.includes('class="team-email"'));
+assert.ok(admin.includes('#team-people-table .team-email { overflow-wrap: anywhere; }'));
+assert.ok(admin.includes('#page-team .team-people-scroll { overflow: visible; }'));
+assert.ok(admin.includes('grid-template-areas: "brand" "logout" "nav"'));
 
 console.log('team tests passed');
