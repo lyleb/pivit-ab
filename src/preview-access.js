@@ -174,6 +174,28 @@ function withPivitParams(pageUrl, entries) {
   return url.toString();
 }
 
+// Preview and edit open a real page. A path, a fragment or a host without a
+// scheme is not an address the browser can open on the customer's site.
+function absolutePageUrl(pageUrl) {
+  const raw = String(pageUrl == null ? '' : pageUrl).trim();
+  if (!/^https?:\/\//i.test(raw)) return '';
+  let url;
+  try {
+    url = new URL(raw);
+  } catch (err) {
+    return '';
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+  if (!url.hostname) return '';
+  return raw;
+}
+
+function pageUrlError(pageUrl) {
+  if (pageUrl == null || String(pageUrl).trim() === '') return 'page_url is required';
+  if (!absolutePageUrl(pageUrl)) return 'Enter the full page address (https://…) to preview on.';
+  return '';
+}
+
 function previewUrl(pageUrl, variantId, token) {
   return withPivitParams(pageUrl, [
     ['ab_preview', variantId],
@@ -202,6 +224,8 @@ module.exports = {
   inspectPreviewToken,
   authorisePreview,
   buildPublicExperimentList,
+  absolutePageUrl,
+  pageUrlError,
   previewUrl,
   editUrl,
   cacheControlForExperimentsQuery,

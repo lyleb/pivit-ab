@@ -2486,8 +2486,10 @@ function showPreviewElementNote(el, selector) {
 function showPreviewUrlWarning(box, textEl, button, rule, pageUrl) {
   if (!box || !textEl || !window.PivitUrl) return;
   const message = PivitUrl.previewUrlWarning(rule.pattern, pageUrl, rule.matchType);
-  const suggested = PivitUrl.defaultPreviewPage(rule);
-  const canUse = !!(suggested && PivitUrl.matchPageUrl(rule.pattern, suggested, rule.matchType));
+  // A path or a full address can be offered. A contains fragment is not a page,
+  // so the button stays hidden instead of filling in origin + that fragment.
+  const suggested = PivitUrl.matchingPreviewPage(rule);
+  const canUse = !!suggested;
   textEl.textContent = message;
   box.hidden = !message;
   if (button) {
@@ -2846,8 +2848,8 @@ function refreshDetailPreviewWarning() {
 
 function applyMatchingPreviewPage() {
   if (!currentDetail || !window.PivitUrl) return;
-  const suggested = PivitUrl.defaultPreviewPage(previewRule(currentDetail));
-  if (!suggested || !PivitUrl.matchPageUrl(currentDetail.url_match, suggested, currentDetail.url_match_type || 'contains')) return;
+  const suggested = PivitUrl.matchingPreviewPage(previewRule(currentDetail));
+  if (!suggested) return;
   const input = document.getElementById('detail-page-url');
   if (input) input.value = suggested;
   rememberPageUrl(currentDetail.id, suggested);
@@ -2913,10 +2915,27 @@ function reportArchived(result) {
   else alert(message);
 }
 
+function absolutePreviewPage(value) {
+  const raw = String(value == null ? '' : value).trim();
+  if (!/^https?:\/\//i.test(raw)) return '';
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    if (!url.hostname) return '';
+    return raw;
+  } catch (err) {
+    return '';
+  }
+}
+
+function fullPageAddressMessage() {
+  return 'Enter the full page address (https://…) to preview on.';
+}
+
 function requirePageUrl() {
   const input = document.getElementById('detail-page-url');
   const value = (input ? input.value : storedPageUrl(currentDetail)).trim();
-  if (value) {
+  if (absolutePreviewPage(value)) {
     rememberPageUrl(currentDetail.id, value);
     const manage = document.getElementById('manage-page-url');
     if (manage && !manage.value) manage.value = value;
@@ -2929,7 +2948,7 @@ function requirePageUrl() {
     const field = document.getElementById('detail-page-url');
     if (field) field.focus();
   });
-  detailError('Enter the page URL to preview on, then try again.');
+  detailError(value ? fullPageAddressMessage() : 'Enter the page URL to preview on, then try again.');
   return '';
 }
 
@@ -2940,6 +2959,13 @@ function pickPreviewVariant(variants) {
 }
 
 async function openPreviewLink(expId, variantId, pageUrl) {
+  if (!absolutePreviewPage(pageUrl)) {
+    const message = fullPageAddressMessage();
+    const detail = document.getElementById('page-detail');
+    if (detail && detail.classList.contains('active')) detailError(message);
+    else alert(message);
+    return;
+  }
   const result = await callApi(`/api/experiments/${expId}/variants/${variantId}/preview-link`, {
     method: 'POST',
     headers: authHeaders(),
@@ -5163,10 +5189,9 @@ function refreshWizardPreviewWarning() {
 
 document.getElementById('wizard-url-use-match').addEventListener('click', () => {
   if (!window.PivitUrl) return;
-  const suggested = PivitUrl.defaultPreviewPage(wizardPreviewRule());
+  const suggested = PivitUrl.matchingPreviewPage(wizardPreviewRule());
   const input = document.getElementById('wizard-page-url');
   if (!suggested || !input) return;
-  if (!PivitUrl.matchPageUrl(wizard.url, suggested, wizard.match || 'contains')) return;
   input.value = suggested;
   wizard.pageUrl = suggested;
   saveWizard();
@@ -5435,8 +5460,8 @@ document.getElementById('manage-url-use-match').addEventListener('click', () => 
   const input = document.getElementById('manage-page-url');
   if (!exp || !input || !window.PivitUrl) return;
   const rule = previewRule(exp);
-  const suggested = PivitUrl.defaultPreviewPage(rule);
-  if (!suggested || !PivitUrl.matchPageUrl(rule.pattern, suggested, rule.matchType)) return;
+  const suggested = PivitUrl.matchingPreviewPage(rule);
+  if (!suggested) return;
   input.value = suggested;
   refreshManagePreviewWarning(exp);
 });
@@ -5469,7 +5494,10 @@ document.addEventListener('click', (e) => {
 
 async function makeEdits(expId, variantId, btn, pageUrl) {
   const url = (pageUrl || (document.getElementById('manage-page-url') || {}).value || '').trim();
-  if (!url) { alert('Enter a page URL first.'); return false; }
+  if (!absolutePreviewPage(url)) {
+    alert(url ? fullPageAddressMessage() : 'Enter a page URL first.');
+    return false;
+  }
   if (btn) btn.disabled = true;
   const result = await callApi(`/api/experiments/${expId}/variants/${variantId}/edit-link`, {
     method: 'POST', headers: authHeaders(), body: JSON.stringify({ page_url: url }),

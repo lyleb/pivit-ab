@@ -209,6 +209,20 @@ async function main() {
     assert.strictEqual(runningLink.status, 200);
     assert.ok(runningLink.json.edit_url.includes('ab_edit='));
 
+    const relativeEdit = await request(server, 'POST', `/api/experiments/${running.id}/variants/${running.variantId}/edit-link`, { page_url: '-t-shirt' });
+    assert.strictEqual(relativeEdit.status, 400);
+    assert.ok(relativeEdit.json.error.includes('https://'));
+    assert.strictEqual(relativeEdit.json.edit_url, undefined);
+
+    const relativePreview = await request(server, 'POST', `/api/experiments/${running.id}/variants/${running.variantId}/preview-link`, { page_url: '/products/' });
+    assert.strictEqual(relativePreview.status, 400);
+    assert.ok(relativePreview.json.error.includes('full page address'));
+    assert.strictEqual(relativePreview.json.preview_url, undefined);
+
+    const missingPreview = await request(server, 'POST', `/api/experiments/${running.id}/variants/${running.variantId}/preview-link`, {});
+    assert.strictEqual(missingPreview.status, 400);
+    assert.strictEqual(missingPreview.json.error, 'page_url is required');
+
     const publicPath = `/api/experiments?url=${encodeURIComponent(page)}`;
     const archivedPreview = await request(
       server,

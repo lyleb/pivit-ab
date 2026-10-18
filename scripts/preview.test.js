@@ -122,6 +122,18 @@ assert.strictEqual(new URL(siteToken).searchParams.get('token'), 'site-token');
 assert.strictEqual(preview.cacheControlForExperimentsQuery({ url: 'https://cantsaythat.co.uk' }), null);
 assert.strictEqual(preview.cacheControlForExperimentsQuery({ preview: '1', preview_variant: variantId }), 'no-store');
 
+const fullAddress = 'Enter the full page address (https://…) to preview on.';
+assert.strictEqual(preview.pageUrlError(''), 'page_url is required');
+assert.strictEqual(preview.pageUrlError('   '), 'page_url is required');
+assert.strictEqual(preview.pageUrlError(null), 'page_url is required');
+assert.strictEqual(preview.pageUrlError('-t-shirt'), fullAddress);
+assert.strictEqual(preview.pageUrlError('/products/'), fullAddress);
+assert.strictEqual(preview.pageUrlError('cantsaythat.co.uk/products/graphic-t-shirt'), fullAddress);
+assert.strictEqual(preview.pageUrlError('javascript:alert(1)'), fullAddress);
+assert.strictEqual(preview.pageUrlError('https://cantsaythat.co.uk/products/graphic-t-shirt'), '');
+assert.strictEqual(preview.absolutePageUrl('https://cantsaythat.co.uk/'), 'https://cantsaythat.co.uk/');
+assert.strictEqual(preview.absolutePageUrl('/products/'), '');
+
 const experimentsSrc = fs.readFileSync(path.join(__dirname, '../src/routes/experiments.js'), 'utf8');
 assert.ok(experimentsSrc.includes("AND status = 'running'"));
 assert.ok(!experimentsSrc.includes('statusClause'));
@@ -130,6 +142,8 @@ assert.ok(experimentsSrc.includes('applyHostScope(matchedPreview, req)'));
 assert.ok(experimentsSrc.includes('checkHost') || experimentsSrc.includes('applyHostScope'));
 assert.ok(experimentsSrc.includes('cacheControlForExperimentsQuery(req.query)'));
 assert.ok(experimentsSrc.includes('editUrl(page_url'));
+assert.strictEqual(experimentsSrc.split('pageUrlError(page_url)').length, 3);
+assert.ok(experimentsSrc.includes('if (pageProblem) return res.status(400)'));
 
 const snippet = fs.readFileSync(path.join(__dirname, '../snippet/ab.js'), 'utf8');
 assert.ok(snippet.includes('ab_preview_token'));

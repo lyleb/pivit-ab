@@ -143,11 +143,48 @@ assert.strictEqual(urlMatch.defaultPreviewPage({
   matchType: 'contains',
   ...shopHost,
 }), 'https://shop.example/pricing');
+// A contains fragment is not a page. Origin + "/pricing" would be a made-up
+// address that still matches the rule, so preview uses the homepage.
 assert.strictEqual(urlMatch.defaultPreviewPage({
   pattern: 'pricing',
   matchType: 'contains',
   ...shopHost,
+}), 'https://shop.example/');
+assert.strictEqual(urlMatch.defaultPreviewPage({
+  pattern: '-t-shirt',
+  matchType: 'contains',
+  allowedHosts: ['cantsaythat.co.uk'],
+}), 'https://cantsaythat.co.uk/');
+assert.strictEqual(urlMatch.defaultPreviewPage({
+  pattern: '/products/',
+  matchType: 'contains',
+  allowedHosts: ['cantsaythat.co.uk'],
+}), 'https://cantsaythat.co.uk/products/');
+assert.strictEqual(urlMatch.matchingPreviewPage({
+  pattern: '-t-shirt',
+  matchType: 'contains',
+  allowedHosts: ['cantsaythat.co.uk'],
+}), '');
+assert.strictEqual(urlMatch.matchingPreviewPage({
+  pattern: '/products/',
+  matchType: 'contains',
+  allowedHosts: ['cantsaythat.co.uk'],
+}), 'https://cantsaythat.co.uk/products/');
+assert.strictEqual(urlMatch.matchingPreviewPage({
+  pattern: '/pricing',
+  matchType: 'starts_with',
+  ...shopHost,
 }), 'https://shop.example/pricing');
+assert.strictEqual(urlMatch.matchingPreviewPage({
+  pattern: 'https://shop.example/pricing',
+  matchType: 'exact',
+  ...shopHost,
+}), 'https://shop.example/pricing');
+assert.strictEqual(urlMatch.matchingPreviewPage({
+  pattern: '/pri[c]ing',
+  matchType: 'regex',
+  ...shopHost,
+}), '');
 // Origin plus the pattern does not match a starts-with rule of "pricing",
 // so the preview falls back to the site homepage.
 assert.strictEqual(urlMatch.defaultPreviewPage({
@@ -191,6 +228,7 @@ const defaultSource = matcherSource.slice(
 );
 assert.ok(warningSource.includes('matchPageUrl('));
 assert.ok(defaultSource.includes('matchPageUrl('));
+assert.ok(defaultSource.includes('patternIsPageAddress'));
 assert.strictEqual(matcherSource.split('function matchPageUrl').length, 2);
 
 const admin = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
@@ -204,6 +242,22 @@ assert.ok(admin.includes('Use a matching page'));
 assert.ok(admin.includes('previewUrlWarning'));
 assert.ok(admin.includes('defaultPreviewPage'));
 assert.ok(admin.includes('PivitUrl.matchPageUrl'));
+assert.ok(admin.includes('matchingPreviewPage'));
+const warningFn = admin.slice(admin.indexOf('function showPreviewUrlWarning'), admin.indexOf('function storedPageUrl'));
+assert.ok(warningFn.includes('matchingPreviewPage'));
+assert.ok(!warningFn.includes('defaultPreviewPage'));
+const addressFn = admin.slice(admin.indexOf('function fullPageAddressMessage'), admin.indexOf('function requirePageUrl'));
+const requireFn = admin.slice(admin.indexOf('function requirePageUrl'), admin.indexOf('function pickPreviewVariant'));
+const editsFn = admin.slice(admin.indexOf('async function makeEdits'), admin.indexOf('async function loadManageVariants'));
+const previewFn = admin.slice(admin.indexOf('async function openPreviewLink'), admin.indexOf('function devicePreviewUrl'));
+const fullAddress = 'Enter the full page address (https://…) to preview on.';
+assert.ok(addressFn.includes(fullAddress));
+assert.ok(requireFn.includes('absolutePreviewPage'));
+assert.ok(requireFn.includes('fullPageAddressMessage()'));
+assert.ok(editsFn.includes('absolutePreviewPage'));
+assert.ok(editsFn.includes('fullPageAddressMessage()'));
+assert.ok(previewFn.includes('absolutePreviewPage'));
+assert.ok(previewFn.includes('window.open') === false || previewFn.indexOf('absolutePreviewPage') < previewFn.indexOf('window.open'));
 assert.ok(admin.includes('class="preview-url-warning"'));
 assert.ok(admin.includes('Test traffic results'));
 assert.ok(admin.includes('Export test traffic CSV'));

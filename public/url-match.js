@@ -410,10 +410,21 @@
     return origin ? origin + '/' : '';
   }
 
+  // A path (/products/) or a full http(s) address names a page. A contains
+  // fragment such as "-t-shirt" does not: joining it onto the origin invents
+  // an address that still matches the rule.
+  function patternIsPageAddress(pattern) {
+    const pat = String(pattern || '').trim();
+    return pat.charAt(0) === '/' || /^https?:\/\//i.test(pat);
+  }
+
   // Default preview address for a rule.
-  // Exact uses the pattern itself. Starts-with and contains use the site
-  // origin plus the pattern when that address matches the rule. Anything
-  // else, including a join that does not match, uses the site homepage.
+  // Exact uses the pattern itself. Starts-with uses the site origin plus the
+  // pattern when that address matches the rule. Contains does the same only
+  // when the pattern is a path or a full http(s) address. A contains fragment
+  // uses the site homepage, so the dashboard can ask for a real page. A
+  // regular expression uses the homepage too. A join that does not match the
+  // rule also uses the homepage.
   function defaultPreviewPage(options) {
     const opts = options || {};
     const pattern = String(opts.pattern == null ? '' : opts.pattern).trim();
@@ -421,11 +432,26 @@
     const type = opts.matchType || 'contains';
     if (type === 'exact') return pattern;
     const origin = previewSiteOrigin(pattern, opts);
-    if (type === 'starts_with' || type === 'contains') {
+    const join = type === 'starts_with' || (type === 'contains' && patternIsPageAddress(pattern));
+    if (join) {
       const candidate = originPlusPattern(origin, pattern);
       if (candidate && matchPageUrl(pattern, candidate, type)) return candidate;
     }
     return siteHomepage(origin);
+  }
+
+  // Page offered by "Use a matching page". Blank unless the pattern is a path
+  // or a full address and that page matches the rule, so a contains fragment
+  // never fills in a made-up URL.
+  function matchingPreviewPage(options) {
+    const opts = options || {};
+    const pattern = String(opts.pattern == null ? '' : opts.pattern).trim();
+    if (!pattern || !patternIsPageAddress(pattern)) return '';
+    const type = opts.matchType || 'contains';
+    if (type === 'regex') return '';
+    const suggested = defaultPreviewPage(opts);
+    if (suggested && matchPageUrl(pattern, suggested, type)) return suggested;
+    return '';
   }
 
   function testUrlGoal(match, pattern, sample) {
@@ -464,5 +490,6 @@
     previewElementNote: previewElementNote,
     previewUrlWarning: previewUrlWarning,
     defaultPreviewPage: defaultPreviewPage,
+    matchingPreviewPage: matchingPreviewPage,
   };
 });
