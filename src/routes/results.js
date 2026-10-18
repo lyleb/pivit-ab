@@ -3,6 +3,7 @@ const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { computeBayesianStats } = require('../bayesian');
 const { detectSRM } = require('../srm');
+const { splitCheckFromVariants } = require('../split-check');
 const { getVariantResults, getGoalBreakdown, getTimeseries, getPrimaryVariantData, annotateUniqueConversions, visibleEventSql } = require('../metrics');
 const { flagIsOn, summariseTestTraffic } = require('../test-traffic');
 const { outcomeGate } = require('../experiment-plan');
@@ -121,6 +122,8 @@ router.get('/:experimentId', async (req, res) => {
       goals: visible ? breakdown.goals : [],
       reading: gate.reading,
       blinded: !visible,
+      srmDetected: !!(gate.loaded && gate.loaded.srm && gate.loaded.srm.srm_detected),
+      splitCheck: splitCheckFromVariants(gate.loaded && gate.loaded.srm, gate.loaded && gate.loaded.variants),
     });
   } catch (err) {
     console.error(err);
@@ -328,7 +331,14 @@ router.get('/:experimentId/srm', async (req, res) => {
     }));
 
     const srm = detectSRM(variantData);
-    res.json({ experiment_id: experimentId, variants: variantData, ...srm });
+    const srmDetected = !!srm.srm_detected;
+    res.json({
+      experiment_id: experimentId,
+      variants: variantData,
+      ...srm,
+      srmDetected,
+      splitCheck: splitCheckFromVariants(srm, variantData),
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });

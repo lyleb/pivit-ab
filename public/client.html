@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>pivitlab — Viewer</title>
-<link rel="stylesheet" href="/assets/pivit.css?v=7">
+<link rel="stylesheet" href="/assets/pivit.css?v=8">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="/admin-ui.js"></script>
 <style>
@@ -52,6 +52,7 @@
   .pill.risk { background: rgba(230,194,122,0.16); color: var(--warn); }
   .pill.done { background: rgba(86,53,251,0.22); color: #c4b6ff; }
   .pill.draft { background: #2a2e3c; color: var(--text-muted); }
+  .status-pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .bar { height: 8px; background: #262a38; border-radius: 99px; overflow: hidden; margin: 6px 0; }
   .bar i { display: block; height: 100%; background: var(--mint); border-radius: 99px; }
   .bar.warn i { background: var(--warn); }
@@ -107,6 +108,11 @@
     .portal-head { display: none; }
     .portal-row, .detail-grid { grid-template-columns: 1fr; gap: 12px; }
     .portal-row .open-cell .btn-ghost, #review-btn { width: 100%; }
+  }
+  @media (max-width: 640px) {
+    .status-pills { align-items: flex-start; }
+    .split-check-top { margin-bottom: 8px; }
+    .portal-row .split-pill { max-width: 100%; }
   }
 </style>
 </head>
@@ -176,6 +182,23 @@ let trendChart;
 let currentTrendSeries = [];
 let trendMode = 'cumulative';
 let currentExperimentId = null;
+let scrollToSrm = false;
+
+function splitBlock(check) {
+  const text = (check && check.tooltip) || 'Not enough visitors yet to check the split.';
+  return `<div class="split-check-top">${UI.splitPillHtml(check)}</div>
+    <section class="panel" id="srm-panel">
+      <h2>Traffic split</h2>
+      <p>${UI.escapeHtml(text)}</p>
+    </section>`;
+}
+
+function maybeScrollSrm() {
+  if (!scrollToSrm) return;
+  scrollToSrm = false;
+  const panel = document.getElementById('srm-panel');
+  if (panel && typeof panel.scrollIntoView === 'function') panel.scrollIntoView({ block: 'start' });
+}
 
 function num(value) {
   return Number(value || 0).toLocaleString('en-GB');
@@ -283,7 +306,24 @@ function renderList(payload) {
       openTest(id);
     });
   });
+  mount.querySelectorAll('[data-open-srm]').forEach((link) => {
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+      const id = link.getAttribute('data-open-srm');
+      scrollToSrm = true;
+      history.pushState(null, '', `#test/${id}`);
+      openTest(id);
+    });
+  });
 }
+
+document.getElementById('view-detail').addEventListener('click', (event) => {
+  const link = event.target.closest('a.split-pill[href="#srm-panel"]');
+  if (!link) return;
+  event.preventDefault();
+  const panel = document.getElementById('srm-panel');
+  if (panel && typeof panel.scrollIntoView === 'function') panel.scrollIntoView({ block: 'start' });
+});
 
 function renderRow(item) {
   const progress = item.group === 'draft'
@@ -303,7 +343,7 @@ function renderRow(item) {
   const actionClass = item.group === 'finished' ? 'btn' : 'btn-ghost';
   return `<div class="portal-row">
     <div><div class="t">${UI.escapeHtml(item.name)}${item.demo ? ' ' + UI.demoBadgeHtml() : ''}</div><div class="s">${UI.escapeHtml(item.subtitle || '')}</div></div>
-    <div><span class="pill ${UI.escapeHtml(item.tone || 'run')}">${UI.escapeHtml(item.pill || '')}</span>${note}</div>
+    <div><div class="status-pills"><span class="pill ${UI.escapeHtml(item.tone || 'run')}">${UI.escapeHtml(item.pill || '')}</span>${UI.splitPillHtml(item.splitCheck, item.id)}</div>${note}</div>
     <div>${progress}</div>
     <div>${headline}</div>
     <div class="open-cell"><button type="button" class="${actionClass}" data-open="${UI.escapeHtml(item.id)}">${action}</button></div>
@@ -375,6 +415,7 @@ function renderBlind(detail) {
       </div>`
     : '';
   return `
+    ${splitBlock(detail.splitCheck)}
     <div class="run-badge ${tone}">${UI.escapeHtml(detail.mode === 'stopped' ? 'Finished early' : badge)}</div>
     <h1>${UI.escapeHtml(exp.name)}${exp.demo ? ' ' + UI.demoBadgeHtml() : ''}</h1>
     <p class="muted">Results stay hidden until the planned sample is reached. That's what keeps the answer honest.</p>
@@ -406,7 +447,7 @@ function renderConcluded(detail) {
   const snap = detail.snapshot;
   const result = snap && snap.concluded;
   if (!result) {
-    return `<h1>${UI.escapeHtml(exp.name)}${exp.demo ? ' ' + UI.demoBadgeHtml() : ''}</h1>
+    return `${splitBlock(detail.splitCheck)}<h1>${UI.escapeHtml(exp.name)}${exp.demo ? ' ' + UI.demoBadgeHtml() : ''}</h1>
       ${exp.demo ? `<p class="note">${UI.escapeHtml(UI.demoRuntimeNote())}</p>` : ''}
       <div class="panel"><p>The daily update has not stored a result yet. This page does not calculate one when you open it.</p></div>`;
   }
@@ -424,6 +465,7 @@ function renderConcluded(detail) {
   const steps = (result.whats_next || []).map((step, index) => `<div class="next-step"><strong>${index + 1}. ${UI.escapeHtml(step.title)}</strong><span class="muted">${UI.escapeHtml(step.body)}</span></div>`).join('');
   const meta = `Finished ${UI.escapeHtml(result.finished_label || '')} · ${num(result.visitors)} visitors · ${num(result.days)} days`;
   return `
+    ${splitBlock(detail.splitCheck)}
     <div class="run-badge done">${UI.escapeHtml(meta)}</div>
     <h1>${UI.escapeHtml(exp.name)}${exp.demo ? ' ' + UI.demoBadgeHtml() : ''}</h1>
     ${exp.demo ? `<p class="note">${UI.escapeHtml(UI.demoRuntimeNote())} This result uses test traffic only.</p>` : ''}
@@ -538,20 +580,24 @@ async function openTest(id) {
   if (detail.mode === 'blind' || detail.mode === 'stopped') {
     mount.innerHTML = renderBlind(detail);
     bindReview(id);
+    maybeScrollSrm();
     return;
   }
   if (detail.mode === 'concluded') {
     mount.innerHTML = renderConcluded(detail);
     bindReview(id);
     bindApprove(id);
+    maybeScrollSrm();
     return;
   }
   if (detail.mode === 'draft') {
-    mount.innerHTML = `<h1>${UI.escapeHtml(detail.experiment.name)}${detail.experiment.demo ? ' ' + UI.demoBadgeHtml() : ''}</h1><p>This test hasn't started yet. Results appear once it's running.</p>${detail.experiment.demo ? `<p class="note">${UI.escapeHtml(UI.demoRuntimeNote())}</p>` : ''}`;
+    mount.innerHTML = `${splitBlock(detail.splitCheck)}<h1>${UI.escapeHtml(detail.experiment.name)}${detail.experiment.demo ? ' ' + UI.demoBadgeHtml() : ''}</h1><p>This test hasn't started yet. Results appear once it's running.</p>${detail.experiment.demo ? `<p class="note">${UI.escapeHtml(UI.demoRuntimeNote())}</p>` : ''}`;
+    maybeScrollSrm();
     return;
   }
-  mount.innerHTML = `<h1>${UI.escapeHtml(detail.experiment.name)}${detail.experiment.demo ? ' ' + UI.demoBadgeHtml() : ''}</h1>`;
+  mount.innerHTML = `${splitBlock(detail.splitCheck)}<h1>${UI.escapeHtml(detail.experiment.name)}${detail.experiment.demo ? ' ' + UI.demoBadgeHtml() : ''}</h1>`;
   document.getElementById('live-section').hidden = false;
+  maybeScrollSrm();
   loadLiveResults({ id, name: detail.experiment.name, status: detail.experiment.status, created_at: detail.experiment.created_at });
 }
 

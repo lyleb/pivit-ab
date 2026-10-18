@@ -5,6 +5,7 @@ const { computeBayesianStats } = require('../bayesian');
 const { publicServerError } = require('../public-error');
 const { getVariantResults, getGoalBreakdown, getTimeseries, getPrimaryVariantData } = require('../metrics');
 const { outcomeGate } = require('../experiment-plan');
+const { splitCheckFromVariants } = require('../split-check');
 const { hideOutcomeRow } = require('../reading');
 const { buildVerdict } = require('../verdict');
 const { isDemo } = require('../demo-test');
@@ -177,6 +178,8 @@ router.get('/results/:experimentId', async (req, res) => {
       reading: gate.reading,
       blinded: !visible,
       verdict,
+      srmDetected: !!(gate.loaded && gate.loaded.srm && gate.loaded.srm.srm_detected),
+      splitCheck: splitCheckFromVariants(gate.loaded && gate.loaded.srm, gate.loaded && gate.loaded.variants),
     });
   } catch (err) {
     res.status(500).json(publicServerError(err));

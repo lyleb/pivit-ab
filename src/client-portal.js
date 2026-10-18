@@ -4,6 +4,15 @@
 const db = require('./db');
 const { createPreviewToken, previewUrl } = require('./preview-access');
 const { listItem, detailPayload, experimentPageUrl, formatLondonStamp } = require('./portal-view');
+const { listVariantCounts, srmFor } = require('./experiment-plan');
+const { splitCheckFromVariants } = require('./split-check');
+
+function attachSplit(item, variants) {
+  const rows = variants || [];
+  item.splitCheck = splitCheckFromVariants(srmFor(rows), rows);
+  item.srmDetected = !!(item.splitCheck && item.splitCheck.srmDetected);
+  return item;
+}
 
 const CLIENT_PREVIEW_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -26,6 +35,7 @@ async function listForClient(clientId, accountId, now = new Date()) {
     [clientId, accountId]
   );
   let latest = null;
+  const counts = await listVariantCounts(rows.map((row) => row.id));
   const experiments = rows.map((row) => {
     const snapshot = row.snapshot_date
       ? { headline_code: row.headline_code, detail: row.detail, created_at: row.snapshot_created_at }
@@ -33,7 +43,7 @@ async function listForClient(clientId, accountId, now = new Date()) {
     if (snapshot && snapshot.created_at && (!latest || new Date(snapshot.created_at) > new Date(latest))) {
       latest = snapshot.created_at;
     }
-    return listItem(row, snapshot, now);
+    return attachSplit(listItem(row, snapshot, now), counts.get(row.id));
   });
   return {
     experiments,
@@ -90,13 +100,15 @@ async function detailForClient(clientId, accountId, experimentId, now = new Date
     }
     return { id: variant.id, name: variant.name, preview_url };
   });
-  return detailPayload({
+  const detail = detailPayload({
     experiment,
     snapshot: snap.rows[0] || null,
     variants: withPreview,
     review: review.rows[0] || null,
     now,
   });
+  const counts = await listVariantCounts([experimentId]);
+  return attachSplit(detail, counts.get(experimentId));
 }
 
 module.exports = {

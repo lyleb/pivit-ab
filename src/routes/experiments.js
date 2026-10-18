@@ -11,7 +11,8 @@ const {
 const { detectSRM } = require('../srm');
 const { buildHealth } = require('../health');
 const { flagIsOn, summariseTestTraffic, requestHasQaFlag, requestIsTestTraffic } = require('../test-traffic');
-const { ensurePlanOnStart, recordReveal, loadReading, readingPayload, srmFor } = require('../experiment-plan');
+const { ensurePlanOnStart, recordReveal, loadReading, readingPayload, srmFor, listVariantCounts } = require('../experiment-plan');
+const { splitCheckFromVariants } = require('../split-check');
 const { planProgress, describeReading, listSignal } = require('../reading');
 const { visibleEventSql } = require('../metrics');
 const { utcDay, windowStartDay } = require('../host-hits');
@@ -334,38 +335,7 @@ router.get('/all', async (req, res) => {
        ORDER BY e.created_at DESC`,
       [req.account.id]
     );
-    const ids = rows.map((row) => row.id);
-    let variantRows = [];
-    if (ids.length) {
-      const counted = await db.query(
-        `SELECT v.experiment_id, v.id, v.name, v.traffic_split, v.enabled,
-           COUNT(DISTINCT e.visitor_id) FILTER (
-             WHERE e.event_type = 'view'
-               AND e.excluded_at IS NULL
-               AND e.is_test = (x.test_type = 'demo')
-           )::int AS visitors
-         FROM variants v
-         JOIN experiments x ON x.id = v.experiment_id
-         LEFT JOIN events e ON e.variant_id = v.id
-         WHERE v.experiment_id = ANY($1::uuid[])
-         GROUP BY v.experiment_id, v.id, x.test_type`,
-        [ids]
-      );
-      variantRows = counted.rows;
-    }
-    const byExperiment = new Map();
-    variantRows.forEach((row) => {
-      if (!byExperiment.has(row.experiment_id)) byExperiment.set(row.experiment_id, []);
-      byExperiment.get(row.experiment_id).push({
-        id: row.id,
-        variant_id: row.id,
-        name: row.name,
-        variant_name: row.name,
-        traffic_split: row.traffic_split,
-        enabled: row.enabled !== false,
-        visitors: Number(row.visitors) || 0,
-      });
-    });
+    const byExperiment = await listVariantCounts(rows.map((row) => row.id));
     const experiments = rows.map((row) => {
       const variants = byExperiment.get(row.id) || [];
       const progress = planProgress({
@@ -374,12 +344,13 @@ router.get('/all', async (req, res) => {
         variants,
       });
       const srm = srmFor(variants);
+      const srmDetected = !!(srm && srm.srm_detected);
       const described = describeReading({
         status: row.status,
         plan: row.plan,
         peekedAt: row.peeked_at,
         progress,
-        srmDetected: !!(srm && srm.srm_detected),
+        srmDetected,
       });
       const reading = {
         mode: described.mode,
@@ -394,6 +365,8 @@ router.get('/all', async (req, res) => {
       return Object.assign({}, row, {
         reading,
         signal: listSignal(row.status, reading),
+        srmDetected,
+        splitCheck: splitCheckFromVariants(srm, variants),
       });
     });
     res.set('Cache-Control', 'no-store');
