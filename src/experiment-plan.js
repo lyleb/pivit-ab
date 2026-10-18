@@ -45,6 +45,42 @@ async function loadExperiment(experimentId, query = db.query.bind(db), accountId
   return rows[0] || null;
 }
 
+// Visitor counts for a list of experiments, in one query. Demo tests count
+// test traffic only; live tests count real visitors. Disabled variants stay
+// in the rows so a caller can ignore them. Matches the experiments list.
+async function listVariantCounts(experimentIds, query = db.query.bind(db)) {
+  const ids = (experimentIds || []).filter(Boolean);
+  const byExperiment = new Map();
+  if (!ids.length) return byExperiment;
+  const { rows } = await query(
+    `SELECT v.experiment_id, v.id, v.name, v.traffic_split, v.enabled,
+       COUNT(DISTINCT e.visitor_id) FILTER (
+         WHERE e.event_type = 'view'
+           AND e.excluded_at IS NULL
+           AND e.is_test = (x.test_type = 'demo')
+       )::int AS visitors
+     FROM variants v
+     JOIN experiments x ON x.id = v.experiment_id
+     LEFT JOIN events e ON e.variant_id = v.id
+     WHERE v.experiment_id = ANY($1::uuid[])
+     GROUP BY v.experiment_id, v.id, x.test_type`,
+    [ids]
+  );
+  rows.forEach((row) => {
+    if (!byExperiment.has(row.experiment_id)) byExperiment.set(row.experiment_id, []);
+    byExperiment.get(row.experiment_id).push({
+      id: row.id,
+      variant_id: row.id,
+      name: row.name,
+      variant_name: row.name,
+      traffic_split: row.traffic_split,
+      enabled: row.enabled !== false,
+      visitors: Number(row.visitors) || 0,
+    });
+  });
+  return byExperiment;
+}
+
 async function visitorRows(experimentId, includeTest, query = db.query.bind(db), options = {}) {
   const testOnly = !!(options && options.testOnly);
   const { rows } = await query(
@@ -391,6 +427,7 @@ module.exports = {
   primaryGoalId,
   loadExperiment,
   visitorRows,
+  listVariantCounts,
   suggest,
   loadReading,
   readingPayload,
