@@ -43,6 +43,11 @@ assert.ok(adminSrc.includes("url.searchParams.set('pivit_device', 'desktop')"));
 assert.ok(!deviceSrc.includes("setAttribute('sandbox'"));
 assert.ok(!deviceSrc.includes('sandbox='));
 assert.ok(deviceSrc.includes('pivitlab preview'));
+assert.ok(deviceSrc.includes('whole-page CSS and JavaScript'));
+assert.ok(snippetSrc.includes("change.type === 'page_css'"));
+assert.ok(snippetSrc.includes("change.type === 'page_js'"));
+assert.ok(editorSrc.includes('id = \'pivit-whole-page\''));
+assert.ok(snippetSrc.includes('including page_css and page_js'));
 
 function element() {
   const attrs = {};

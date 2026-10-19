@@ -41,6 +41,7 @@ const {
   archivedPreviewMessage,
   expiredPreviewMessage,
 } = require('../editor-context');
+const { validateChanges } = require('../changes');
 const router = express.Router();
 
 async function noteDomainWarning(client, accountId, placed) {
@@ -625,6 +626,10 @@ router.post('/:id/variants', async (req, res) => {
     const { name, traffic_split, changes, goals } = req.body;
     if (!name) return res.status(400).json({ error: 'name is required' });
     if (!id) return res.status(400).json({ error: 'experiment id is required in the URL' });
+    if (changes !== undefined && changes !== null) {
+      const problem = validateChanges(changes);
+      if (problem) return res.status(400).json({ error: problem });
+    }
 
     await client.query('BEGIN');
     const locked = await client.query(
@@ -685,6 +690,10 @@ router.patch('/:id/variants/:variantId', async (req, res) => {
     const { id, variantId } = req.params;
     const { name, traffic_split, changes, goals } = req.body;
     if (!name) return res.status(400).json({ error: 'name is required' });
+    if (changes !== undefined && changes !== null) {
+      const problem = validateChanges(changes);
+      if (problem) return res.status(400).json({ error: problem });
+    }
 
     // `changes` is only written when the request actually includes it. The
     // dashboard form edits name/split — what a variant *does* is authored in

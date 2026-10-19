@@ -10,7 +10,9 @@
  *
  * "Edit element" opens a panel with HTML / CSS / JS tabs. Each part becomes its
  * own entry in the Changes list ('replace', 'stylesheet', 'js'), so it can be
- * edited or removed independently later.
+ * edited or removed independently later. "Whole page" does not need an element.
+ * Its CSS and JavaScript are stored as page_css and page_js. Element HTML, CSS
+ * and JS are left as they are.
  *
  * Editing or removing an EXISTING change reloads the page and replays the
  * updated change list from a clean DOM, rather than trying to reverse an
@@ -64,6 +66,41 @@
       document.head.appendChild(styleEl);
       return;
     }
+    // Whole-page CSS is one style tag. Applying the same text again does not
+    // add another. Whole-page JS runs once for this document, with no element.
+    if (change.type === 'page_css') {
+      const css = typeof change.value === 'string' ? change.value : '';
+      const styles = document.querySelectorAll('style[data-pivit-page-css]');
+      for (let i = 0; i < styles.length; i++) {
+        if ((styles[i].textContent || '') === css) return;
+      }
+      const styleEl = document.createElement('style');
+      styleEl.setAttribute('data-pivit-page-css', '');
+      styleEl.textContent = css;
+      (document.head || document.documentElement).appendChild(styleEl);
+      return;
+    }
+    if (change.type === 'page_js') {
+      const root = document.documentElement || document;
+      if (!root.__pivitPageJsRan || typeof root.__pivitPageJsRan !== 'object') {
+        root.__pivitPageJsRan = Object.create(null);
+      }
+      const source = typeof change.value === 'string' ? change.value : '';
+      if (root.__pivitPageJsRan[source]) return;
+      root.__pivitPageJsRan[source] = true;
+      if (!source) return;
+      try {
+        const result = new Function('document', source)(document);
+        if (result && typeof result.then === 'function') {
+          result.then(function () {}, function (err) {
+            console.warn('[pivit-editor] page JS change failed:', err);
+          });
+        }
+      } catch (e) {
+        console.warn('[pivit-editor] page JS change failed:', e);
+      }
+      return;
+    }
     const els = document.querySelectorAll(change.selector);
     els.forEach((el) => {
       switch (change.type) {
@@ -98,6 +135,8 @@
       case 'show': return `Show ${sel}`;
       case 'style': return `Inline styles on ${sel}`;
       case 'stylesheet': return sel ? `Add CSS rules (for ${sel})` : 'Custom CSS for this variant';
+      case 'page_css': return 'Page CSS';
+      case 'page_js': return 'Page JavaScript';
       case 'replace': return `Replace element ${sel}`;
       case 'attr': return `Set ${change.attr || 'attribute'} on ${sel}`;
       case 'js': return `Custom JS on ${sel}`;
@@ -123,6 +162,8 @@
     js: { label: 'JavaScript', hint: '"el" is the selected element.' },
   };
   function isEditable(change) {
+    if (!change) return false;
+    if (change.type === 'page_css' || change.type === 'page_js') return true;
     return !!EDIT_META[change.type];
   }
 
@@ -440,6 +481,13 @@
     pickBtn.id = 'pivit-pick-btn';
     toolbar.appendChild(pickBtn);
 
+    const wholePageBtn = makeButton('Whole page', '#f0f0f7', () => openWholePagePanel(null));
+    wholePageBtn.style.width = '100%';
+    wholePageBtn.style.color = COLORS.ink;
+    wholePageBtn.style.marginTop = '6px';
+    wholePageBtn.id = 'pivit-whole-page';
+    toolbar.appendChild(wholePageBtn);
+
     customCssBtn = makeButton('Custom CSS', '#f0f0f7', () => openCustomCssPanel());
     customCssBtn.style.width = '100%';
     customCssBtn.style.color = COLORS.ink;
@@ -506,7 +554,7 @@
     hint.style.fontSize = '11px';
     hint.style.color = '#6b6f83';
     hint.style.marginTop = '8px';
-    hint.textContent = 'Preview shows the last save, not unsaved edits. Each device runs the variant\'s JavaScript.';
+    hint.textContent = 'Preview shows the last save, not unsaved edits. Desktop, tablet and mobile run the saved variant, including whole-page CSS and JavaScript.';
     toolbar.appendChild(hint);
 
     refreshToolbarState();
@@ -541,7 +589,7 @@
       empty.style.fontSize = '12px';
       empty.style.color = '#6b6f83';
       empty.style.padding = '6px 2px';
-      empty.textContent = 'No changes yet — select an element to start.';
+      empty.textContent = 'No changes yet. Select an element, or choose Whole page.';
       changesListEl.appendChild(empty);
       return;
     }
@@ -650,6 +698,7 @@
 
   function editChangeAtIndex(idx) {
     const change = allChanges[idx];
+    if (change && (change.type === 'page_css' || change.type === 'page_js')) { openWholePagePanel(idx); return; }
     // Variant-level custom CSS has no element selector. Element stylesheet
     // entries still open with the HTML / CSS / JS set.
     if (change.type === 'stylesheet' && !String(change.selector || '').trim()) { openCustomCssPanel(); return; }
@@ -1011,7 +1060,7 @@
     actionPopup = document.createElement('div');
     styleReset(actionPopup);
     Object.assign(actionPopup.style, {
-      position: 'fixed', left: Math.min(x, window.innerWidth - 260) + 'px', top: Math.min(y, window.innerHeight - 340) + 'px',
+      position: 'fixed', left: Math.min(x, window.innerWidth - 260) + 'px', top: Math.min(y, window.innerHeight - 380) + 'px',
       zIndex: String(Z), background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: '10px',
       boxShadow: '0 8px 28px rgba(19,23,35,0.2)', padding: '8px', width: '240px', fontSize: '13px',
     });
@@ -1038,6 +1087,7 @@
 
     const actions = [
       ['✎ Edit element', () => openEditElementPanel(el, selector)],
+      ['Whole page', () => openWholePagePanel(null)],
       ['⬆ Add above', () => openInsertPanel(selector, 'insert_before')],
       ['⬇ Add below', () => openInsertPanel(selector, 'insert_after')],
       ['⧉ Duplicate', () => { recordAndApply({ selector, type: 'duplicate' }); closeActionPopup(); }],
@@ -1094,6 +1144,7 @@
     const fields = opts.fields;
 
     panelEl = document.createElement('div');
+    if (opts.id) panelEl.id = opts.id;
     styleReset(panelEl);
     Object.assign(panelEl.style, {
       position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
@@ -1314,6 +1365,71 @@
   }
 
   function openEditElementPanel(el, selector) { openEditSetPanel(el, selector, null); }
+
+  // The first whole-page entry of this type, unless the Changes-list click
+  // pinned a specific one. Element CSS and JS are a different type, so they
+  // are never opened here.
+  function pageChangeIndex(type, pinnedIdx) {
+    if (pinnedIdx != null && allChanges[pinnedIdx] && allChanges[pinnedIdx].type === type) return pinnedIdx;
+    return allChanges.findIndex((c) => c && c.type === type);
+  }
+
+  function openWholePagePanel(pinnedIdx) {
+    const cssIdx = pageChangeIndex('page_css', pinnedIdx);
+    const jsIdx = pageChangeIndex('page_js', pinnedIdx);
+    const editing = cssIdx !== -1 || jsIdx !== -1;
+    const curCss = cssIdx === -1 ? '' : String(allChanges[cssIdx].value || '');
+    const curJs = jsIdx === -1 ? '' : String(allChanges[jsIdx].value || '');
+
+    showEditorPanel({
+      id: 'pivit-whole-page-panel',
+      title: 'Whole page',
+      subtitle: 'This page, not one element',
+      fields: [
+        {
+          key: 'css',
+          label: 'CSS',
+          value: curCss,
+          hint: 'Plain CSS for the whole page. It is added once, as a single style tag in the head, and only while this variant is active. Clear this tab to remove it.',
+        },
+        {
+          key: 'js',
+          label: 'JS',
+          value: curJs,
+          placeholder: "document.documentElement.classList.add('pivit-offer');",
+          hint: 'Runs once each time this page is viewed, not once for each element. There is no element here, so there is no el. An error is caught and does not stop the rest of the page. Clear this tab to remove it.',
+        },
+      ],
+      applyLabel: editing ? 'Save change' : 'Apply',
+      onApply: (v) => {
+        const css = v.css.trim();
+        const js = v.js.trim();
+        const cssSame = css === curCss.trim();
+        const jsSame = js === curJs.trim();
+        if (cssSame && jsSame) {
+          return { error: editing ? 'Nothing changed yet.' : 'Add some CSS or JavaScript, or cancel.' };
+        }
+
+        const cssChange = css ? { type: 'page_css', value: css } : null;
+        const jsChange = js ? { type: 'page_js', value: js } : null;
+        if (cssIdx === -1 && jsIdx === -1) {
+          if (cssChange) recordAndApply(cssChange);
+          if (jsChange) recordAndApply(jsChange);
+          return;
+        }
+
+        const drop = new Set([cssIdx, jsIdx].filter((i) => i !== -1));
+        const kept = allChanges.filter((_, i) => !drop.has(i));
+        const insertAt = Math.min.apply(null, [cssIdx, jsIdx].filter((i) => i !== -1));
+        let removedBefore = 0;
+        drop.forEach((i) => { if (i < insertAt) removedBefore += 1; });
+        const at = insertAt - removedBefore;
+        const block = [cssChange, jsChange].filter(Boolean);
+        allChanges = kept.slice(0, at).concat(block, kept.slice(at));
+        reloadAndReplay();
+      },
+    });
+  }
 
   // Goals are stored once for the experiment and apply to every variant.
   // The id is generated and stays put if the name is renamed. A test whose

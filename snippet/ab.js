@@ -46,9 +46,17 @@
  * previous test), the last one wins, and preview applies only that experiment.
  * ?pivit_device=desktop|tablet|mobile (with a preview token) opens device
  * frames. The frame reloads the page without that parameter, so the variant's
- * CSS, HTML and JavaScript run inside the frame the same way they do live.
+ * CSS, HTML and JavaScript run inside the frame the same way they do live,
+ * including whole-page CSS (page_css) and whole-page JavaScript (page_js).
  * Switching device or refreshing loads the frame again, including JavaScript
  * that runs once on load. A normal visit ignores pivit_device.
+ *
+ * page_css adds one <style> in the head. Applying it again updates that tag
+ * and does not add a second one. page_js runs once per page view, not once
+ * per element. A second apply, a new applier on the same document (an SPA
+ * re-render), and the mutation observer all leave it unrun. A thrown error
+ * is caught so the rest of the page still runs. Element html, stylesheet
+ * and js are unchanged.
  *
  * Anti-flicker: if the anti-flicker snippet (from the dashboard's "Copy
  * Snippet" popover) is also installed in <head>, it hides the page via an
@@ -133,9 +141,9 @@
   let qaOn = false;
   const ASSIGNMENT_PREFIX = '_ab_assign_';
   // Bump when editor.js changes so a cached copy cannot keep the old variant.
-  const EDITOR_VERSION = '20261016a';
+  const EDITOR_VERSION = '20261018a';
   // Bump when device-preview.js changes so a cached shell cannot skip JavaScript.
-  const DEVICE_PREVIEW_VERSION = '20261016a';
+  const DEVICE_PREVIEW_VERSION = '20261018a';
 
   // The first query value is the leftover. The last ab_edit or ab_preview is
   // the link the owner just opened.
@@ -661,7 +669,8 @@
 
     // Device frames are a preview of the saved variant. The top document does
     // not apply changes: the frame loads this URL without pivit_device, and
-    // that load runs CSS, HTML and JavaScript exactly as a visitor would.
+    // that load runs CSS, HTML and JavaScript exactly as a visitor would,
+    // including page_css and page_js.
     const devicePreview = wantsPreview
       ? previewDevice(lastQuery(new URLSearchParams(window.location.search), 'pivit_device'))
       : '';
@@ -1267,6 +1276,62 @@
       (doc.head || doc.documentElement).appendChild(styleEl);
     }
 
+    // One style tag per page_css change. A later apply with the same key
+    // updates that tag, or puts it back if an SPA render removed it. It does
+    // not append a second tag.
+    function injectPageCss(css, key) {
+      const id = cssDomId(key);
+      const existing = doc.getElementById && doc.getElementById(id);
+      if (existing) {
+        if (!css) {
+          if (existing.remove) existing.remove();
+        } else if (existing.textContent !== css) {
+          existing.textContent = css;
+        }
+        return;
+      }
+      if (!css) return;
+      const styleEl = doc.createElement('style');
+      styleEl.id = id;
+      styleEl.setAttribute('data-pivit-page-css', '');
+      styleEl.textContent = css;
+      (doc.head || doc.documentElement).appendChild(styleEl);
+    }
+
+    // Once per page view. The mark lives on the document, so a new applier
+    // (the snippet starting again after an SPA re-render) and the mutation
+    // observer cannot run the same change again. A new document is a new view.
+    function pageJsStore() {
+      if (!doc.__pivitPageJsRan || typeof doc.__pivitPageJsRan !== 'object') {
+        doc.__pivitPageJsRan = Object.create(null);
+      }
+      return doc.__pivitPageJsRan;
+    }
+
+    function runPageJs(change, key) {
+      let store;
+      try {
+        store = pageJsStore();
+      } catch (err) {
+        console.warn('[ab] page JS change failed:', err);
+        return;
+      }
+      if (store[key]) return;
+      store[key] = true;
+      const source = typeof change.value === 'string' ? change.value : '';
+      if (!source) return;
+      try {
+        const result = new Function('document', source)(doc);
+        if (result && typeof result.then === 'function') {
+          result.then(function () {}, function (err) {
+            console.warn('[ab] page JS change failed:', err);
+          });
+        }
+      } catch (err) {
+        console.warn('[ab] page JS change failed:', err);
+      }
+    }
+
     function already(el, key) {
       const cur = el.getAttribute(MARK) || '';
       return cur.split(' ').indexOf(key) !== -1;
@@ -1434,7 +1499,19 @@
     }
 
     function applyOne(change, key) {
-      if (!change || seen.has(key)) return { checked: false, applied: false };
+      if (!change) return { checked: false, applied: false };
+      // Whole-page changes are not tied to an element, so they are not part
+      // of the change-applied check and they are not replayed per node.
+      if (change.type === 'page_css') {
+        try { injectPageCss(typeof change.value === 'string' ? change.value : '', key); }
+        catch (err) { console.warn('[ab] page CSS change failed:', err); }
+        return { checked: false, applied: false };
+      }
+      if (change.type === 'page_js') {
+        runPageJs(change, key);
+        return { checked: false, applied: false };
+      }
+      if (seen.has(key)) return { checked: false, applied: false };
       seen.add(key);
       if (change.type === 'stylesheet') {
         // Free-form CSS, including the variant's custom CSS block. Injected

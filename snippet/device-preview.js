@@ -103,7 +103,7 @@
     shell.appendChild(bar);
 
     const note = doc.createElement('p');
-    note.textContent = 'This frame runs the saved variant, including JavaScript, the same way the live snippet does. Switching device or refreshing loads the page again, so a change that runs once on load runs again.';
+    note.textContent = 'This frame runs the saved variant, including whole-page CSS and JavaScript, the same way the live snippet does. Switching device or refreshing loads the page again, so a change that runs once on load runs again.';
     style(note, {
       margin: '0',
       padding: '8px 16px',

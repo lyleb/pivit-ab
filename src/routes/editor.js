@@ -11,6 +11,7 @@ const {
   editorFields,
   expiredEditMessage,
 } = require('../editor-context');
+const { validateChanges } = require('../changes');
 const router = express.Router();
 
 // The editor reads one variant at a time. A cached GET would keep showing the
@@ -128,7 +129,11 @@ router.patch('/variants/:variantId', requireValidEditToken, async (req, res) => 
   try {
     const { changes, goals } = req.body;
     if (changes === undefined && goals === undefined) return res.status(400).json({ error: 'send changes and/or goals' });
-    if (changes !== undefined && !Array.isArray(changes)) return res.status(400).json({ error: 'changes must be an array' });
+    if (changes !== undefined) {
+      const problem = validateChanges(changes);
+      if (problem) return res.status(400).json({ error: problem });
+      if (!Array.isArray(changes)) return res.status(400).json({ error: 'changes must be an array' });
+    }
     if (goals !== undefined) {
       const problem = validateGoals(goals);
       if (problem) return res.status(400).json({ error: problem });

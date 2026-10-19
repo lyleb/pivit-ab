@@ -150,11 +150,11 @@ function changeList(value) {
   return [];
 }
 
-// Stylesheet-only changes inject CSS and do not look up an element.
+// Stylesheet, page CSS and page JavaScript do not look up an element.
 // Everything else with a selector is what the snippet reports.
 function tracksElementChange(changes) {
   return changeList(changes).some((change) => {
-    if (!change || change.type === 'stylesheet') return false;
+    if (!change || change.type === 'stylesheet' || change.type === 'page_css' || change.type === 'page_js') return false;
     return String(change.selector || '').trim() !== '';
   });
 }
