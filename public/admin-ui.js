@@ -68,11 +68,13 @@
     return `<div class="planner" data-planner="${id}">
       <h2>How big a change are you looking for?</h2>
       <p class="hint">You can leave the suggestion. pivitlab turns it into the visitors you need, and saves a plan either way.</p>
+      <div class="choice-grid">
       <div class="choice-row" role="radiogroup" aria-label="Size of change">
-        <button type="button" class="choice" data-plan-choice="small" aria-pressed="false">Small change<span>about 5% relative</span></button>
-        <button type="button" class="choice" data-plan-choice="medium" aria-pressed="true">Medium<span>about 10% relative</span></button>
-        <button type="button" class="choice" data-plan-choice="big" aria-pressed="false">Big<span>about 20% relative</span></button>
-        <button type="button" class="choice" data-plan-choice="custom" aria-pressed="false">Custom<span>your own figures</span></button>
+        <button type="button" class="choice" data-plan-choice="small" aria-pressed="false"><span class="choice-label">Small change</span><span class="choice-hint">about 5% relative</span></button>
+        <button type="button" class="choice" data-plan-choice="medium" aria-pressed="true"><span class="choice-label">Medium</span><span class="choice-hint">about 10% relative</span></button>
+        <button type="button" class="choice" data-plan-choice="big" aria-pressed="false"><span class="choice-label">Big</span><span class="choice-hint">about 20% relative</span></button>
+        <button type="button" class="choice" data-plan-choice="custom" aria-pressed="false"><span class="choice-label">Custom</span><span class="choice-hint">your own figures</span></button>
+      </div>
       </div>
       <p class="plan-sentence" id="${id}-plan-sentence"></p>
       <p class="hint" id="${id}-plan-meta"></p>
