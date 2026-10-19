@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>pivitlab</title>
-<link rel="stylesheet" href="/assets/pivit.css?v=7">
+<link rel="stylesheet" href="/assets/pivit.css?v=8">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="/url-match.js"></script>
 <script src="/plan.js"></script>
@@ -585,7 +585,7 @@
         <table id="exp-list-table" class="table-cards">
           <thead>
             <tr>
-              <th>Name</th><th>Status</th><th>URL match</th><th>Viewer</th><th>Variants</th><th>Signal</th><th></th>
+              <th>Name</th><th>Status</th><th>Split</th><th>URL match</th><th>Viewer</th><th>Variants</th><th>Signal</th><th></th>
             </tr>
           </thead>
           <tbody id="exp-list-body"></tbody>
@@ -1129,6 +1129,7 @@ let currentTab = 'overview';
 let routeToken = 0;
 let viewGen = 0;
 let listGen = 0;
+let scrollToSrmId = null;
 const statusConfirms = new Map();
 let pickerHref = '#';
 let rateChart = null;
@@ -2405,6 +2406,7 @@ async function loadExperimentList() {
     return `<tr>
       <td class="card-title" data-label="Name"><button type="button" class="name-btn" data-open="${exp.id}">${UI.escapeHtml(exp.name)}</button>${UI.isDemoTest(exp) ? ' ' + UI.demoBadgeHtml() : ''}</td>
       <td class="card-status" data-label="Status"><span class="badge ${STATUS_CLASS[exp.status] || 'paused'}">${UI.escapeHtml(exp.status)}</span></td>
+      <td class="card-split" data-label="Split">${UI.splitPillHtml(exp.splitCheck, exp.id)}</td>
       <td class="mono" data-label="URL match" title="${UI.escapeHtml(exp.url_match || '')}">${UI.escapeHtml(UI.shortUrl(exp.url_match))}${matchBadge(exp)}${noDomainBadge(exp)}</td>
       <td data-label="Viewer">${UI.escapeHtml(client)}</td>
       <td data-label="Variants">${exp.variant_count}</td>
@@ -2496,7 +2498,22 @@ document.getElementById('review-requests-list').addEventListener('click', async 
   loadReviewRequests();
 });
 
+document.getElementById('page-detail').addEventListener('click', (e) => {
+  const link = e.target.closest('a.split-pill[href="#srm-panel"]');
+  if (!link || link.hasAttribute('data-open-srm')) return;
+  e.preventDefault();
+  const panel = document.getElementById('srm-panel');
+  if (panel && typeof panel.scrollIntoView === 'function') panel.scrollIntoView({ block: 'start' });
+});
+
 document.getElementById('exp-list-body').addEventListener('click', (e) => {
+  const split = e.target.closest('[data-open-srm]');
+  if (split) {
+    e.preventDefault();
+    scrollToSrmId = split.getAttribute('data-open-srm');
+    go(`#experiment/${scrollToSrmId}/results`);
+    return;
+  }
   const btn = e.target.closest('[data-open]');
   if (!btn) return;
   go(`#experiment/${btn.dataset.open}/overview`);
@@ -2778,6 +2795,16 @@ function renderDetail() {
     </div>
 
     <div data-tab-panel="results" hidden>
+      <div class="card split-check-card" id="split-check-card">
+        <div class="split-check-head">
+          <div>
+            <h2>Sample ratio check</h2>
+            <p class="hint" style="margin:4px 0 0;">Whether traffic is actually split the way it is configured.</p>
+          </div>
+          <div id="split-badge"></div>
+        </div>
+        <div id="srm-panel" class="srm-early">Checking the split…</div>
+      </div>
       <div id="change-applied-panel"></div>
       <div id="plan-panel"></div>
       <div class="card" id="test-traffic-card">
@@ -2854,9 +2881,6 @@ function renderDetail() {
             <button type="button" class="btn-ghost" id="refresh-results-btn" data-action="refresh-results">Refresh</button>
             <button type="button" class="btn-ghost" id="export-results-btn" data-action="export">Export CSV</button>
           </div>
-          <h3 style="margin-top:22px;">Sample ratio check</h3>
-          <p class="hint">Whether traffic is actually split the way it is configured.</p>
-          <div id="srm-panel" style="display:none;"></div>
           <h3 id="bayesian-heading" style="margin-top:22px;">Bayesian analysis</h3>
           <details>
             <summary>How probability best is calculated</summary>
@@ -4172,12 +4196,56 @@ function showResultsGate(text) {
   currentTrendSeries = [];
 }
 
+function paintSplit(data) {
+  const badge = document.getElementById('split-badge');
+  const panel = document.getElementById('srm-panel');
+  const check = data && data.splitCheck;
+  if (badge) badge.innerHTML = UI.splitPillHtml(check);
+  if (!panel) return;
+  panel.style.display = 'block';
+  if (!check || check.state === 'early') {
+    panel.className = 'srm-early';
+    panel.textContent = (check && check.tooltip) || 'Not enough visitors yet to check the split.';
+    return;
+  }
+  if (check.state === 'skewed') {
+    panel.className = 'srm-warning';
+    const splits = ((data && data.variants) || []).map((v) => `${v.name}: ${v.visitors} visitors (configured ${v.traffic_split}%)`).join(' · ');
+    const p = data && data.p_value;
+    const pText = p < 0.0001 ? '&lt;0.0001' : Number(p).toFixed(4);
+    panel.innerHTML = `<strong>Sample ratio mismatch detected</strong> (p = ${pText}). Actual traffic doesn’t match the configured split closely enough to be ordinary chance. Treat the rates below with caution until that is understood.<br><span class="hint" style="color:inherit;">${UI.escapeHtml(splits)}</span>`;
+    return;
+  }
+  panel.className = 'srm-ok';
+  const p = data && data.p_value;
+  panel.textContent = `Traffic split looks healthy (p = ${Number(p).toFixed(3)}).`;
+}
+
+async function refreshSplitCheck(expId) {
+  const result = await callApi(withTestQuery(`/api/results/${expId}/srm`), { headers: authHeaders() });
+  if (!currentDetail || currentDetail.id !== expId) return;
+  if (!result.ok) {
+    paintSplit(null);
+    const panel = document.getElementById('srm-panel');
+    if (panel) panel.textContent = 'Could not check the split.';
+    return;
+  }
+  paintSplit(result.data);
+  if (scrollToSrmId === expId) {
+    scrollToSrmId = null;
+    const panel = document.getElementById('srm-panel');
+    if (panel && typeof panel.scrollIntoView === 'function') panel.scrollIntoView({ block: 'start' });
+  }
+}
+
 async function loadResults() {
   if (!currentDetail) return;
   const expId = currentDetail.id;
   const status = currentDetail.status;
+  const splitReady = refreshSplitCheck(expId);
   loadTestAudit(expId);
   loadTestTrafficResults(expId);
+  try {
   if (status === 'draft') {
     showResultsGate('Not running — Bayesian and conversion rates stay hidden until you collect traffic. Install the snippet, then start.');
     return;
@@ -4265,23 +4333,6 @@ async function loadResults() {
   currentTrendSeries = (trendResult.ok && trendResult.data.series) ? trendResult.data.series : [];
   renderTrendChart();
 
-  const srmPanel = document.getElementById('srm-panel');
-  const srmResult = await callApi(withTestQuery(`/api/results/${expId}/srm`), { headers: authHeaders() });
-  if (!srmResult.ok || !srmResult.data.applicable) {
-    srmPanel.style.display = 'none';
-  } else {
-    const srm = srmResult.data;
-    srmPanel.style.display = 'block';
-    if (srm.srm_detected) {
-      srmPanel.className = 'srm-warning';
-      const splits = srm.variants.map((v) => `${v.name}: ${v.visitors} visitors (configured ${v.traffic_split}%)`).join(' · ');
-      srmPanel.innerHTML = `<strong>Sample ratio mismatch detected</strong> (p = ${srm.p_value < 0.0001 ? '&lt;0.0001' : Number(srm.p_value).toFixed(4)}). Actual traffic doesn’t match the configured split closely enough to be ordinary chance. Treat the rates below with caution until that is understood.<br><span class="hint" style="color:inherit;">${UI.escapeHtml(splits)}</span>`;
-    } else {
-      srmPanel.className = 'srm-ok';
-      srmPanel.textContent = `Traffic split looks healthy (p = ${Number(srm.p_value).toFixed(3)}).`;
-    }
-  }
-
   const bayesianTable = document.getElementById('bayesian-table');
   const bayesianWarning = document.getElementById('bayesian-warning');
   const bayesianHeading = document.getElementById('bayesian-heading');
@@ -4314,6 +4365,9 @@ async function loadResults() {
       </tr>
     `).join('');
     bayesianTable.style.display = 'table';
+  }
+  } finally {
+    await splitReady;
   }
 }
 

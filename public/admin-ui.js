@@ -382,6 +382,17 @@
     return '<span class="badge demo">Demo</span>';
   }
 
+  // Split OK / Split skewed / Too early. The server decides the state
+  // (p < 0.01, hidden as a verdict until 100 visitors). This only paints the pill.
+  // A link to #srm-panel. Pass an experiment id on a list row so the dashboard
+  // can open that test's results before scrolling.
+  function splitPillHtml(check, experimentId) {
+    if (!check || !check.label) return '';
+    const state = check.state === 'ok' || check.state === 'skewed' ? check.state : 'early';
+    const id = experimentId ? ` data-open-srm="${escapeHtml(experimentId)}"` : '';
+    return `<a class="split-pill ${state}" href="#srm-panel"${id} title="${escapeHtml(check.tooltip || '')}">${escapeHtml(check.label)}</a>`;
+  }
+
   function demoRuntimeNote() {
     return DEMO_RUNTIME_NOTE;
   }
@@ -1144,6 +1155,7 @@
     shouldShowSignpost,
     isDemoTest,
     demoBadgeHtml,
+    splitPillHtml,
     demoRuntimeNote,
     demoPlanHtml,
     AUDIT_PAGE_SIZE,
