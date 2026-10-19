@@ -143,7 +143,7 @@
   // Bump when editor.js changes so a cached copy cannot keep the old variant.
   const EDITOR_VERSION = '20261018a';
   // Bump when device-preview.js changes so a cached shell cannot skip JavaScript.
-  const DEVICE_PREVIEW_VERSION = '20261018a';
+  const DEVICE_PREVIEW_VERSION = '20261019a';
 
   // The first query value is the leftover. The last ab_edit or ab_preview is
   // the link the owner just opened.

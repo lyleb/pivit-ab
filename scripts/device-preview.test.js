@@ -62,7 +62,16 @@ function element() {
     id: '',
     setAttribute(name, value) { attrs[name] = String(value); if (name === 'id') node.id = String(value); },
     getAttribute(name) { return Object.prototype.hasOwnProperty.call(attrs, name) ? attrs[name] : null; },
-    addEventListener(type, fn) { listeners[type] = fn; },
+    addEventListener(type, fn) {
+      listeners[type] = fn;
+      if (!node._listeners) node._listeners = {};
+      if (!node._listeners[type]) node._listeners[type] = [];
+      node._listeners[type].push(fn);
+    },
+    dispatchEvent(event) {
+      const list = (node._listeners && node._listeners[event.type]) || [];
+      list.forEach((fn) => fn(event));
+    },
     click() { if (listeners.click) listeners.click(); },
     appendChild(child) {
       if (child.parentElement) child.parentElement.removeChild(child);
@@ -163,6 +172,270 @@ assert.ok(history.length >= 2);
 assert.ok(history[history.length - 1].includes('pivit_device=tablet'));
 
 assert.ok(shellApi && shellApi.shell === shell);
+
+const csp = 'frame-ancestors *.builder-preview.com *.hostinger.com';
+assert.strictEqual(preview.framingBlockedByHeaders({
+  csp,
+  xfo: '',
+  ancestorOrigin: 'https://cantsaythat.co.uk',
+  resourceOrigin: 'https://cantsaythat.co.uk',
+}), true);
+assert.strictEqual(preview.framingBlockedByHeaders({
+  csp: "default-src 'self'; frame-ancestors 'self'",
+  ancestorOrigin: 'https://cantsaythat.co.uk',
+  resourceOrigin: 'https://cantsaythat.co.uk',
+}), false);
+assert.strictEqual(preview.framingBlockedByHeaders({
+  csp: "frame-ancestors 'self'",
+  ancestorOrigin: 'https://pivitlab.com',
+  resourceOrigin: 'https://cantsaythat.co.uk',
+}), true);
+assert.strictEqual(preview.framingBlockedByHeaders({
+  csp: 'frame-ancestors *',
+  xfo: 'DENY',
+  ancestorOrigin: 'https://cantsaythat.co.uk',
+  resourceOrigin: 'https://cantsaythat.co.uk',
+}), false);
+assert.strictEqual(preview.framingBlockedByHeaders({
+  csp: '',
+  xfo: 'DENY',
+  ancestorOrigin: 'https://cantsaythat.co.uk',
+  resourceOrigin: 'https://cantsaythat.co.uk',
+}), true);
+assert.strictEqual(preview.framingBlockedByHeaders({
+  csp: '',
+  xfo: 'SAMEORIGIN',
+  ancestorOrigin: 'https://cantsaythat.co.uk',
+  resourceOrigin: 'https://cantsaythat.co.uk',
+}), false);
+assert.strictEqual(preview.framingBlockedByHeaders({
+  csp: '',
+  xfo: 'SAMEORIGIN',
+  ancestorOrigin: 'https://pivitlab.com',
+  resourceOrigin: 'https://cantsaythat.co.uk',
+}), true);
+assert.strictEqual(preview.framingBlockedByHeaders({
+  csp: "frame-ancestors 'none'",
+  ancestorOrigin: 'https://cantsaythat.co.uk',
+  resourceOrigin: 'https://cantsaythat.co.uk',
+}), true);
+assert.deepStrictEqual(preview.popupOptions('tablet'), {
+  device: 'tablet',
+  target: 'pivitlab-preview',
+  features: 'popup,width=820,height=1180',
+  width: 820,
+  height: 1180,
+});
+assert.deepStrictEqual(preview.popupOptions('mobile'), {
+  device: 'mobile',
+  target: 'pivitlab-preview',
+  features: 'popup,width=390,height=844',
+  width: 390,
+  height: 844,
+});
+assert.strictEqual(preview.popupOptions('desktop').features, '');
+assert.strictEqual(preview.popupOptions('desktop').target, '_blank');
+assert.strictEqual(preview.popupLabel('desktop'), 'Open in a tab');
+assert.strictEqual(preview.popupLabel('tablet'), 'Open tablet window');
+assert.strictEqual(preview.popupLabel('mobile'), 'Open mobile window');
+assert.strictEqual(preview.BLOCKED_MESSAGE, "This site doesn't allow previews inside another page, so we'll open it in its own window.");
+assert.ok(deviceSrc.includes(preview.BLOCKED_MESSAGE));
+assert.ok(deviceSrc.includes('win.resizeTo(choice.width, choice.height)'));
+assert.ok(deviceSrc.includes('Open the preview in a tab'));
+assert.ok(!deviceSrc.includes('This page cannot be shown in a frame'));
+
+function findAttr(node, attr, value) {
+  if (!node) return null;
+  if (node.getAttribute && node.getAttribute(attr) === value) return node;
+  const kids = node.children || [];
+  for (let i = 0; i < kids.length; i++) {
+    const found = findAttr(kids[i], attr, value);
+    if (found) return found;
+  }
+  return null;
+}
+
+function bezelOf(shellNode) {
+  const stage = shellNode.children.find((node) => node.children && node.children.some((child) => child.getAttribute && child.getAttribute('data-bezel')));
+  return stage.children.find((child) => child.getAttribute && child.getAttribute('data-bezel'));
+}
+
+function dispatchLoad(frame, docState) {
+  if (docState === 'shown') {
+    frame.contentDocument = { documentElement: {}, URL: frame.src };
+  } else if (docState === 'blank') {
+    frame.contentDocument = { documentElement: {}, URL: 'about:blank' };
+  } else {
+    frame.contentDocument = null;
+  }
+  frame.dispatchEvent({ type: 'load' });
+}
+
+async function settle() {
+  for (let i = 0; i < 8; i++) await new Promise((resolve) => setImmediate(resolve));
+}
+
+(async () => {
+  const opened = [];
+  const fetches = [];
+  const timers = [];
+  const blockedDoc = mockDocument();
+  const blockedHref = 'https://cantsaythat.co.uk/pricing?ab_preview=variant-1&ab_preview_token=signed&pivit_device=mobile&utm=1#offer';
+  preview.boot(blockedDoc, blockedHref, {
+    history: { replaceState() {} },
+    setTimeout(fn, ms) { timers.push({ fn, ms, cleared: false }); return timers.length; },
+    clearTimeout(id) { if (timers[id - 1]) timers[id - 1].cleared = true; },
+    headersFor(url) {
+      fetches.push(String(url));
+      return {
+        csp,
+        xfo: '',
+        resourceOrigin: 'https://cantsaythat.co.uk',
+      };
+    },
+    open(url, target, features) {
+      opened.push({ url, target, features });
+      return { opener: {} };
+    },
+  });
+  const blockedShell = blockedDoc.getElementById('pivit-device-shell');
+  const blockedBezel = bezelOf(blockedShell);
+  const blockedFrame = blockedBezel.children[0];
+  assert.strictEqual(timers.length, 1);
+  assert.strictEqual(timers[0].ms, preview.LOAD_TIMEOUT_MS);
+  assert.strictEqual(new URL(blockedFrame.src).searchParams.get('pivit_device'), null);
+  assert.strictEqual(new URL(blockedFrame.src).searchParams.get('ab_preview'), 'variant-1');
+  assert.strictEqual(new URL(blockedFrame.src).searchParams.get('ab_preview_token'), 'signed');
+  assert.strictEqual(new URL(blockedFrame.src).hash, '#offer');
+  dispatchLoad(blockedFrame, 'opaque');
+  await settle();
+  const fail = findAttr(blockedBezel, 'data-frame-fallback', '1');
+  assert.ok(fail);
+  const fallbackMessage = findAttr(fail, 'data-fallback-message', '1');
+  assert.strictEqual(fallbackMessage.textContent, preview.BLOCKED_MESSAGE);
+  assert.strictEqual(blockedFrame.style.display, 'none');
+  const anchor = (function walk(node) {
+    if (node && node.textContent === 'Open the preview in a tab' && node.href) return node;
+    const kids = (node && node.children) || [];
+    for (let i = 0; i < kids.length; i++) {
+      const found = walk(kids[i]);
+      if (found) return found;
+    }
+    return null;
+  })(fail);
+  assert.ok(anchor);
+  assert.strictEqual(anchor.href, blockedFrame.src);
+  assert.strictEqual(anchor.target, '_blank');
+  assert.strictEqual(anchor.rel, 'noopener');
+  const mobileOpen = findAttr(fail, 'data-open-window', 'mobile');
+  const tabletOpen = findAttr(fail, 'data-open-window', 'tablet');
+  const desktopOpen = findAttr(fail, 'data-open-window', 'desktop');
+  assert.strictEqual(mobileOpen.getAttribute('data-popup-features'), 'popup,width=390,height=844');
+  assert.strictEqual(tabletOpen.getAttribute('data-popup-features'), 'popup,width=820,height=1180');
+  assert.strictEqual(desktopOpen.getAttribute('data-popup-features'), null);
+  mobileOpen.click();
+  tabletOpen.click();
+  desktopOpen.click();
+  assert.strictEqual(opened.length, 3);
+  assert.strictEqual(opened[0].url, blockedFrame.src);
+  assert.strictEqual(opened[0].target, 'pivitlab-preview');
+  assert.strictEqual(opened[0].features, 'popup,width=390,height=844');
+  assert.strictEqual(opened[1].features, 'popup,width=820,height=1180');
+  assert.strictEqual(opened[2].target, '_blank');
+  assert.strictEqual(opened[2].features, undefined);
+  assert.ok(fetches.length >= 1);
+  assert.ok(!fetches[0].includes('pivit_device'));
+
+  timers[0].fn();
+  assert.strictEqual(findAttr(blockedBezel, 'data-frame-fallback', '1'), fail);
+
+  const allowedDoc = mockDocument();
+  let allowedFetches = 0;
+  preview.boot(allowedDoc, 'https://shop.example/pricing?ab_preview=variant-1&pivit_device=desktop', {
+    history: { replaceState() {} },
+    setTimeout() { return 0; },
+    clearTimeout() {},
+    headersFor() { allowedFetches += 1; return { csp: '', xfo: '', resourceOrigin: 'https://shop.example' }; },
+    fetch() { allowedFetches += 1; throw new Error('fetch should not run for a readable frame'); },
+  });
+  const allowedFrame = bezelOf(allowedDoc.getElementById('pivit-device-shell')).children[0];
+  dispatchLoad(allowedFrame, 'shown');
+  await settle();
+  assert.strictEqual(findAttr(allowedFrame.parentElement, 'data-frame-fallback', '1'), null);
+  assert.notStrictEqual(allowedFrame.style.display, 'none');
+  assert.strictEqual(allowedFetches, 0);
+
+  const redirected = mockDocument();
+  preview.boot(redirected, 'https://shop.example/go?ab_preview=variant-1&pivit_device=tablet', {
+    history: { replaceState() {} },
+    setTimeout() { return 0; },
+    clearTimeout() {},
+    headersFor() {
+      return { csp: '', xfo: '', resourceOrigin: 'https://checkout.example' };
+    },
+  });
+  const redirectedFrame = bezelOf(redirected.getElementById('pivit-device-shell')).children[0];
+  dispatchLoad(redirectedFrame, 'opaque');
+  await settle();
+  assert.strictEqual(findAttr(redirectedFrame.parentElement, 'data-frame-fallback', '1'), null);
+  assert.strictEqual(redirectedFrame.style.display, 'block');
+
+  const reported = mockDocument();
+  let reportedHeaders = 0;
+  preview.boot(reported, 'https://cantsaythat.co.uk/?pivit_device=desktop', {
+    history: { replaceState() {} },
+    setTimeout(fn) { return { fn }; },
+    clearTimeout() {},
+    headersFor() { reportedHeaders += 1; return null; },
+  });
+  const reportedFrame = bezelOf(reported.getElementById('pivit-device-shell')).children[0];
+  reportedFrame.dispatchEvent({
+    type: 'securitypolicyviolation',
+    effectiveDirective: 'frame-ancestors',
+    violatedDirective: 'frame-ancestors',
+    blockedURI: reportedFrame.src,
+  });
+  await settle();
+  assert.ok(findAttr(reportedFrame.parentElement, 'data-frame-fallback', '1'));
+  assert.strictEqual(reportedHeaders, 0);
+  reportedFrame.dispatchEvent({
+    type: 'securitypolicyviolation',
+    effectiveDirective: 'script-src',
+    violatedDirective: 'script-src',
+    blockedURI: 'https://example.com/app.js',
+  });
+
+  const timed = mockDocument();
+  const timedTimers = [];
+  preview.boot(timed, 'https://slow.example/?ab_preview=variant-1&pivit_device=mobile', {
+    history: { replaceState() {} },
+    setTimeout(fn, ms) { timedTimers.push({ fn, ms }); return timedTimers.length; },
+    clearTimeout(id) { if (timedTimers[id - 1]) timedTimers[id - 1].cleared = true; },
+    headersFor() { return { csp: '', xfo: '', resourceOrigin: 'https://slow.example' }; },
+  });
+  const timedFrame = bezelOf(timed.getElementById('pivit-device-shell')).children[0];
+  assert.strictEqual(findAttr(timedFrame.parentElement, 'data-frame-fallback', '1'), null);
+  timedTimers[0].fn();
+  assert.ok(findAttr(timedFrame.parentElement, 'data-frame-fallback', '1'));
+  dispatchLoad(timedFrame, 'shown');
+  await settle();
+  assert.strictEqual(findAttr(timedFrame.parentElement, 'data-frame-fallback', '1'), null);
+  assert.strictEqual(timedFrame.style.display, 'block');
+
+  const responseHeaders = preview.headersFromResponse({
+    type: 'basic',
+    url: 'https://cantsaythat.co.uk/pricing',
+    headers: { get(name) { return name === 'content-security-policy' ? csp : ''; } },
+  }, 'https://cantsaythat.co.uk/pricing');
+  assert.strictEqual(responseHeaders.csp, csp);
+  assert.strictEqual(responseHeaders.resourceOrigin, 'https://cantsaythat.co.uk');
+  assert.strictEqual(preview.headersFromResponse({ type: 'opaque', headers: { get() { return csp; } } }, 'https://cantsaythat.co.uk/'), null);
+
+  console.log('device-preview fallback checks ok');
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
 
 function snippetDocument(search) {
   const scripts = [];
