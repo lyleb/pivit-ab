@@ -11,8 +11,10 @@
  * "Edit element" opens a panel with HTML / CSS / JS tabs. Each part becomes its
  * own entry in the Changes list ('replace', 'stylesheet', 'js'), so it can be
  * edited or removed independently later. "Whole page" does not need an element.
- * Its CSS and JavaScript are stored as page_css and page_js. Element HTML, CSS
- * and JS are left as they are.
+ * Its CSS and JavaScript are stored as page_css and page_js. "Insert banner"
+ * does not need an element either. It stores one banner change: text, an
+ * optional countdown, colours, top or bottom, sticky, and an optional link.
+ * Element HTML, CSS and JS are left as they are.
  *
  * Editing or removing an EXISTING change reloads the page and replays the
  * updated change list from a clean DOM, rather than trying to reverse an
@@ -80,6 +82,12 @@
       (document.head || document.documentElement).appendChild(styleEl);
       return;
     }
+    if (change.type === 'banner') {
+      if (window.PivitRuntime && typeof window.PivitRuntime.applyBanner === 'function') {
+        window.PivitRuntime.applyBanner(document, change);
+      }
+      return;
+    }
     if (change.type === 'page_js') {
       const root = document.documentElement || document;
       if (!root.__pivitPageJsRan || typeof root.__pivitPageJsRan !== 'object') {
@@ -137,6 +145,13 @@
       case 'stylesheet': return sel ? `Add CSS rules (for ${sel})` : 'Custom CSS for this variant';
       case 'page_css': return 'Page CSS';
       case 'page_js': return 'Page JavaScript';
+      case 'banner': {
+        const place = change.position === 'bottom' ? 'bottom' : 'top';
+        let extra = '';
+        if (change.countdown === 'midnight') extra = ', counting down to UK midnight';
+        else if (change.countdown === 'fixed') extra = ', counting down to a fixed time';
+        return `Banner at the ${place}${extra}`;
+      }
       case 'replace': return `Replace element ${sel}`;
       case 'attr': return `Set ${change.attr || 'attribute'} on ${sel}`;
       case 'js': return `Custom JS on ${sel}`;
@@ -163,7 +178,7 @@
   };
   function isEditable(change) {
     if (!change) return false;
-    if (change.type === 'page_css' || change.type === 'page_js') return true;
+    if (change.type === 'page_css' || change.type === 'page_js' || change.type === 'banner') return true;
     return !!EDIT_META[change.type];
   }
 
@@ -319,7 +334,7 @@
 
   // --- UI: a single floating root element, all children styled inline to stay
   // insulated from whatever CSS the host page already has. ---
-  let root, toolbar, statusEl, countEl, actionPopup, panelEl, changesListEl, goalsListEl, customCssBtn, selectorWarnEl;
+  let root, toolbar, statusEl, countEl, actionPopup, panelEl, changesListEl, goalsListEl, customCssBtn, bannerBtn, selectorWarnEl;
   let editorApplier = null;
   let scopePanelEl = null;
   let similarHits = [];
@@ -495,6 +510,13 @@
     customCssBtn.id = 'pivit-custom-css';
     toolbar.appendChild(customCssBtn);
 
+    bannerBtn = makeButton('Insert banner', '#f0f0f7', () => openBannerPanel());
+    bannerBtn.style.width = '100%';
+    bannerBtn.style.color = COLORS.ink;
+    bannerBtn.style.marginTop = '6px';
+    bannerBtn.id = 'pivit-insert-banner';
+    toolbar.appendChild(bannerBtn);
+
     // --- Changes list (collapsible) ---
     const listToggle = makeButton('Changes (0)', '#f0f0f7', toggleChangesList);
     listToggle.style.width = '100%';
@@ -554,7 +576,7 @@
     hint.style.fontSize = '11px';
     hint.style.color = '#6b6f83';
     hint.style.marginTop = '8px';
-    hint.textContent = 'Preview shows the last save, not unsaved edits. Desktop, tablet and mobile run the saved variant, including whole-page CSS and JavaScript.';
+    hint.textContent = 'Preview shows the last save, not unsaved edits. Desktop, tablet and mobile run the saved variant, including a banner and whole-page CSS and JavaScript.';
     toolbar.appendChild(hint);
 
     refreshToolbarState();
@@ -589,7 +611,7 @@
       empty.style.fontSize = '12px';
       empty.style.color = '#6b6f83';
       empty.style.padding = '6px 2px';
-      empty.textContent = 'No changes yet. Select an element, or choose Whole page.';
+      empty.textContent = 'No changes yet. Select an element, choose Whole page, or insert a banner.';
       changesListEl.appendChild(empty);
       return;
     }
@@ -698,6 +720,7 @@
 
   function editChangeAtIndex(idx) {
     const change = allChanges[idx];
+    if (change && change.type === 'banner') { openBannerPanel(idx); return; }
     if (change && (change.type === 'page_css' || change.type === 'page_js')) { openWholePagePanel(idx); return; }
     // Variant-level custom CSS has no element selector. Element stylesheet
     // entries still open with the HTML / CSS / JS set.
@@ -723,9 +746,14 @@
     return allChanges.findIndex((c) => c && c.type === 'stylesheet' && !String(c.selector || '').trim());
   }
 
+  function bannerChangeIndex() {
+    return allChanges.findIndex((c) => c && c.type === 'banner');
+  }
+
   function refreshToolbarState() {
     countEl.textContent = isDirty() ? '● Unsaved changes' : '✓ All changes saved';
     if (customCssBtn) customCssBtn.textContent = variantStylesheetIndex() === -1 ? 'Custom CSS' : 'Edit custom CSS';
+    if (bannerBtn) bannerBtn.textContent = bannerChangeIndex() === -1 ? 'Insert banner' : 'Edit banner';
     refreshSelectorWarning();
     renderChangesList();
     renderGoalsList();
@@ -1015,6 +1043,353 @@
     input.addEventListener('input', refresh);
     refresh();
     input.focus();
+  }
+
+  function bannerHex(value) {
+    const raw = String(value == null ? '' : value).trim();
+    const match = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(raw);
+    if (!match) return '';
+    const hex = match[1].toLowerCase();
+    return hex.length === 3 ? '#' + hex.split('').map((ch) => ch + ch).join('') : '#' + hex;
+  }
+
+  function bannerLink(value) {
+    const raw = String(value == null ? '' : value).trim();
+    if (!raw) return '';
+    if (window.PivitRuntime && typeof window.PivitRuntime.bannerHref === 'function') {
+      return window.PivitRuntime.bannerHref(raw);
+    }
+    if (raw.charAt(0) === '/' && raw.charAt(1) !== '/' && raw.charAt(1) !== '\\') return raw;
+    if (raw.charAt(0) === '#' || raw.charAt(0) === '?') return raw;
+    try {
+      const url = new URL(raw);
+      if (url.protocol === 'https:' || url.protocol === 'http:') return url.href;
+    } catch (err) { /* not a URL */ }
+    return '';
+  }
+
+  function toDatetimeLocal(iso) {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return '';
+    const pad = (n) => (n < 10 ? '0' : '') + n;
+    return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
+      + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+  }
+
+  function bannerFromForm(input) {
+    const text = String(input.text || '').replace(/\s+/g, ' ').trim();
+    if (!text) return { error: 'Enter the banner text.' };
+    if (text.length > 180) return { error: 'Keep the banner text to 180 characters or fewer.' };
+    const countdown = input.countdown === 'midnight' || input.countdown === 'fixed' ? input.countdown : 'none';
+    const background = bannerHex(input.background);
+    const color = bannerHex(input.color);
+    if (!background || !color) return { error: 'Use a colour like #111111.' };
+    const position = input.position === 'bottom' ? 'bottom' : 'top';
+    const sticky = !!input.sticky;
+    const hrefRaw = String(input.href || '').trim();
+    let href = '';
+    if (hrefRaw) {
+      href = bannerLink(hrefRaw);
+      if (!href) return { error: 'Use a full https:// link, or a path starting with /.' };
+    }
+    const change = {
+      type: 'banner',
+      text,
+      countdown,
+      background,
+      color,
+      position,
+      sticky,
+    };
+    if (countdown === 'fixed') {
+      const rawEnd = String(input.end || '').trim();
+      const parsed = Date.parse(rawEnd);
+      if (!rawEnd || Number.isNaN(parsed)) return { error: 'Choose the end time.' };
+      change.end = new Date(parsed).toISOString();
+    }
+    if (href) change.href = href;
+    return { change };
+  }
+
+  function bannerFormValues(change) {
+    const current = change || {};
+    return {
+      text: typeof current.text === 'string' ? current.text : '',
+      countdown: current.countdown === 'midnight' || current.countdown === 'fixed' ? current.countdown : 'none',
+      end: current.end ? toDatetimeLocal(current.end) : '',
+      background: bannerHex(current.background) || '#131723',
+      color: bannerHex(current.color) || '#ffffff',
+      position: current.position === 'bottom' ? 'bottom' : 'top',
+      sticky: current.sticky !== false,
+      href: typeof current.href === 'string' ? current.href : '',
+    };
+  }
+
+  function sameBanner(left, right) {
+    return canon(left || null) === canon(right || null);
+  }
+
+  // One banner for this variant. A second apply replaces the first, so the
+  // page never stores two bars that would fight over the single rendered one.
+  function writeBanner(change) {
+    const indexes = [];
+    allChanges.forEach((item, i) => { if (item && item.type === 'banner') indexes.push(i); });
+    if (!indexes.length) {
+      recordAndApply(change);
+      return;
+    }
+    const insertAt = indexes[0];
+    const without = allChanges.filter((item) => !item || item.type !== 'banner');
+    without.splice(insertAt, 0, change);
+    allChanges = without;
+    reloadAndReplay();
+  }
+
+  function openBannerPanel(pinnedIdx) {
+    const idx = pinnedIdx != null && allChanges[pinnedIdx] && allChanges[pinnedIdx].type === 'banner'
+      ? pinnedIdx
+      : bannerChangeIndex();
+    const editing = idx !== -1;
+    const current = editing ? allChanges[idx] : null;
+    const start = bannerFormValues(current);
+
+    closeActionPopup();
+    if (panelEl) panelEl.remove();
+    panelEl = document.createElement('div');
+    panelEl.id = 'pivit-banner-panel';
+    styleReset(panelEl);
+    Object.assign(panelEl.style, {
+      position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+      zIndex: String(Z), background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: '12px',
+      boxShadow: '0 12px 40px rgba(19,23,35,0.25)', padding: '20px', width: '380px', maxWidth: '92vw',
+      maxHeight: '90vh', overflowY: 'auto', color: COLORS.ink, fontSize: '13px',
+    });
+    ['keydown', 'keyup', 'keypress'].forEach((evt) => panelEl.addEventListener(evt, (e) => e.stopPropagation()));
+    document.body.appendChild(panelEl);
+
+    const title = document.createElement('div');
+    styleReset(title);
+    title.style.fontWeight = '700';
+    title.style.fontSize = '14px';
+    title.textContent = editing ? 'Edit banner' : 'Insert banner';
+    panelEl.appendChild(title);
+
+    const sub = document.createElement('div');
+    styleReset(sub);
+    Object.assign(sub.style, { fontSize: '12px', color: '#6b6f83', marginTop: '4px', lineHeight: '1.4' });
+    sub.textContent = 'Shown on this variant only. "Sale ends in" with UK midnight daily is a sale banner. No code needed.';
+    panelEl.appendChild(sub);
+
+    function addLabel(text, htmlFor) {
+      const label = document.createElement('label');
+      styleReset(label);
+      label.textContent = text;
+      label.htmlFor = htmlFor;
+      label.setAttribute('for', htmlFor);
+      Object.assign(label.style, { display: 'block', fontWeight: '650', marginTop: '12px', marginBottom: '4px' });
+      panelEl.appendChild(label);
+      return label;
+    }
+
+    function addHint(text, id) {
+      const hint = document.createElement('div');
+      styleReset(hint);
+      if (id) hint.id = id;
+      Object.assign(hint.style, { fontSize: '11px', color: '#6b6f83', marginTop: '4px', lineHeight: '1.4' });
+      hint.textContent = text;
+      panelEl.appendChild(hint);
+      return hint;
+    }
+
+    function lineBox(id, value, placeholder) {
+      const input = document.createElement('input');
+      styleReset(input);
+      input.id = id;
+      input.type = 'text';
+      input.value = value || '';
+      input.placeholder = placeholder || '';
+      input.setAttribute('spellcheck', 'false');
+      Object.assign(input.style, {
+        display: 'block', width: '100%', padding: '8px 10px', border: `1px solid ${COLORS.border}`,
+        borderRadius: '8px', fontSize: '13px', color: COLORS.ink, background: '#fff',
+      });
+      panelEl.appendChild(input);
+      return input;
+    }
+
+    addLabel('Banner text', 'pivit-banner-text');
+    const textInput = lineBox('pivit-banner-text', start.text, 'Sale ends in');
+
+    addLabel('Countdown', 'pivit-banner-countdown');
+    const countdown = document.createElement('select');
+    styleReset(countdown);
+    countdown.id = 'pivit-banner-countdown';
+    Object.assign(countdown.style, {
+      display: 'block', width: '100%', padding: '8px 10px', border: `1px solid ${COLORS.border}`,
+      borderRadius: '8px', fontSize: '13px', color: COLORS.ink, background: '#fff',
+    });
+    [
+      ['none', 'None'],
+      ['midnight', 'UK midnight daily'],
+      ['fixed', 'Fixed end time'],
+    ].forEach(([value, label]) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      countdown.appendChild(option);
+    });
+    countdown.value = start.countdown;
+    panelEl.appendChild(countdown);
+    const countdownHint = addHint('', 'pivit-banner-countdown-hint');
+
+    const endRow = document.createElement('div');
+    styleReset(endRow);
+    endRow.id = 'pivit-banner-end-row';
+    panelEl.appendChild(endRow);
+    const endLabel = document.createElement('label');
+    styleReset(endLabel);
+    endLabel.textContent = 'End time';
+    endLabel.htmlFor = 'pivit-banner-end';
+    endLabel.setAttribute('for', 'pivit-banner-end');
+    Object.assign(endLabel.style, { display: 'block', fontWeight: '650', marginTop: '12px', marginBottom: '4px' });
+    endRow.appendChild(endLabel);
+    const endInput = document.createElement('input');
+    styleReset(endInput);
+    endInput.id = 'pivit-banner-end';
+    endInput.type = 'datetime-local';
+    endInput.value = start.end;
+    Object.assign(endInput.style, {
+      display: 'block', width: '100%', padding: '8px 10px', border: `1px solid ${COLORS.border}`,
+      borderRadius: '8px', fontSize: '13px', color: COLORS.ink, background: '#fff',
+    });
+    endRow.appendChild(endInput);
+    const endHint = document.createElement('div');
+    styleReset(endHint);
+    Object.assign(endHint.style, { fontSize: '11px', color: '#6b6f83', marginTop: '4px', lineHeight: '1.4' });
+    endHint.textContent = 'The countdown ends at this moment.';
+    endRow.appendChild(endHint);
+
+    function syncCountdown() {
+      const mode = countdown.value;
+      endRow.style.display = mode === 'fixed' ? 'block' : 'none';
+      if (mode === 'midnight') {
+        countdownHint.textContent = 'Counts down to midnight in the UK (Europe/London). Midnight stays at midnight when the clocks change.';
+      } else if (mode === 'fixed') {
+        countdownHint.textContent = 'Counts down to the time you set.';
+      } else {
+        countdownHint.textContent = 'No countdown. The banner shows the text only.';
+      }
+    }
+    countdown.addEventListener('change', syncCountdown);
+    syncCountdown();
+
+    const colourRow = document.createElement('div');
+    styleReset(colourRow);
+    Object.assign(colourRow.style, { display: 'flex', gap: '12px', marginTop: '12px' });
+    panelEl.appendChild(colourRow);
+
+    function colourField(id, label, value) {
+      const wrap = document.createElement('div');
+      styleReset(wrap);
+      wrap.style.flex = '1';
+      const lab = document.createElement('label');
+      styleReset(lab);
+      lab.textContent = label;
+      lab.htmlFor = id;
+      lab.setAttribute('for', id);
+      Object.assign(lab.style, { display: 'block', fontWeight: '650', marginBottom: '4px' });
+      const input = document.createElement('input');
+      styleReset(input);
+      input.id = id;
+      input.type = 'color';
+      input.value = value;
+      Object.assign(input.style, {
+        display: 'block', width: '100%', height: '36px', padding: '2px', border: `1px solid ${COLORS.border}`,
+        borderRadius: '8px', background: '#fff',
+      });
+      wrap.appendChild(lab);
+      wrap.appendChild(input);
+      colourRow.appendChild(wrap);
+      return input;
+    }
+    const backgroundInput = colourField('pivit-banner-background', 'Background colour', start.background);
+    const colorInput = colourField('pivit-banner-color', 'Text colour', start.color);
+
+    addLabel('Position', 'pivit-banner-position');
+    const position = document.createElement('select');
+    styleReset(position);
+    position.id = 'pivit-banner-position';
+    Object.assign(position.style, {
+      display: 'block', width: '100%', padding: '8px 10px', border: `1px solid ${COLORS.border}`,
+      borderRadius: '8px', fontSize: '13px', color: COLORS.ink, background: '#fff',
+    });
+    [['top', 'Top'], ['bottom', 'Bottom']].forEach(([value, label]) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      position.appendChild(option);
+    });
+    position.value = start.position;
+    panelEl.appendChild(position);
+
+    const stickyLabel = document.createElement('label');
+    styleReset(stickyLabel);
+    Object.assign(stickyLabel.style, { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', fontWeight: '650' });
+    const sticky = document.createElement('input');
+    sticky.id = 'pivit-banner-sticky';
+    sticky.type = 'checkbox';
+    sticky.checked = start.sticky;
+    Object.assign(sticky.style, { width: '16px', height: '16px', margin: '0' });
+    const stickyText = document.createElement('span');
+    styleReset(stickyText);
+    stickyText.textContent = 'Sticky';
+    stickyLabel.appendChild(sticky);
+    stickyLabel.appendChild(stickyText);
+    panelEl.appendChild(stickyLabel);
+    addHint('Keeps the banner on screen while the page scrolls. Turn this off and it scrolls away with the page.');
+
+    addLabel('Link (optional)', 'pivit-banner-href');
+    const hrefInput = lineBox('pivit-banner-href', start.href, 'https://example.co.uk/sale');
+    addHint('Optional. Use a full https:// link, or a path on this site such as /pricing.');
+
+    const errEl = document.createElement('div');
+    styleReset(errEl);
+    errEl.id = 'pivit-banner-error';
+    Object.assign(errEl.style, { color: COLORS.danger, fontSize: '12px', marginTop: '8px', lineHeight: '1.4' });
+    panelEl.appendChild(errEl);
+
+    const row = document.createElement('div');
+    styleReset(row);
+    Object.assign(row.style, { display: 'flex', gap: '8px', marginTop: '12px' });
+    function doApply() {
+      const built = bannerFromForm({
+        text: textInput.value,
+        countdown: countdown.value,
+        end: endInput.value,
+        background: backgroundInput.value,
+        color: colorInput.value,
+        position: position.value,
+        sticky: sticky.checked,
+        href: hrefInput.value,
+      });
+      if (built.error) { errEl.textContent = built.error; return; }
+      const previous = editing ? bannerFromForm(bannerFormValues(current)) : null;
+      if (editing && previous && previous.change && sameBanner(built.change, previous.change)) {
+        errEl.textContent = 'Nothing changed yet.';
+        return;
+      }
+      writeBanner(built.change);
+      if (panelEl) { panelEl.remove(); panelEl = null; }
+    }
+    const applyBtn = makeButton(editing ? 'Save change' : 'Apply', COLORS.indigo, doApply);
+    applyBtn.style.flex = '1';
+    const cancelBtn = makeButton('Cancel', '#f0f0f7', () => { if (panelEl) { panelEl.remove(); panelEl = null; } });
+    cancelBtn.style.flex = '1';
+    cancelBtn.style.color = COLORS.ink;
+    row.appendChild(applyBtn);
+    row.appendChild(cancelBtn);
+    panelEl.appendChild(row);
+    textInput.focus();
   }
 
   // Free-form CSS for this variant only. Stored as a stylesheet change with

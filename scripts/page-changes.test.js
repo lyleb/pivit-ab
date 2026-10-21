@@ -24,6 +24,7 @@ assert.strictEqual(validateChanges([
   ...elementChanges,
   { type: 'page_css', value: 'body{margin:0}' },
   { type: 'page_js', value: 'document.documentElement.classList.add("pivit-offer")' },
+  { type: 'banner', text: 'Sale ends in', countdown: 'midnight', background: '#131723', color: '#ffffff', position: 'top', sticky: true },
 ]), null);
 assert.strictEqual(validateChanges(undefined), null);
 assert.strictEqual(validateChanges(null), null);
@@ -33,6 +34,7 @@ assert.strictEqual(validateChanges([null]), 'each change must be an object');
 assert.strictEqual(validateChanges([{ type: 'made_up' }]), 'unknown change type "made_up"');
 assert.ok(CHANGE_TYPES.indexOf('page_css') !== -1);
 assert.ok(CHANGE_TYPES.indexOf('page_js') !== -1);
+assert.ok(CHANGE_TYPES.indexOf('banner') !== -1);
 assert.ok(CHANGE_TYPES.indexOf('html') !== -1);
 assert.ok(CHANGE_TYPES.indexOf('js') !== -1);
 assert.ok(CHANGE_TYPES.indexOf('stylesheet') !== -1);

@@ -64,6 +64,7 @@ const pageChanges = [
   { selector: '#cta', type: 'html', value: '<b>Buy</b>' },
   { selector: '#cta', type: 'js', value: 'el.dataset.ready = "1"' },
   { selector: '#cta', type: 'stylesheet', value: '#cta{color:red}' },
+  { type: 'banner', text: 'Sale ends in', countdown: 'midnight', position: 'top', sticky: true },
 ];
 
 async function main() {
@@ -133,6 +134,9 @@ async function main() {
     assert.strictEqual(saved.json.changes[2].type, 'html');
     assert.strictEqual(saved.json.changes[3].type, 'js');
     assert.strictEqual(saved.json.changes[4].type, 'stylesheet');
+    assert.strictEqual(saved.json.changes[5].type, 'banner');
+    assert.strictEqual(saved.json.changes[5].text, 'Sale ends in');
+    assert.strictEqual(saved.json.changes[5].countdown, 'midnight');
 
     const rejected = await request(
       server,

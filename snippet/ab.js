@@ -47,9 +47,9 @@
  * ?pivit_device=desktop|tablet|mobile (with a preview token) opens device
  * frames. The frame reloads the page without that parameter, so the variant's
  * CSS, HTML and JavaScript run inside the frame the same way they do live,
- * including whole-page CSS (page_css) and whole-page JavaScript (page_js).
- * Switching device or refreshing loads the frame again, including JavaScript
- * that runs once on load. A normal visit ignores pivit_device.
+ * including whole-page CSS (page_css), whole-page JavaScript (page_js) and
+ * a banner. Switching device or refreshing loads the frame again, including
+ * JavaScript that runs once on load. A normal visit ignores pivit_device.
  *
  * page_css adds one <style> in the head. Applying it again updates that tag
  * and does not add a second one. page_js runs once per page view, not once
@@ -57,6 +57,17 @@
  * re-render), and the mutation observer all leave it unrun. A thrown error
  * is caught so the rest of the page still runs. Element html, stylesheet
  * and js are unchanged.
+ *
+ * banner is one bar for the page, at the top or the bottom. Sticky bars use
+ * position:fixed; the others use position:absolute and scroll away. Either
+ * way the page gets padding equal to the bar's height so the bar does not
+ * cover the content. A viewport up to 640px wide uses a smaller type size
+ * and tighter padding, which is what the mobile device frame is. Applying
+ * the change again, starting a new applier on the same document (an SPA
+ * route change), or a mutation all keep a single bar. The countdown is a
+ * fixed instant, or the next Europe/London midnight. That midnight follows
+ * British Summer Time, so the short day in spring and the long day in
+ * autumn are both the real gap until midnight.
  *
  * Anti-flicker: if the anti-flicker snippet (from the dashboard's "Copy
  * Snippet" popover) is also installed in <head>, it hides the page via an
@@ -141,9 +152,9 @@
   let qaOn = false;
   const ASSIGNMENT_PREFIX = '_ab_assign_';
   // Bump when editor.js changes so a cached copy cannot keep the old variant.
-  const EDITOR_VERSION = '20261018a';
+  const EDITOR_VERSION = '20261021a';
   // Bump when device-preview.js changes so a cached shell cannot skip JavaScript.
-  const DEVICE_PREVIEW_VERSION = '20261019a';
+  const DEVICE_PREVIEW_VERSION = '20261021a';
 
   // The first query value is the leftover. The last ab_edit or ab_preview is
   // the link the owner just opened.
@@ -670,7 +681,7 @@
     // Device frames are a preview of the saved variant. The top document does
     // not apply changes: the frame loads this URL without pivit_device, and
     // that load runs CSS, HTML and JavaScript exactly as a visitor would,
-    // including page_css and page_js.
+    // including page_css, page_js and banner.
     const devicePreview = wantsPreview
       ? previewDevice(lastQuery(new URLSearchParams(window.location.search), 'pivit_device'))
       : '';
@@ -1250,6 +1261,294 @@
     return 'pivit-css-' + String(key).replace(/[^a-zA-Z0-9_-]/g, '-');
   }
 
+  // One bar per document. The id is stable, so a second apply, a new applier
+  // after an SPA route change, and the mutation observer all update this node
+  // instead of adding another. Padding on the root matches the bar's height.
+  const BANNER_ID = 'pivit-banner';
+  const BANNER_STYLE_ID = 'pivit-banner-css';
+  const BANNER_Z = '2147483000';
+  const BANNER_FALLBACK_HEIGHT = 48;
+
+  function londonParts(date) {
+    const fmt = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/London',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    });
+    const out = { year: 0, month: 0, day: 0, hour: 0, minute: 0, second: 0 };
+    fmt.formatToParts(date).forEach((part) => {
+      if (Object.prototype.hasOwnProperty.call(out, part.type)) out[part.type] = Number(part.value);
+    });
+    // A few engines report midnight as 24:00:00.
+    if (out.hour === 24) out.hour = 0;
+    return out;
+  }
+
+  function londonOffsetMs(date) {
+    const parts = londonParts(date);
+    const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+    return asUtc - date.getTime();
+  }
+
+  // UTC milliseconds of 00:00:00 on that Europe/London calendar date.
+  // The offset is read twice so a guess that lands on the other side of a
+  // clock change still resolves to the real midnight.
+  function londonMidnightUtc(year, month, day) {
+    const utcGuess = Date.UTC(year, month - 1, day, 0, 0, 0);
+    const offset = londonOffsetMs(new Date(utcGuess));
+    let utc = utcGuess - offset;
+    const offsetAt = londonOffsetMs(new Date(utc));
+    if (offsetAt !== offset) utc = utcGuess - offsetAt;
+    return utc;
+  }
+
+  // The next Europe/London midnight after `now`. At exactly 00:00 the next
+  // one is tomorrow, so a daily countdown rolls forward instead of sitting
+  // at zero. Spring is 23 hours and autumn is 25 because the offset changes.
+  function nextLondonMidnight(now) {
+    const date = now instanceof Date ? now : new Date(now);
+    if (Number.isNaN(date.getTime())) return NaN;
+    const parts = londonParts(date);
+    const nextDay = new Date(Date.UTC(parts.year, parts.month - 1, parts.day) + 86400000);
+    return londonMidnightUtc(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate());
+  }
+
+  function formatRemaining(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return '0h 00m 00s';
+    const total = Math.floor(ms / 1000);
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor((total % 86400) / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    const pad = (n) => (n < 10 ? '0' : '') + n;
+    const clock = hours + 'h ' + pad(minutes) + 'm ' + pad(seconds) + 's';
+    return days > 0 ? days + 'd ' + clock : clock;
+  }
+
+  function bannerColour(value, fallback) {
+    const raw = String(value == null ? '' : value).trim();
+    const match = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(raw);
+    if (!match) return fallback;
+    const hex = match[1];
+    if (hex.length === 3) return '#' + hex.split('').map((ch) => ch + ch).join('');
+    return '#' + hex;
+  }
+
+  // http(s), a site path, a query, or a hash. javascript: and protocol-relative
+  // URLs are dropped so the bar cannot become a script.
+  function bannerHref(value) {
+    const raw = String(value == null ? '' : value).trim();
+    if (!raw || raw.length > 2000) return '';
+    if (raw.charAt(0) === '/' && raw.charAt(1) !== '/' && raw.charAt(1) !== '\\') return raw;
+    if (raw.charAt(0) === '#' || raw.charAt(0) === '?') return raw;
+    try {
+      const url = new URL(raw);
+      if (url.protocol === 'https:' || url.protocol === 'http:') return url.href;
+    } catch (err) { /* not a URL */ }
+    return '';
+  }
+
+  function bannerPosition(change) {
+    return change && change.position === 'bottom' ? 'bottom' : 'top';
+  }
+
+  function bannerSticky(change) {
+    return !change || change.sticky !== false;
+  }
+
+  function bannerCountdownMode(change) {
+    const mode = change && change.countdown;
+    if (mode === 'midnight' || mode === 'fixed' || mode === 'none') return mode;
+    return 'none';
+  }
+
+  function bannerCss(position, sticky) {
+    const edge = position === 'bottom' ? 'bottom' : 'top';
+    const flow = sticky ? 'fixed' : 'absolute';
+    return '#pivit-banner{'
+      + 'position:' + flow + ';' + edge + ':0;left:0;right:0;z-index:' + BANNER_Z + ';'
+      + 'display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px;'
+      + 'box-sizing:border-box;width:100%;max-width:100%;margin:0;'
+      + 'padding:12px 16px;'
+      + 'padding:12px max(16px, env(safe-area-inset-right)) 12px max(16px, env(safe-area-inset-left));'
+      + 'min-height:' + BANNER_FALLBACK_HEIGHT + 'px;'
+      + 'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;'
+      + 'font-size:16px;font-weight:650;line-height:1.3;text-align:center;'
+      + 'overflow-wrap:anywhere;'
+      + '}'
+      + '#pivit-banner a{color:inherit;text-decoration:underline;display:inline;}'
+      + '@media (max-width:640px){#pivit-banner{'
+      + 'font-size:14px;line-height:1.35;min-height:44px;'
+      + 'padding:10px 12px;'
+      + 'padding:10px max(12px, env(safe-area-inset-right)) 10px max(12px, env(safe-area-inset-left));'
+      + '}}';
+  }
+
+  function clearElementChildren(el) {
+    const kids = el && el.children;
+    if (kids && typeof kids.splice === 'function') {
+      kids.splice(0, kids.length);
+      return;
+    }
+    if (el && typeof el.replaceChildren === 'function') {
+      el.replaceChildren();
+      return;
+    }
+    if (el) el.innerHTML = '';
+  }
+
+  function applyBannerPadding(doc, position, px) {
+    const root = (doc && doc.documentElement) || (doc && doc.body);
+    if (!root || !root.style) return;
+    const size = (px > 0 ? px : BANNER_FALLBACK_HEIGHT) + 'px';
+    if (position === 'bottom') {
+      root.style.paddingBottom = size;
+      root.style.paddingTop = '';
+    } else {
+      root.style.paddingTop = size;
+      root.style.paddingBottom = '';
+    }
+  }
+
+  function bannerHeight(el) {
+    const measured = el && typeof el.offsetHeight === 'number' ? el.offsetHeight : 0;
+    return measured > 0 ? measured : BANNER_FALLBACK_HEIGHT;
+  }
+
+  function bannerEndMs(change, now) {
+    const mode = bannerCountdownMode(change);
+    if (mode === 'midnight') return nextLondonMidnight(now);
+    if (mode === 'fixed') {
+      const end = Date.parse(change && change.end);
+      return Number.isFinite(end) ? end : NaN;
+    }
+    return NaN;
+  }
+
+  function ensureBannerStyle(doc, position, sticky) {
+    const css = bannerCss(position, sticky);
+    let styleEl = doc.getElementById && doc.getElementById(BANNER_STYLE_ID);
+    if (styleEl && styleEl.isConnected === false) styleEl = null;
+    if (!styleEl) {
+      styleEl = doc.createElement('style');
+      if (styleEl.setAttribute) {
+        styleEl.setAttribute('id', BANNER_STYLE_ID);
+        styleEl.setAttribute('data-pivit-banner-css', '');
+      } else {
+        styleEl.id = BANNER_STYLE_ID;
+      }
+      (doc.head || doc.documentElement).appendChild(styleEl);
+    }
+    if (styleEl.textContent !== css) styleEl.textContent = css;
+    return styleEl;
+  }
+
+  function clearBannerTimer(doc, clearTimer) {
+    if (!doc || doc.__pivitBannerTimerId == null) return;
+    const clear = clearTimer || (typeof clearInterval === 'function' ? clearInterval : function () {});
+    try { clear(doc.__pivitBannerTimerId); } catch (err) { /* already cleared */ }
+    doc.__pivitBannerTimerId = null;
+  }
+
+  function watchBannerBox(doc, el) {
+    if (!el || el.__pivitBannerObserver) return;
+    const View = (doc && doc.defaultView) || (typeof window !== 'undefined' ? window : null);
+    if (!View || typeof View.ResizeObserver !== 'function') return;
+    try {
+      const observer = new View.ResizeObserver(function () {
+        applyBannerPadding(doc, el.__pivitBannerPosition || 'top', bannerHeight(el));
+      });
+      observer.observe(el);
+      el.__pivitBannerObserver = observer;
+    } catch (err) { /* measuring the bar is optional */ }
+  }
+
+  function paintBannerCountdown(el, change, now) {
+    if (!el || !el.__pivitCount) return;
+    const date = now instanceof Date ? now : new Date(now);
+    const end = bannerEndMs(change, date);
+    const label = formatRemaining(end - date.getTime());
+    const text = typeof change.text === 'string' ? change.text.trim() : '';
+    el.__pivitCount.textContent = (text ? ' ' : '') + label;
+  }
+
+  function armBannerCountdown(doc, el, change, opts) {
+    const clearTimer = (opts && opts.clearInterval) || (typeof clearInterval === 'function' ? clearInterval : function () {});
+    clearBannerTimer(doc, clearTimer);
+    const mode = bannerCountdownMode(change);
+    if (mode === 'none' || !el.__pivitCount) return;
+    const setTimer = (opts && opts.setInterval) || (typeof setInterval === 'function' ? setInterval : null);
+    if (!setTimer) return;
+    const nowFn = typeof opts.now === 'function' ? opts.now : function () { return new Date(); };
+    const id = setTimer(function () { paintBannerCountdown(el, change, nowFn()); }, 1000);
+    if (id && typeof id.unref === 'function') id.unref();
+    doc.__pivitBannerTimerId = id;
+  }
+
+  function applyBanner(doc, change, options) {
+    if (!doc || !doc.createElement || !change || change.type !== 'banner') return null;
+    const text = typeof change.text === 'string' ? change.text.trim() : '';
+    const mode = bannerCountdownMode(change);
+    if (!text && mode === 'none') return null;
+    const opts = options || {};
+    const position = bannerPosition(change);
+    const sticky = bannerSticky(change);
+    const background = bannerColour(change.background, '#131723');
+    const color = bannerColour(change.color, '#ffffff');
+    const href = bannerHref(change.href);
+    ensureBannerStyle(doc, position, sticky);
+
+    const parent = doc.body || doc.documentElement;
+    let el = doc.getElementById && doc.getElementById(BANNER_ID);
+    if (el && el.isConnected === false) el = null;
+    if (!el) {
+      el = doc.createElement('div');
+      if (el.setAttribute) {
+        el.setAttribute('id', BANNER_ID);
+        el.setAttribute('data-pivit-banner', '');
+        el.setAttribute('role', 'region');
+      } else {
+        el.id = BANNER_ID;
+      }
+      if (parent && parent.appendChild) parent.appendChild(el);
+    }
+    if (el.setAttribute) el.setAttribute('aria-label', text || 'Banner');
+    if (!el.style) el.style = {};
+    el.style.background = background;
+    el.style.color = color;
+    el.__pivitBannerPosition = position;
+
+    const nowFn = typeof opts.now === 'function' ? opts.now : function () { return new Date(); };
+    const now = nowFn();
+    clearElementChildren(el);
+    const host = href ? doc.createElement('a') : el;
+    if (href) {
+      if (host.setAttribute) host.setAttribute('href', href);
+      host.appendChild && el.appendChild(host);
+    }
+    const textEl = doc.createElement('span');
+    if (textEl.setAttribute) textEl.setAttribute('data-pivit-banner-text', '');
+    textEl.textContent = text;
+    host.appendChild(textEl);
+    el.__pivitCount = null;
+    if (mode !== 'none') {
+      const countEl = doc.createElement('span');
+      if (countEl.setAttribute) countEl.setAttribute('data-pivit-banner-count', '');
+      host.appendChild(countEl);
+      el.__pivitCount = countEl;
+      paintBannerCountdown(el, change, now);
+    }
+    applyBannerPadding(doc, position, bannerHeight(el));
+    watchBannerBox(doc, el);
+    armBannerCountdown(doc, el, change, opts);
+    return el;
+  }
+
   function createApplier(doc, options) {
     const schedule = (options && options.schedule) || function (fn) {
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(fn);
@@ -1511,6 +1810,11 @@
         runPageJs(change, key);
         return { checked: false, applied: false };
       }
+      if (change.type === 'banner') {
+        try { applyBanner(doc, change, options); }
+        catch (err) { console.warn('[ab] banner change failed:', err); }
+        return { checked: false, applied: false };
+      }
       if (seen.has(key)) return { checked: false, applied: false };
       seen.add(key);
       if (change.type === 'stylesheet') {
@@ -1555,6 +1859,7 @@
     function disconnect() {
       if (observer) observer.disconnect();
       observer = null;
+      clearBannerTimer(doc, options && options.clearInterval);
     }
 
     return { applyAll, applyOne, flush, disconnect };
@@ -1570,6 +1875,10 @@
     generaliseSelector,
     cssForChange,
     createApplier,
+    applyBanner,
+    nextLondonMidnight,
+    formatRemaining,
+    bannerHref,
   };
   }
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this));

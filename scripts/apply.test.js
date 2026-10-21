@@ -521,4 +521,129 @@ function styleTags(doc) {
   assert.strictEqual(pageOnly.checked, 0);
 }
 
+// A banner is one fixed bar. Applying it again, a new applier on the same
+// document, and a mutation do not add a second bar. The page is padded by
+// the bar's height so the content is not covered. A narrow layout is in the
+// bar's stylesheet. The countdown is the text plus the time remaining.
+{
+  const doc = createDocument();
+  addBadge(doc, 'A');
+  const now = new Date('2026-07-15T21:00:00.000Z');
+  const sale = {
+    type: 'banner',
+    text: 'Sale ends in',
+    countdown: 'midnight',
+    background: '#131723',
+    color: '#ffffff',
+    position: 'top',
+    sticky: true,
+    href: 'https://cantsaythat.co.uk/sale',
+  };
+  let cleared = [];
+  const opts = {
+    schedule: (fn) => fn(),
+    MutationObserver: doc.MutationObserver,
+    now: () => now,
+    setInterval: () => 42,
+    clearInterval: (id) => { cleared.push(id); },
+  };
+  const applier = runtime.createApplier(doc, opts);
+  const only = applier.applyAll([sale], 'banner');
+  assert.strictEqual(only.checked, 0);
+  assert.strictEqual(only.ok, null);
+  assert.strictEqual(doc.querySelectorAll('#pivit-banner').length, 1);
+  const bar = doc.querySelectorAll('#pivit-banner')[0];
+  assert.strictEqual(bar.getAttribute('data-pivit-banner'), '');
+  assert.strictEqual(bar.style.background, '#131723');
+  assert.strictEqual(bar.style.color, '#ffffff');
+  assert.strictEqual(bar.children.length, 1);
+  assert.strictEqual(bar.children[0].tagName, 'A');
+  assert.strictEqual(bar.children[0].getAttribute('href'), 'https://cantsaythat.co.uk/sale');
+  const bits = bar.children[0].children.map((node) => node.textContent).join('');
+  assert.strictEqual(bits, 'Sale ends in 2h 00m 00s');
+  assert.strictEqual(doc.documentElement.style.paddingTop, '48px');
+  assert.strictEqual(doc.documentElement.style.paddingBottom, '');
+  const css = styleTags(doc).filter((tag) => tag.id === 'pivit-banner-css');
+  assert.strictEqual(css.length, 1);
+  assert.ok(css[0].textContent.indexOf('position:fixed') !== -1);
+  assert.ok(css[0].textContent.indexOf('@media (max-width:640px)') !== -1);
+  assert.ok(css[0].textContent.indexOf('font-size:14px') !== -1);
+  applier.applyAll([sale], 'banner');
+  doc.notify([doc.body]);
+  addBadge(doc, 'B');
+  assert.strictEqual(doc.querySelectorAll('#pivit-banner').length, 1);
+  assert.strictEqual(styleTags(doc).filter((tag) => tag.id === 'pivit-banner-css').length, 1);
+  runtime.createApplier(doc, opts).applyAll([sale], 'spa');
+  assert.strictEqual(doc.querySelectorAll('#pivit-banner').length, 1);
+  bar.remove();
+  runtime.createApplier(doc, opts).applyAll([sale], 'spa');
+  assert.strictEqual(doc.querySelectorAll('#pivit-banner').length, 1);
+  applier.disconnect();
+  assert.ok(cleared.indexOf(42) !== -1);
+
+  const bottom = createDocument();
+  runtime.createApplier(bottom, {
+    schedule: (fn) => fn(),
+    MutationObserver: bottom.MutationObserver,
+    setInterval: () => 0,
+    clearInterval: () => {},
+  }).applyAll([{
+    type: 'banner',
+    text: 'Hello',
+    countdown: 'none',
+    position: 'bottom',
+    sticky: false,
+    href: 'javascript:alert(1)',
+  }], 'bottom');
+  assert.strictEqual(bottom.querySelectorAll('#pivit-banner').length, 1);
+  const lower = bottom.querySelectorAll('#pivit-banner')[0];
+  assert.strictEqual(lower.children[0].tagName, 'SPAN');
+  assert.strictEqual(lower.textContent, '');
+  assert.strictEqual(lower.children.map((node) => node.textContent).join(''), 'Hello');
+  assert.strictEqual(bottom.documentElement.style.paddingBottom, '48px');
+  assert.strictEqual(bottom.documentElement.style.paddingTop, '');
+  const lowerCss = styleTags(bottom).map((tag) => tag.textContent).join('\n');
+  assert.ok(lowerCss.indexOf('position:absolute') !== -1);
+  assert.ok(lowerCss.indexOf('bottom:0') !== -1);
+  assert.ok(!lower.children.some((node) => node.tagName === 'A'));
+
+  const doubled = createDocument();
+  runtime.createApplier(doubled, {
+    schedule: (fn) => fn(),
+    MutationObserver: doubled.MutationObserver,
+    now: () => new Date('2026-01-15T22:00:00.000Z'),
+    setInterval: () => 0,
+    clearInterval: () => {},
+  }).applyAll([
+    { type: 'banner', text: 'First', countdown: 'none', position: 'top', sticky: true },
+    { type: 'banner', text: 'Sale ends in', countdown: 'midnight', position: 'top', sticky: true },
+    { selector: 'span.missing', type: 'text', value: 'nope' },
+  ], 'two');
+  assert.strictEqual(doubled.querySelectorAll('#pivit-banner').length, 1);
+  const kept = doubled.querySelectorAll('#pivit-banner')[0];
+  assert.strictEqual(kept.children.map((node) => node.textContent).join(''), 'Sale ends in 2h 00m 00s');
+}
+
+assert.strictEqual(
+  runtime.formatRemaining(runtime.nextLondonMidnight(new Date('2026-07-15T21:00:00.000Z')) - Date.parse('2026-07-15T21:00:00.000Z')),
+  '2h 00m 00s'
+);
+assert.strictEqual(
+  runtime.formatRemaining(runtime.nextLondonMidnight(new Date('2026-01-15T22:00:00.000Z')) - Date.parse('2026-01-15T22:00:00.000Z')),
+  '2h 00m 00s'
+);
+assert.strictEqual(
+  runtime.formatRemaining(runtime.nextLondonMidnight(new Date('2026-03-29T00:30:00.000Z')) - Date.parse('2026-03-29T00:30:00.000Z')),
+  '22h 30m 00s'
+);
+assert.strictEqual(
+  runtime.formatRemaining(runtime.nextLondonMidnight(new Date('2026-10-24T23:30:00.000Z')) - Date.parse('2026-10-24T23:30:00.000Z')),
+  '1d 0h 30m 00s'
+);
+assert.strictEqual(runtime.formatRemaining(0), '0h 00m 00s');
+assert.strictEqual(runtime.formatRemaining(-5), '0h 00m 00s');
+assert.strictEqual(runtime.bannerHref('javascript:alert(1)'), '');
+assert.strictEqual(runtime.bannerHref('https://cantsaythat.co.uk/sale'), 'https://cantsaythat.co.uk/sale');
+assert.strictEqual(runtime.bannerHref('/pricing'), '/pricing');
+
 console.log('apply.test.js ok');
