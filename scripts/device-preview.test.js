@@ -47,7 +47,11 @@ assert.ok(deviceSrc.includes('whole-page CSS and JavaScript'));
 assert.ok(snippetSrc.includes("change.type === 'page_css'"));
 assert.ok(snippetSrc.includes("change.type === 'page_js'"));
 assert.ok(editorSrc.includes('id = \'pivit-whole-page\''));
-assert.ok(snippetSrc.includes('including page_css and page_js'));
+assert.ok(snippetSrc.includes('including page_css, page_js and banner'));
+assert.ok(snippetSrc.includes("change.type === 'banner'"));
+assert.ok(editorSrc.includes('id = \'pivit-insert-banner\''));
+assert.ok(editorSrc.includes('UK midnight daily'));
+assert.ok(deviceSrc.includes('including a banner and whole-page CSS and JavaScript'));
 
 function element() {
   const attrs = {};

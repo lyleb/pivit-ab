@@ -1,6 +1,7 @@
 // Variant changes are JSON the visual editor and the API both write.
 // Element HTML, CSS and JS stay the types they already use. page_css and
-// page_js are the whole page, not one element.
+// page_js are the whole page, not one element. banner is one bar for the
+// page (text, countdown, colours, position, sticky, optional link).
 
 const CHANGE_TYPES = [
   'text',
@@ -18,6 +19,7 @@ const CHANGE_TYPES = [
   'stylesheet',
   'page_css',
   'page_js',
+  'banner',
 ];
 
 const ALLOWED = Object.create(null);

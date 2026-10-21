@@ -29,6 +29,7 @@ assert.strictEqual(health.tracksElementChange([]), false);
 assert.strictEqual(health.tracksElementChange([{ type: 'stylesheet', selector: '', value: '.x{color:red}' }]), false);
 assert.strictEqual(health.tracksElementChange([{ type: 'page_css', value: 'body{margin:0}' }]), false);
 assert.strictEqual(health.tracksElementChange([{ type: 'page_js', selector: 'h1', value: 'void 0' }]), false);
+assert.strictEqual(health.tracksElementChange([{ type: 'banner', selector: 'h1', text: 'Sale ends in' }]), false);
 assert.strictEqual(health.tracksElementChange([{ type: 'text', selector: 'h1', value: 'Hi' }]), true);
 
 const low = health.changeAppliedLine({
