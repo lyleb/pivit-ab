@@ -61,6 +61,12 @@ assert.ok(adminHtml.includes('Support view: see another agency read-only. Every 
 assert.ok(adminHtml.includes('id="role-badge"'));
 assert.ok(adminHtml.includes('UI.roleBadgeLabel'));
 assert.ok(adminHtml.includes('href="/help.html">Help</a>'));
+const navRule = adminHtml.slice(adminHtml.indexOf('.nav-item {'), adminHtml.indexOf('.nav-item:hover'));
+assert.ok(navRule.includes('justify-content: center'));
+const mobileNav = adminHtml.match(/\.sidebar-nav \.nav-item \{[^}]+\}/);
+assert.ok(mobileNav);
+assert.ok(mobileNav[0].includes('width: auto'));
+assert.ok(!mobileNav[0].includes('justify-content'));
 assert.ok(!adminHtml.includes('You\'re signed in with the emergency password'));
 assert.ok(!adminHtml.includes('View as another account'));
 assert.ok(!adminHtml.includes('id="status-value"'));
