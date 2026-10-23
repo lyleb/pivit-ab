@@ -1,5 +1,5 @@
 /**
- * pivitlab snippet — v0.7
+ * pivitlab snippet — v0.8
  *
  * Usage on client site:
  *   <script src="https://your-api.example.com/snippet/ab.js"
@@ -88,6 +88,17 @@
  * take a signal from, and whether that's fine is a call for whoever runs the
  * site. If a site uses a different CMP, wire up window.pivitConsent manually.
  *
+ * Send to GA4: when the API includes a ga4 measurement id, an assignment
+ * sends one experience_impression through the gtag or dataLayer already on
+ * the page. The parameter exp_variant_string is the test name and id, then
+ * the variant name and id, which is the shape VWO and Optimizely use. The
+ * same page view is sent once. A single-page app sends it again when the
+ * address changes. Preview and pivit_qa / v_pt visits are not sent. This
+ * file does not load Google Analytics, does not call gtag.js, and does not
+ * set Google cookies. If gtag and dataLayer are both missing, nothing is
+ * sent. If Google Consent Mode has already set analytics storage to denied,
+ * nothing is sent until that state is granted.
+ *
  * Selectors and applying changes live on PivitRuntime (also exported for tests).
  * The visual editor uses the same helpers, so a selector saved from the editor
  * is what visitors get. Positional selectors (nth-child / nth-of-type and the
@@ -117,6 +128,18 @@
   api.previewInfo = previewInfo;
   api.mayBucketExperiment = mayBucketExperiment;
   api.assignVariant = assignVariant;
+  api.normaliseGa4MeasurementId = normaliseGa4MeasurementId;
+  api.expVariantString = expVariantString;
+  api.pageViewKey = pageViewKey;
+  api.analyticsStorageState = analyticsStorageState;
+  api.analyticsConsentAllows = analyticsConsentAllows;
+  api.ga4Transport = ga4Transport;
+  api.planExperienceImpressions = planExperienceImpressions;
+  api.deliverExperienceImpression = deliverExperienceImpression;
+  api.markImpressionsSent = markImpressionsSent;
+  api.sendPlannedImpressions = sendPlannedImpressions;
+  api.watchAnalyticsConsent = watchAnalyticsConsent;
+  api.bindSpaRouteChanges = bindSpaRouteChanges;
   api.TEST_VISITOR_PREFIX = 'v_pt';
   api.QA_STORAGE_KEY = 'pivit_qa';
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
@@ -150,6 +173,12 @@
   const SITE_KEY = withSite('http://s', rawSite) === 'http://s' ? '' : String(rawSite).trim();
   const VISITOR_KEY = '_ab_visitor_id';
   let qaOn = false;
+  const ga4Sent = Object.create(null);
+  const ga4Gate = {};
+  let ga4Config = null;
+  let ga4Experiments = [];
+  let ga4Reporting = false;
+  let ga4Nav = 0;
   const ASSIGNMENT_PREFIX = '_ab_assign_';
   // Bump when editor.js changes so a cached copy cannot keep the old variant.
   const EDITOR_VERSION = '20261021a';
@@ -633,6 +662,79 @@
     return variant ? { experiment, variant } : null;
   }
 
+  function rememberPublicGa4(data) {
+    const ga4 = data && data.ga4;
+    const id = ga4 && normaliseGa4MeasurementId(ga4.measurement_id);
+    ga4Config = id ? { measurement_id: id } : null;
+    if (data && Array.isArray(data.experiments)) ga4Experiments = data.experiments;
+  }
+
+  function visitorLooksLikeTest() {
+    let visitorId = '';
+    try { visitorId = localStorage.getItem(VISITOR_KEY) || ''; } catch (err) { visitorId = ''; }
+    return qaOn || visitorId.indexOf(api.TEST_VISITOR_PREFIX) === 0;
+  }
+
+  function assignmentsFor(experiments) {
+    const assignments = Object.create(null);
+    const list = experiments || [];
+    for (let i = 0; i < list.length; i++) {
+      const experiment = list[i];
+      if (!experiment || experiment.id == null) continue;
+      let stored = null;
+      try { stored = localStorage.getItem(ASSIGNMENT_PREFIX + experiment.id); } catch (err) { stored = null; }
+      if (stored) assignments[experiment.id] = stored;
+    }
+    return assignments;
+  }
+
+  // Ready experiments are sent now. An element rule that is not on the page
+  // yet waits, then sends once, without applying the variant again.
+  function reportExperienceImpressions(experiments, href) {
+    if (ga4Reporting) return;
+    ga4Reporting = true;
+    const waiting = [];
+    try {
+      const list = experiments || ga4Experiments || [];
+      const ready = [];
+      for (let i = 0; i < list.length; i++) {
+        const experiment = list[i];
+        const selector = api.elementSelectorOf(experiment);
+        const query = api.elementQuery(document, selector);
+        if (query.state === 'invalid') continue;
+        if (query.state === 'missing') waiting.push(experiment);
+        else ready.push(experiment);
+      }
+      const pageHref = href || (window.location && window.location.href) || '';
+      const planned = planExperienceImpressions({
+        experiments: ready,
+        assignments: assignmentsFor(ready),
+        pageKey: pageViewKey(pageHref),
+        sent: ga4Sent,
+        ga4: ga4Config,
+        consentAllows: analyticsConsentAllows(window),
+        transport: ga4Transport(window),
+        preview: false,
+        testTraffic: visitorLooksLikeTest(),
+      });
+      sendPlannedImpressions(window, planned, ga4Sent, ga4Gate);
+    } finally {
+      ga4Reporting = false;
+    }
+    const pageKey = pageViewKey(href || (window.location && window.location.href) || '');
+    waiting.forEach(function (experiment) {
+      api.waitForElement(document, api.elementSelectorOf(experiment)).then(function (gate) {
+        if (!gate || !gate.found) return;
+        if (pageViewKey(window.location && window.location.href) !== pageKey) return;
+        reportExperienceImpressions([experiment], href);
+      }).catch(function () { /* the impression is skipped if the wait fails */ });
+    });
+  }
+
+  function reportGa4FromConsent() {
+    reportExperienceImpressions(ga4Experiments, window.location.href);
+  }
+
   async function init() {
     const mode = pageMode();
 
@@ -765,6 +867,8 @@
         return;
       }
 
+      rememberPublicGa4(data);
+
       const visitorId = getVisitorId();
       const enrolledThisView = Object.create(null);
       const waiting = [];
@@ -783,6 +887,7 @@
         const changeApplied = outcome && (outcome.ok === true || outcome.ok === false) ? outcome.ok : undefined;
         sendEvent(experiment.id, variant.id, visitorId, 'view', null, changeApplied);
         wireConversionTracking(experiment.id, variant.id, visitorId, goalsFor(experiment, variant));
+        reportExperienceImpressions([experiment], window.location.href);
       }
 
       (data.experiments || []).forEach((experiment) => {
@@ -804,6 +909,23 @@
         }).catch((err) => {
           console.warn('[ab] element wait failed:', err);
         });
+      });
+
+      watchAnalyticsConsent(window, reportGa4FromConsent);
+      bindSpaRouteChanges(window, function () {
+        const href = window.location.href;
+        const ticket = ++ga4Nav;
+        const page = encodeURIComponent(href);
+        fetch(api.withQaQuery(api.withSite(`${API_BASE}/api/experiments?url=${page}`, SITE_KEY), fetchAsTest))
+          .then(function (res) { return res.json(); })
+          .then(function (next) {
+            if (ticket !== ga4Nav) return;
+            if (!hasTrackingConsent()) return;
+            rememberPublicGa4(next);
+            watchAnalyticsConsent(window, reportGa4FromConsent);
+            reportExperienceImpressions((next && next.experiments) || [], href);
+          })
+          .catch(function () { /* a later address change can still report */ });
       });
 
       // Reveal now. Experiments whose element is already there are applied.
@@ -1080,6 +1202,270 @@
       if (type === 'starts_with' && startsEdge(left, right)) return true;
     }
     return false;
+  }
+
+  // Keep this pattern in step with src/ga4.js. A measurement ID is G- plus
+  // 6 to 12 letters or digits. Empty is '', anything else that is not an ID
+  // is null.
+  function normaliseGa4MeasurementId(value) {
+    if (value == null) return '';
+    const text = String(value).trim().toUpperCase();
+    if (!text) return '';
+    if (!/^G-[A-Z0-9]{6,12}$/.test(text)) return null;
+    return text;
+  }
+
+  function ga4Text(value) {
+    return String(value == null ? '' : value).replace(/[\r\n\t]+/g, ' ').trim();
+  }
+
+  function clipGa4(value) {
+    const text = ga4Text(value);
+    return text.length > 100 ? text.slice(0, 100) : text;
+  }
+
+  // test name(test id):variant name(variant id). GA4 keeps 100 characters.
+  // When the names do not fit, they are shortened and the ids stay.
+  function expVariantString(experimentName, experimentId, variantName, variantId) {
+    const expName = ga4Text(experimentName);
+    const expId = ga4Text(experimentId);
+    const varName = ga4Text(variantName);
+    const varId = ga4Text(variantId);
+    const full = expName + '(' + expId + '):' + varName + '(' + varId + ')';
+    if (full.length <= 100) return full;
+    const overhead = expId.length + varId.length + 5;
+    const room = 100 - overhead;
+    if (room < 2) {
+      const compact = expId + ':' + varId;
+      return compact.length <= 100 ? compact : compact.slice(0, 100);
+    }
+    const leftRoom = Math.ceil(room / 2);
+    const rightRoom = room - leftRoom;
+    return expName.slice(0, leftRoom) + '(' + expId + '):' + varName.slice(0, rightRoom) + '(' + varId + ')';
+  }
+
+  function pageViewKey(href) {
+    const raw = href == null ? '' : String(href);
+    try {
+      const url = new URL(raw, 'https://pivitlab.invalid');
+      return url.pathname + url.search + url.hash;
+    } catch (err) {
+      return raw;
+    }
+  }
+
+  function analyticsStorageFromEntry(entry) {
+    if (!entry || typeof entry !== 'object') return '';
+    const params = entry[2];
+    if (entry[0] === 'consent' && params && typeof params === 'object') {
+      if (params.analytics_storage === 'granted' || params.analytics_storage === 'denied') {
+        return params.analytics_storage;
+      }
+    }
+    if ((entry[0] === 'consent' || entry.event === 'gtm.init_consent')
+      && (entry.analytics_storage === 'granted' || entry.analytics_storage === 'denied')) {
+      return entry.analytics_storage;
+    }
+    return '';
+  }
+
+  // granted, denied, or unknown. Unknown means Consent Mode is not in use.
+  // The resolved Google tag state wins when it is present. Otherwise the
+  // latest consent command already on dataLayer wins.
+  function analyticsStorageState(win) {
+    const ics = win && win.google_tag_data && win.google_tag_data.ics;
+    const entries = ics && ics.entries;
+    const item = entries && entries.analytics_storage;
+    if (item && typeof item === 'object') {
+      const raw = item.update != null && item.update !== '' ? item.update : item.default;
+      if (raw === 'granted' || raw === true) return 'granted';
+      if (raw === 'denied' || raw === false) return 'denied';
+    }
+    const dataLayer = win && win.dataLayer;
+    if (!Array.isArray(dataLayer)) return 'unknown';
+    let state = 'unknown';
+    for (let i = 0; i < dataLayer.length; i++) {
+      const value = analyticsStorageFromEntry(dataLayer[i]);
+      if (value) state = value;
+    }
+    return state;
+  }
+
+  function analyticsConsentAllows(win) {
+    return analyticsStorageState(win) !== 'denied';
+  }
+
+  // gtag when the page already defined it, otherwise an existing dataLayer.
+  // Never creates either one.
+  function ga4Transport(win) {
+    if (!win) return null;
+    if (typeof win.gtag === 'function') return 'gtag';
+    if (Array.isArray(win.dataLayer)) return 'dataLayer';
+    return null;
+  }
+
+  function planExperienceImpressions(input) {
+    const opts = input || {};
+    function none(reason) { return { events: [], reason: reason }; }
+    if (opts.preview === true || opts.testTraffic === true) return none('not-live');
+    if (opts.consentAllows !== true) return none('consent');
+    if (opts.transport !== 'gtag' && opts.transport !== 'dataLayer') return none('no-transport');
+    const ga4 = opts.ga4;
+    if (!ga4 || ga4.enabled === false) return none('disabled');
+    const measurementId = normaliseGa4MeasurementId(ga4.measurement_id);
+    if (!measurementId) return none('measurement-id');
+    const pageKey = opts.pageKey == null ? '' : String(opts.pageKey);
+    const sent = opts.sent || {};
+    const seen = Object.create(null);
+    const events = [];
+    const experiments = opts.experiments || [];
+    const assignments = opts.assignments || {};
+    for (let i = 0; i < experiments.length; i++) {
+      const experiment = experiments[i];
+      if (!experiment || experiment.id == null || experiment.id === '') continue;
+      const assigned = assignments[experiment.id];
+      if (assigned == null || assigned === '') continue;
+      const variants = experiment.variants || [];
+      let variant = null;
+      for (let v = 0; v < variants.length; v++) {
+        if (variants[v] && variants[v].id === assigned) {
+          variant = variants[v];
+          break;
+        }
+      }
+      if (!variant) continue;
+      const dedupeKey = String(experiment.id) + '\n' + String(variant.id) + '\n' + pageKey;
+      if (sent[dedupeKey] || seen[dedupeKey]) continue;
+      seen[dedupeKey] = 1;
+      events.push({
+        transport: opts.transport,
+        measurement_id: measurementId,
+        name: 'experience_impression',
+        dedupeKey: dedupeKey,
+        params: {
+          exp_variant_string: expVariantString(experiment.name, experiment.id, variant.name, variant.id),
+          experiment_id: clipGa4(experiment.id),
+          experiment_name: clipGa4(experiment.name),
+          variant_id: clipGa4(variant.id),
+          variant_name: clipGa4(variant.name),
+          send_to: measurementId,
+        },
+      });
+    }
+    return { events: events, reason: events.length ? 'ok' : 'none' };
+  }
+
+  function deliverExperienceImpression(win, event) {
+    if (!win || !event || !event.params) return false;
+    if (event.transport === 'gtag' && typeof win.gtag === 'function') {
+      win.gtag('event', 'experience_impression', event.params);
+      return true;
+    }
+    if (event.transport === 'dataLayer' && Array.isArray(win.dataLayer)) {
+      const payload = { event: 'experience_impression' };
+      const params = event.params;
+      for (const key in params) {
+        if (Object.prototype.hasOwnProperty.call(params, key)) payload[key] = params[key];
+      }
+      win.dataLayer.push(payload);
+      return true;
+    }
+    return false;
+  }
+
+  function markImpressionsSent(sent, events) {
+    const book = sent || Object.create(null);
+    const list = events || [];
+    for (let i = 0; i < list.length; i++) {
+      if (list[i] && list[i].dedupeKey) book[list[i].dedupeKey] = 1;
+    }
+    return book;
+  }
+
+  // Marks each event before it is delivered, and ignores a nested call.
+  // gtag itself pushes onto dataLayer, which would otherwise send the rest
+  // of the list a second time.
+  function sendPlannedImpressions(win, planned, sent, state) {
+    const gate = state || {};
+    if (gate.busy) return 0;
+    gate.busy = true;
+    let sentCount = 0;
+    try {
+      const events = (planned && planned.events) || [];
+      for (let i = 0; i < events.length; i++) {
+        const event = events[i];
+        if (!event || !event.dedupeKey) continue;
+        markImpressionsSent(sent, [event]);
+        let ok = false;
+        try {
+          ok = deliverExperienceImpression(win, event) === true;
+        } catch (err) {
+          ok = false;
+        }
+        if (!ok && sent) delete sent[event.dedupeKey];
+        if (ok) sentCount += 1;
+      }
+    } finally {
+      gate.busy = false;
+    }
+    return sentCount;
+  }
+
+  function watchAnalyticsConsent(win, onAllow) {
+    if (!win || typeof onAllow !== 'function' || !Array.isArray(win.dataLayer)) return false;
+    const current = win.dataLayer.push;
+    if (typeof current === 'function' && current.__pivitGa4Watch) return true;
+    const original = typeof current === 'function' ? current : Array.prototype.push;
+    function wrapped() {
+      const result = original.apply(win.dataLayer, arguments);
+      try {
+        if (analyticsConsentAllows(win)) onAllow();
+      } catch (err) { /* the page's dataLayer still received the push */ }
+      return result;
+    }
+    wrapped.__pivitGa4Watch = true;
+    try {
+      win.dataLayer.push = wrapped;
+    } catch (err) {
+      return false;
+    }
+    return true;
+  }
+
+  function bindSpaRouteChanges(win, onChange) {
+    if (!win || typeof onChange !== 'function' || !win.history) return false;
+    if (win.__pivitSpaBound) return true;
+    let last = pageViewKey(win.location && win.location.href);
+    function fire() {
+      let next = '';
+      try { next = pageViewKey(win.location && win.location.href); }
+      catch (err) { return; }
+      if (next === last) return;
+      last = next;
+      try { onChange(next); }
+      catch (err) { /* a later navigation can still report */ }
+    }
+    function wrap(name) {
+      const original = win.history[name];
+      if (typeof original !== 'function' || original.__pivitSpa) return;
+      function wrapped() {
+        const result = original.apply(win.history, arguments);
+        fire();
+        return result;
+      }
+      wrapped.__pivitSpa = true;
+      try { win.history[name] = wrapped; }
+      catch (err) { /* the browser's own history stays as it was */ }
+    }
+    wrap('pushState');
+    wrap('replaceState');
+    if (typeof win.addEventListener === 'function') {
+      win.addEventListener('popstate', fire);
+      win.addEventListener('hashchange', fire);
+    }
+    try { win.__pivitSpaBound = true; }
+    catch (err) { /* the listeners are still in place for this document */ }
+    return true;
   }
 
   // Hoisted. Node can require this file and read the return value; the boot

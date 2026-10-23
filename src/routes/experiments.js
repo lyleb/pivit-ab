@@ -34,6 +34,7 @@ const { normaliseElementSelector } = require('../element-selector');
 const { isDemo, normaliseTestType, typeChangeError, demoPlan, countOptions } = require('../demo-test');
 const { refreshDemoPlan } = require('../demo-sample');
 const { noteSnippetSeen, noteInstallCheck, noteQaPreview, installCheckPayload } = require('../site-verify');
+const { publicGa4ForScope } = require('../ga4');
 const { normaliseStatusChange } = require('../experiment-status');
 const {
   archivedBody,
@@ -135,6 +136,11 @@ router.get('/', async (req, res) => {
   try {
     const scope = await openPublicScope(req);
     if (!scope) return res.json({ experiments: [] });
+    const ga4 = await publicGa4ForScope(db, scope);
+    const sendPublic = (body) => {
+      if (ga4 && ga4.measurement_id) body.ga4 = { measurement_id: ga4.measurement_id };
+      return res.json(body);
+    };
 
     const { rows: experiments } = await db.query(
       `SELECT id, name, url_match, url_match_type, element_selector, test_type, allowed_hosts, goals FROM experiments
@@ -186,8 +192,8 @@ router.get('/', async (req, res) => {
       experimentIds.push(previewExperiment.id);
     }
     if (experimentIds.length === 0) {
-      if (previewExpired) return res.json({ experiments: [], preview_expired: previewExpired });
-      return res.json({ experiments: [] });
+      if (previewExpired) return sendPublic({ experiments: [], preview_expired: previewExpired });
+      return sendPublic({ experiments: [] });
     }
 
     const { rows: variants } = await db.query(
@@ -205,10 +211,10 @@ router.get('/', async (req, res) => {
     });
 
     if (previewExpired) {
-      return res.json({ experiments: payload.experiments, preview_expired: previewExpired });
+      return sendPublic({ experiments: payload.experiments, preview_expired: previewExpired });
     }
-    if (payload.preview) return res.json({ experiments: payload.experiments, preview: payload.preview });
-    res.json({ experiments: payload.experiments });
+    if (payload.preview) return sendPublic({ experiments: payload.experiments, preview: payload.preview });
+    sendPublic({ experiments: payload.experiments });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });
