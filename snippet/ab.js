@@ -102,6 +102,13 @@
  * Data Layer Variables. A gtag.js page with no Tag Manager still uses gtag.
  * The two are never both used for the same impression.
  *
+ * Click goals use one listener on the document, in the capture phase. The
+ * selector is checked when the visitor clicks, so an element added after
+ * load, or replaced by a later render, still converts. The listener does
+ * not call preventDefault or stopPropagation: a link still navigates, and
+ * the conversion beacon is sent with that click. One beacon per visitor
+ * per goal. Preview and the editor do not install the listener.
+ *
  * Selectors and applying changes live on PivitRuntime (also exported for tests).
  * The visual editor uses the same helpers, so a selector saved from the editor
  * is what visitors get. Positional selectors (nth-child / nth-of-type and the
@@ -116,6 +123,9 @@
   api.shouldCountUrlGoal = shouldCountUrlGoal;
   api.claimClick = claimClick;
   api.clickStorageKey = clickStorageKey;
+  api.clickGoalsFrom = clickGoalsFrom;
+  api.clickGoalElement = clickGoalElement;
+  api.createClickTracker = createClickTracker;
   api.qaFlagFromSearch = qaFlagFromSearch;
   api.applyQaFlag = applyQaFlag;
   api.readQaFlag = readQaFlag;
@@ -457,23 +467,33 @@
     return (variant && variant.goals) || [];
   }
 
+  // One document listener for every click goal enrolled on this page.
+  // The selector is checked at click time, so a node that was not in the
+  // document yet still counts, and so does a node a later render swapped in.
+  // Binding each match as it appeared would miss a click in that same turn,
+  // and would drop the goal when the node was replaced. Capture runs before
+  // the page's own handler, which may remove the button or follow a link.
+  // The event is left alone, so that still happens. claimClick keeps a
+  // single beacon per visitor per goal.
+  let pageClickTracker = null;
   function wireConversionTracking(experimentId, variantId, visitorId, goals) {
-    (goals || []).forEach((goal) => {
-      const type = goal.type || 'click'; // goals saved before this feature have no "type" — always click
-      if (type !== 'click' || !goal.selector) return; // 'url' goals are handled by checkUrlGoals below
-      let nodes;
-      try { nodes = document.querySelectorAll(goal.selector); } catch (e) { return; }
-      const goalId = goal.id || goal.selector;
-      nodes.forEach((el) => {
-        el.addEventListener('click', () => {
-          // One beacon per visitor per goal. Later clicks are not sent, so
-          // they cannot burn the per-IP event cap. The server still counts
-          // unique conversions from whatever did arrive.
-          if (!claimClick(localStorage, visitorId, experimentId, goalId)) return;
-          sendEvent(experimentId, variantId, visitorId, 'convert', goalId);
-        });
-      });
+    const list = clickGoalsFrom(goals, {
+      experimentId: experimentId,
+      variantId: variantId,
+      visitorId: visitorId,
     });
+    if (!list.length) return;
+    if (!pageClickTracker) {
+      pageClickTracker = createClickTracker(document, {
+        claim: function (goal) {
+          return claimClick(localStorage, goal.visitorId, goal.experimentId, goal.goalId);
+        },
+        send: function (goal) {
+          sendEvent(goal.experimentId, goal.variantId, goal.visitorId, 'convert', goal.goalId);
+        },
+      });
+    }
+    pageClickTracker.track(list);
   }
 
   // A URL goal must not convert on the page view that first enrolled the
@@ -973,6 +993,97 @@
       if (storage && storage.setItem) storage.setItem(key, '1');
     } catch (e) { /* the memory flag above is the fallback */ }
     return true;
+  }
+
+  // Goals saved before types existed have no "type" and are always click.
+  // URL goals are handled by checkUrlGoals, not by this listener.
+  function clickGoalsFrom(goals, context) {
+    const ctx = context || {};
+    const list = goals || [];
+    const out = [];
+    for (let i = 0; i < list.length; i++) {
+      const goal = list[i] || {};
+      const type = goal.type || 'click';
+      if (type !== 'click' || typeof goal.selector !== 'string' || !goal.selector) continue;
+      out.push({
+        experimentId: ctx.experimentId,
+        variantId: ctx.variantId,
+        visitorId: ctx.visitorId,
+        goalId: goal.id || goal.selector,
+        selector: goal.selector,
+      });
+    }
+    return out;
+  }
+
+  // The innermost element that matches. composedPath sees through a shadow
+  // root, where event.target is retargeted to the host. An invalid selector
+  // matches nothing and does not throw into the page.
+  function nodesForClick(event) {
+    if (!event) return [];
+    if (typeof event.composedPath === 'function') {
+      try {
+        const path = event.composedPath();
+        if (path && path.length) return path;
+      } catch (err) { /* fall through to the target chain */ }
+    }
+    const nodes = [];
+    let current = null;
+    if (event.target !== undefined && event.nodeType == null) current = event.target;
+    else current = event;
+    if (current && current.nodeType === 3) current = current.parentElement || null;
+    while (current) {
+      nodes.push(current);
+      if (current.nodeType === 9) break;
+      current = current.parentElement || null;
+    }
+    return nodes;
+  }
+  function clickGoalElement(event, selector) {
+    if (typeof selector !== 'string' || !selector) return null;
+    const nodes = nodesForClick(event);
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      if (!node || node.nodeType !== 1 || typeof node.matches !== 'function') continue;
+      try {
+        if (node.matches(selector)) return node;
+      } catch (err) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  // One capture listener. track() can be called again as further experiments
+  // enrol; it does not add a second listener. The click is never cancelled.
+  function createClickTracker(doc, hooks) {
+    const goals = [];
+    let listening = false;
+    const claim = hooks && hooks.claim;
+    const send = hooks && hooks.send;
+    function onClick(event) {
+      for (let i = 0; i < goals.length; i++) {
+        const goal = goals[i];
+        if (!clickGoalElement(event, goal.selector)) continue;
+        if (!claim(goal, event)) continue;
+        send(goal, event);
+      }
+    }
+    return {
+      track: function (list) {
+        const adding = list || [];
+        for (let i = 0; i < adding.length; i++) {
+          const goal = adding[i];
+          if (!goal || typeof goal.selector !== 'string' || !goal.selector) continue;
+          goals.push(goal);
+        }
+        if (listening) return;
+        if (!doc || typeof doc.addEventListener !== 'function') return;
+        if (!goals.length) return;
+        listening = true;
+        doc.addEventListener('click', onClick, true);
+      },
+    };
   }
 
   // Keep in step with public/url-match.js. scripts/goals.test.js checks they agree.
