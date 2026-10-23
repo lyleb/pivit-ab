@@ -100,6 +100,27 @@ The password page at the unlisted address is only a fallback for the platform ad
 
 **Sign out everywhere**, at the bottom of the sidebar, ends your other sessions.
 
+## Single-page apps
+
+A single-page app changes the address without loading the page again. The snippet notices history.pushState, history.replaceState, the back and forward buttons, and a hash change. An address that has not actually changed is ignored. Several changes within about a tenth of a second count as one, so pivitlab asks once for the address the visitor landed on.
+
+On that change, pivitlab fetches the tests for the new address. A test that matches, and was not already applied on this page, is applied and its view is recorded once. A URL goal is checked again, and it still converts once for that visitor.
+
+A test that was already applied stays applied until the next full load. Moving to another address does not remove it, and it is not applied a second time. Its page JavaScript does not run again. A full reload starts from the address in the browser.
+
+To turn this off, add data-spa="off" to the snippet tag:
+
+```html
+<script src="https://pivitlab.com/snippet/ab.js"
+        data-api="https://pivitlab.com"
+        data-site="site_…"
+        data-spa="off"></script>
+```
+
+Tests and URL goals are then evaluated only when the page fully loads. Send to GA4 still sends experience_impression again when the address changes, and still only once for the same address.
+
+An address with ab_edit, or a preview token, is unchanged. It still opens that mode on a full load, and a later address change does not track it.
+
 ## Send to GA4
 
 On Home, each site has **Send to GA4** and a box for that site's GA4 measurement ID. The ID starts with G-. This is included on paid plans. pivitlab has no priced plans yet. Paid plan is the switch that lets an agency use Send to GA4. A Platform admin sets it on Home, on the Send to GA4 card. That card also says how many sites have Send to GA4 switched on.

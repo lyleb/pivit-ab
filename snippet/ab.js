@@ -52,11 +52,11 @@
  * JavaScript that runs once on load. A normal visit ignores pivit_device.
  *
  * page_css adds one <style> in the head. Applying it again updates that tag
- * and does not add a second one. page_js runs once per page view, not once
- * per element. A second apply, a new applier on the same document (an SPA
- * re-render), and the mutation observer all leave it unrun. A thrown error
- * is caught so the rest of the page still runs. Element html, stylesheet
- * and js are unchanged.
+ * and does not add a second one. page_js runs at most once per experiment
+ * per document, not once per element. A second apply, a new applier on the
+ * same document (an SPA re-render or a later address), and the mutation
+ * observer all leave it unrun. A thrown error is caught so the rest of the
+ * page still runs. Element html, stylesheet and js are unchanged.
  *
  * banner is one bar for the page, at the top or the bottom. Sticky bars use
  * position:fixed; the others use position:absolute and scroll away. Either
@@ -109,6 +109,21 @@
  * the conversion beacon is sent with that click. One beacon per visitor
  * per goal. Preview and the editor do not install the listener.
  *
+ * Single-page apps: history.pushState, history.replaceState, popstate and
+ * hashchange are watched. A change that leaves the address the same is
+ * ignored. Changes inside about a tenth of a second collapse into one, so
+ * the API is asked once for the address the visitor actually landed on.
+ * That request enrols and applies any test that newly matches, and URL
+ * goals are checked again. A test already applied on this document stays
+ * applied until the next full load: it is not removed, not applied again,
+ * and its view is not sent again. Its page JavaScript does not run again.
+ * Send to GA4 still uses the same impression dedupe, so the combined check
+ * does not send a second experience_impression for that address. The click
+ * listener is the one already installed; a newly applied test adds its
+ * goals to it. data-spa="off" on the snippet tag leaves tests and URL goals
+ * on full loads only. Send to GA4 still follows the address in that case.
+ * An ab_edit or preview address is not re-checked and is not tracked.
+ *
  * Selectors and applying changes live on PivitRuntime (also exported for tests).
  * The visual editor uses the same helpers, so a selector saved from the editor
  * is what visitors get. Positional selectors (nth-child / nth-of-type and the
@@ -116,6 +131,10 @@
  */
 (function (root) {
   const ELEMENT_WAIT_MS = 4000;
+  // About a tenth of a second. A router that writes the address twice in
+  // one turn, or a push followed at once by a replace, becomes one request.
+  const SPA_DEBOUNCE_MS = 100;
+  const ASSIGNMENT_PREFIX = '_ab_assign_';
   const api = buildPivitRuntime();
   const clickSeen = Object.create(null);
   api.matchUrlGoal = matchUrlGoal;
@@ -154,6 +173,17 @@
   api.sendPlannedImpressions = sendPlannedImpressions;
   api.watchAnalyticsConsent = watchAnalyticsConsent;
   api.bindSpaRouteChanges = bindSpaRouteChanges;
+  api.SPA_DEBOUNCE_MS = SPA_DEBOUNCE_MS;
+  api.spaNavigationEnabled = spaNavigationEnabled;
+  api.spaRecheckAllowed = spaRecheckAllowed;
+  api.modeFromHref = modeFromHref;
+  api.createRouteSession = createRouteSession;
+  api.startSpaRecheck = startSpaRecheck;
+  api.createNavigationGate = createNavigationGate;
+  api.publicExperimentsUrl = publicExperimentsUrl;
+  api.applyMatchingExperiments = applyMatchingExperiments;
+  api.deliverNavigation = deliverNavigation;
+  api.planUrlConversions = planUrlConversions;
   api.TEST_VISITOR_PREFIX = 'v_pt';
   api.QA_STORAGE_KEY = 'pivit_qa';
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
@@ -192,8 +222,6 @@
   let ga4Config = null;
   let ga4Experiments = [];
   let ga4Reporting = false;
-  let ga4Nav = 0;
-  const ASSIGNMENT_PREFIX = '_ab_assign_';
   // Bump when editor.js changes so a cached copy cannot keep the old variant.
   const EDITOR_VERSION = '20261021a';
   // Bump when device-preview.js changes so a cached shell cannot skip JavaScript.
@@ -236,17 +264,28 @@
     document.head.appendChild(loader);
   }
 
-  function pageMode() {
-    const params = new URLSearchParams(window.location.search);
+  // The last ab_edit or ab_preview in the query wins, including a leftover
+  // from an earlier test in the same address.
+  function modeFromHref(href) {
+    let params;
+    try {
+      params = new URL(href, 'https://pivitlab.invalid').searchParams;
+    } catch (err) {
+      return { type: null, variantId: null, token: null };
+    }
     let mode = null;
-    for (const [key, value] of params) {
-      if (!value) continue;
+    params.forEach(function (value, key) {
+      if (!value) return;
       if (key === 'ab_edit') mode = { type: 'edit', variantId: value };
       else if (key === 'ab_preview') mode = { type: 'preview', variantId: value };
-    }
+    });
     if (!mode) return { type: null, variantId: null, token: null };
     mode.token = mode.type === 'edit' ? lastQuery(params, 'token') : lastQuery(params, 'ab_preview_token');
     return mode;
+  }
+
+  function pageMode() {
+    return modeFromHref(window.location.href);
   }
 
   function revealPage() {
@@ -407,9 +446,10 @@
 
   // Sticky via localStorage. A visitor we cannot store is not reported, so the
   // server never keeps a variant the browser did not keep.
-  function pickVariant(experiment, visitorId) {
+  function pickVariant(experiment, visitorId, storage) {
+    const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null);
     let stored = null;
-    try { stored = localStorage.getItem(ASSIGNMENT_PREFIX + experiment.id); } catch (e) { stored = null; }
+    try { stored = store && store.getItem ? store.getItem(ASSIGNMENT_PREFIX + experiment.id) : null; } catch (e) { stored = null; }
     if (stored) {
       const match = (experiment.variants || []).find((v) => v.id === stored);
       if (match) return match;
@@ -418,7 +458,8 @@
     const chosen = assignVariant(experiment, visitorId);
     if (!chosen || !chosen.id) return null;
     try {
-      localStorage.setItem(ASSIGNMENT_PREFIX + experiment.id, chosen.id);
+      if (!store || !store.setItem) return null;
+      store.setItem(ASSIGNMENT_PREFIX + experiment.id, chosen.id);
     } catch (e) {
       return null;
     }
@@ -510,10 +551,34 @@
 
   // "Visited a URL" goals can't be wired up as a click listener on the page the
   // experiment runs on, because the goal page (e.g. /thank-you) is often a
-  // completely different page. Instead, on every page load, check every experiment
-  // this visitor has ever been assigned to (found via localStorage) against the
-  // current URL, and fire a conversion once per goal if it matches.
-  async function checkUrlGoals(visitorId, enrolledThisView) {
+  // completely different page. On a full load, and again when a single-page
+  // app changes the address, check every experiment this visitor has been
+  // assigned to (found via localStorage) against that address, and fire a
+  // conversion once per goal if it matches.
+  function planUrlConversions(experiments, assignments, href, enrolledThisView) {
+    const assigned = assignments || {};
+    const out = [];
+    (experiments || []).forEach((experiment) => {
+      if (!experiment || !shouldCountUrlGoal(experiment.id, enrolledThisView)) return;
+      const variantId = assigned[experiment.id];
+      const variant = (experiment.variants || []).find((v) => v.id === variantId);
+      if (!variant) return;
+      goalsFor(experiment, variant).forEach((goal) => {
+        if (goal.type !== 'url' || !goal.url_match) return;
+        if (!matchUrlGoal(goal.url_match, href, goal.match || 'contains')) return;
+        const goalId = goal.id || goal.url_match;
+        out.push({
+          experimentId: experiment.id,
+          variantId: variantId,
+          goalId: goalId,
+          key: '_ab_converted_' + experiment.id + '_' + goalId,
+        });
+      });
+    });
+    return out;
+  }
+
+  async function checkUrlGoals(visitorId, enrolledThisView, href) {
     const assignments = {};
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
@@ -524,25 +589,18 @@
     const experimentIds = Object.keys(assignments);
     if (experimentIds.length === 0) return;
 
+    const pageHref = href || (window.location && window.location.href) || '';
     try {
       const res = await fetch(api.withQaQuery(api.withSite(`${API_BASE}/api/experiments/by-ids?ids=${experimentIds.join(',')}`, SITE_KEY), qaOn));
       const data = await res.json();
-
-      (data.experiments || []).forEach((experiment) => {
-        if (!shouldCountUrlGoal(experiment.id, enrolledThisView)) return;
-        const variantId = assignments[experiment.id];
-        const variant = (experiment.variants || []).find((v) => v.id === variantId);
-        if (!variant) return;
-
-        goalsFor(experiment, variant).forEach((goal) => {
-          if (goal.type !== 'url' || !goal.url_match) return;
-          if (!matchUrlGoal(goal.url_match, window.location.href, goal.match || 'contains')) return;
-
-          const firedKey = '_ab_converted_' + experiment.id + '_' + (goal.id || goal.url_match);
-          if (localStorage.getItem(firedKey)) return; // only count once per visitor per goal
-          localStorage.setItem(firedKey, '1');
-          sendEvent(experiment.id, variantId, visitorId, 'convert', goal.id || goal.url_match);
-        });
+      // The visitor may have moved on while this request was in flight. The
+      // navigation that is current now checks that address itself.
+      if (pageViewKey(window.location.href) !== pageViewKey(pageHref)) return;
+      const planned = planUrlConversions(data.experiments, assignments, pageHref, enrolledThisView);
+      planned.forEach((item) => {
+        if (localStorage.getItem(item.key)) return; // only count once per visitor per goal
+        localStorage.setItem(item.key, '1');
+        sendEvent(item.experimentId, item.variantId, visitorId, 'convert', item.goalId);
       });
     } catch (err) {
       console.warn('[ab] failed to check URL goals:', err);
@@ -895,62 +953,107 @@
 
       const visitorId = getVisitorId();
       const enrolledThisView = Object.create(null);
-      const waiting = [];
+      // One record for this document. A test applied on the first load, or
+      // on a later address, is not applied again until the next full load.
+      const appliedOnPage = Object.create(null);
+      const navigationGate = createNavigationGate();
 
-      // Assignment and the view happen here, and only here. A waiting
-      // experiment does not call this until its element is on the page.
-      function enroll(experiment) {
-        if (!api.mayBucketExperiment(experiment, visitorId, qaOn)) return;
-        if (!experiment.variants || experiment.variants.length === 0) return;
-        let already = null;
-        try { already = localStorage.getItem(ASSIGNMENT_PREFIX + experiment.id); } catch (e) { already = null; }
-        const variant = pickVariant(experiment, visitorId);
-        if (!variant) return;
-        if (!already) enrolledThisView[experiment.id] = 1;
-        const outcome = applyVariantChanges(variant);
-        const changeApplied = outcome && (outcome.ok === true || outcome.ok === false) ? outcome.ok : undefined;
-        sendEvent(experiment.id, variant.id, visitorId, 'view', null, changeApplied);
-        wireConversionTracking(experiment.id, variant.id, visitorId, goalsFor(experiment, variant));
-        reportExperienceImpressions([experiment], window.location.href);
+      function watchWaiting(waiting, href, enrolled, stayOnPage) {
+        const pageKey = pageViewKey(href || window.location.href);
+        (waiting || []).forEach((experiment) => {
+          api.exposeWhenReady(experiment, {
+            document: document,
+            onExpose: function () {
+              if (!hasTrackingConsent()) return;
+              if (stayOnPage && pageViewKey(window.location.href) !== pageKey) return;
+              applyMatchingExperiments({
+                experiments: [experiment],
+                href: window.location.href,
+                document: document,
+                visitorId: visitorId,
+                qaOn: qaOn,
+                applied: appliedOnPage,
+                enrolledThisView: enrolled,
+              });
+            },
+          }).catch((err) => {
+            console.warn('[ab] element wait failed:', err);
+          });
+        });
       }
 
-      (data.experiments || []).forEach((experiment) => {
-        if (!experiment.variants || experiment.variants.length === 0) return;
-        const selector = api.elementSelectorOf(experiment);
-        const query = api.elementQuery(document, selector);
-        if (query.state === 'invalid') return;
-        if (query.state === 'none' || query.state === 'present') enroll(experiment);
-        else waiting.push(experiment);
+      const first = applyMatchingExperiments({
+        experiments: data.experiments || [],
+        href: window.location.href,
+        document: document,
+        visitorId: visitorId,
+        qaOn: qaOn,
+        applied: appliedOnPage,
+        enrolledThisView: enrolledThisView,
       });
-
-      waiting.forEach((experiment) => {
-        api.exposeWhenReady(experiment, {
-          document: document,
-          onExpose: function () {
-            if (!hasTrackingConsent()) return;
-            enroll(experiment);
-          },
-        }).catch((err) => {
-          console.warn('[ab] element wait failed:', err);
-        });
-      });
+      watchWaiting(first.waiting, window.location.href, enrolledThisView, false);
 
       watchAnalyticsConsent(window, reportGa4FromConsent);
-      bindSpaRouteChanges(window, function () {
-        const href = window.location.href;
-        const ticket = ++ga4Nav;
-        const page = encodeURIComponent(href);
-        fetch(api.withQaQuery(api.withSite(`${API_BASE}/api/experiments?url=${page}`, SITE_KEY), fetchAsTest))
+
+      function refreshAfterNavigation(href) {
+        const nextMode = modeFromHref(href);
+        // An edit or preview address is a full-load handoff. A client-side
+        // change into one of those must not enrol or send a view.
+        if (nextMode.type === 'edit' || nextMode.type === 'preview') return;
+        const token = navigationGate.start();
+        fetch(publicExperimentsUrl(href, fetchAsTest))
           .then(function (res) { return res.json(); })
           .then(function (next) {
-            if (ticket !== ga4Nav) return;
+            if (!navigationGate.current(token, href, window.location.href)) return;
             if (!hasTrackingConsent()) return;
             rememberPublicGa4(next);
             watchAnalyticsConsent(window, reportGa4FromConsent);
-            reportExperienceImpressions((next && next.experiments) || [], href);
+            const delivered = deliverNavigation({
+              experiments: (next && next.experiments) || [],
+              href: href,
+              document: document,
+              visitorId: visitorId,
+              qaOn: qaOn,
+              applied: appliedOnPage,
+              reportOne: function (experiment, pageHref) {
+                reportExperienceImpressions([experiment], pageHref);
+              },
+              reportAll: function (experiments, pageHref) {
+                reportExperienceImpressions(experiments, pageHref);
+              },
+            });
+            watchWaiting(delivered.waiting, href, delivered.enrolledThisView, true);
+            checkUrlGoals(visitorId, delivered.enrolledThisView, href);
           })
           .catch(function () { /* a later address change can still report */ });
-      });
+      }
+
+      if (spaRecheckAllowed(mode, scriptTag)) {
+        startSpaRecheck(window, {
+          mode: mode,
+          script: scriptTag,
+          applied: appliedOnPage,
+          initialHref: window.location.href,
+          onNavigate: refreshAfterNavigation,
+        });
+      } else {
+        // data-spa="off": tests and URL goals stay on the full load. GA4
+        // still follows the address, once per address, as before.
+        bindSpaRouteChanges(window, function () {
+          const href = window.location.href;
+          const token = navigationGate.start();
+          fetch(publicExperimentsUrl(href, fetchAsTest))
+            .then(function (res) { return res.json(); })
+            .then(function (next) {
+              if (!navigationGate.current(token, href, window.location.href)) return;
+              if (!hasTrackingConsent()) return;
+              rememberPublicGa4(next);
+              watchAnalyticsConsent(window, reportGa4FromConsent);
+              reportExperienceImpressions((next && next.experiments) || [], href);
+            })
+            .catch(function () { /* a later address change can still report */ });
+        });
+      }
 
       // Reveal now. Experiments whose element is already there are applied.
       // A missing element does not hold the page blank: a site-wide URL rule
@@ -959,7 +1062,8 @@
       revealPage();
 
       // Check "visited a URL" goals on every page load — including pages with no
-      // on-page experiment at all, e.g. a /thank-you confirmation page.
+      // on-page experiment at all, e.g. a /thank-you confirmation page. A
+      // single-page app checks again from refreshAfterNavigation.
       await checkUrlGoals(visitorId, enrolledThisView);
     } catch (err) {
       console.warn('[ab] failed to load experiments:', err);
@@ -1608,6 +1712,199 @@
       return false;
     }
     return true;
+  }
+
+  // Missing, empty, or anything other than "off" keeps the address check on.
+  function spaNavigationEnabled(script) {
+    if (!script || typeof script.getAttribute !== 'function') return true;
+    const raw = script.getAttribute('data-spa');
+    if (raw == null) return true;
+    return String(raw).trim().toLowerCase() !== 'off';
+  }
+
+  // Edit and preview are a full-load handoff. They do not enrol on a later
+  // address change. data-spa="off" keeps tests and URL goals on the full load.
+  function spaRecheckAllowed(mode, script) {
+    if (mode && (mode.type === 'edit' || mode.type === 'preview')) return false;
+    return spaNavigationEnabled(script);
+  }
+
+  // apiBase and siteKey are filled in by tests. A page call leaves them out
+  // and uses the snippet tag's own API origin and site key.
+  function publicExperimentsUrl(href, testTraffic, apiBase, siteKey) {
+    const base = arguments.length >= 3 ? apiBase : API_BASE;
+    const site = arguments.length >= 4 ? siteKey : SITE_KEY;
+    const page = encodeURIComponent(href == null ? '' : String(href));
+    return api.withQaQuery(api.withSite(`${base}/api/experiments?url=${page}`, site), !!testTraffic);
+  }
+
+  // Drops a response when a newer address change has already started, or
+  // when the visitor has moved on from the address that was requested.
+  function createNavigationGate() {
+    let ticket = 0;
+    return {
+      start: function () {
+        ticket += 1;
+        return ticket;
+      },
+      current: function (token, href, currentHref) {
+        if (token !== ticket) return false;
+        return pageViewKey(href) === pageViewKey(currentHref);
+      },
+    };
+  }
+
+  function createRouteSession(options) {
+    const opts = options || {};
+    const applied = opts.applied || Object.create(null);
+    const debounceMs = opts.debounceMs == null ? SPA_DEBOUNCE_MS : opts.debounceMs;
+    const setTimer = opts.setTimer || function (fn, ms) { return setTimeout(fn, ms); };
+    const clearTimer = opts.clearTimer || function (id) { clearTimeout(id); };
+    let handledKey = opts.initialKey == null ? '' : String(opts.initialKey);
+    let timer = null;
+    let generation = 0;
+
+    function schedule() {
+      if (timer != null) {
+        clearTimer(timer);
+        timer = null;
+      }
+      const generationAtSchedule = ++generation;
+      timer = setTimer(function () {
+        timer = null;
+        if (generationAtSchedule !== generation) return;
+        let href = '';
+        try {
+          href = typeof opts.currentHref === 'function' ? opts.currentHref() : '';
+        } catch (err) {
+          return;
+        }
+        const pageKey = pageViewKey(href);
+        if (!pageKey || pageKey === handledKey) return;
+        handledKey = pageKey;
+        if (typeof opts.onChange !== 'function') return;
+        try { opts.onChange(href, pageKey); }
+        catch (err) { /* a later address change can still run */ }
+      }, debounceMs);
+    }
+
+    return { applied: applied, schedule: schedule };
+  }
+
+  function startSpaRecheck(win, hooks) {
+    const h = hooks || {};
+    if (!spaRecheckAllowed(h.mode, h.script)) return { enabled: false, session: null };
+    if (!win || !win.history) return { enabled: false, session: null };
+    const initialHref = h.initialHref || (win.location && win.location.href) || '';
+    const session = createRouteSession({
+      applied: h.applied,
+      debounceMs: h.debounceMs,
+      setTimer: h.setTimer,
+      clearTimer: h.clearTimer,
+      initialKey: pageViewKey(initialHref),
+      currentHref: function () { return win.location && win.location.href; },
+      onChange: h.onNavigate,
+    });
+    const bound = bindSpaRouteChanges(win, function () { session.schedule(); });
+    if (!bound) return { enabled: false, session: session };
+    return { enabled: true, session: session };
+  }
+
+  // Enrols tests that are not already applied on this document. A second call
+  // with the same experiment sends no view, applies nothing, and does not
+  // wire the click goal again. Page JavaScript stays on the document mark
+  // inside the applier, so it cannot run a second time either.
+  function applyMatchingExperiments(input) {
+    const opts = input || {};
+    const experiments = opts.experiments || [];
+    const applied = opts.applied || Object.create(null);
+    const enrolledThisView = opts.enrolledThisView || Object.create(null);
+    const doc = opts.document;
+    const storage = opts.storage;
+    const visitorId = opts.visitorId;
+    const qa = !!opts.qaOn;
+    const href = opts.href || '';
+    const waiting = [];
+    const views = [];
+
+    function storedAssignment(experimentId) {
+      if (!storage || typeof storage.getItem !== 'function') {
+        try {
+          return typeof localStorage !== 'undefined'
+            ? localStorage.getItem(ASSIGNMENT_PREFIX + experimentId)
+            : null;
+        } catch (err) {
+          return null;
+        }
+      }
+      try { return storage.getItem(ASSIGNMENT_PREFIX + experimentId); }
+      catch (err) { return null; }
+    }
+
+    function enrolOne(experiment) {
+      if (!experiment || experiment.id == null || experiment.id === '') return { reason: 'missing' };
+      if (applied[experiment.id]) return { reason: 'already' };
+      if (!mayBucketExperiment(experiment, visitorId, qa)) return { reason: 'demo' };
+      if (!experiment.variants || experiment.variants.length === 0) return { reason: 'no-variants' };
+      const selector = elementSelectorOf(experiment);
+      const query = elementQuery(doc, selector);
+      if (query.state === 'invalid') return { reason: 'invalid' };
+      if (query.state === 'missing') return { reason: 'waiting' };
+      const stored = storedAssignment(experiment.id);
+      const variant = pickVariant(experiment, visitorId, storage);
+      if (!variant) return { reason: 'no-variant' };
+      applied[experiment.id] = 1;
+      if (!stored) enrolledThisView[experiment.id] = 1;
+      let outcome = null;
+      if (typeof opts.apply === 'function') outcome = opts.apply(variant, experiment);
+      else outcome = applyVariantChanges(variant);
+      const changeApplied = outcome && (outcome.ok === true || outcome.ok === false) ? outcome.ok : undefined;
+      const goalList = goalsFor(experiment, variant);
+      if (typeof opts.send === 'function') opts.send(experiment.id, variant.id, visitorId, 'view', null, changeApplied);
+      else sendEvent(experiment.id, variant.id, visitorId, 'view', null, changeApplied);
+      views.push(experiment.id);
+      if (typeof opts.wire === 'function') opts.wire(experiment.id, variant.id, visitorId, goalList);
+      else wireConversionTracking(experiment.id, variant.id, visitorId, goalList);
+      if (typeof opts.report === 'function') opts.report(experiment, href);
+      else reportExperienceImpressions([experiment], href);
+      return { reason: 'applied', variant: variant };
+    }
+
+    experiments.forEach(function (experiment) {
+      const result = enrolOne(experiment);
+      if (result && result.reason === 'waiting') waiting.push(experiment);
+    });
+    return { waiting: waiting, views: views, applied: applied, enrolledThisView: enrolledThisView };
+  }
+
+  // One pass for a new address: apply what is new, then report impressions
+  // for every test that matches this address. The second report is how an
+  // already-applied test tells GA4 about the new address. Dedupe keeps the
+  // test that was just applied from being sent twice.
+  function deliverNavigation(input) {
+    const opts = input || {};
+    const enrolledThisView = opts.enrolledThisView || Object.create(null);
+    const appliedResult = applyMatchingExperiments({
+      experiments: opts.experiments,
+      href: opts.href,
+      document: opts.document,
+      storage: opts.storage,
+      visitorId: opts.visitorId,
+      qaOn: opts.qaOn,
+      applied: opts.applied,
+      enrolledThisView: enrolledThisView,
+      apply: opts.apply,
+      send: opts.send,
+      wire: opts.wire,
+      report: opts.reportOne,
+    });
+    if (typeof opts.reportAll === 'function') opts.reportAll(opts.experiments || [], opts.href);
+    return {
+      applied: appliedResult,
+      enrolledThisView: enrolledThisView,
+      waiting: appliedResult.waiting,
+      views: appliedResult.views,
+    };
   }
 
   function bindSpaRouteChanges(win, onChange) {

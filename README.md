@@ -39,7 +39,7 @@ The landing page form does not collect anything until `ACCESS_REQUESTS_ENABLED` 
    <script src="https://your-app.up.railway.app/snippet/ab.js"
            data-api="https://your-app.up.railway.app"></script>
    ```
-5. On page load, the snippet asks the API which experiments apply to the current URL, picks a variant per visitor (sticky via `localStorage`), applies the DOM changes, and logs a `view` event.
+5. On page load, the snippet asks the API which experiments apply to the current URL, picks a variant per visitor (sticky via `localStorage`), applies the DOM changes, and logs a `view` event. On a single-page app, a later address change is checked again: a test that newly matches is applied, and a test already applied on that page stays applied until the next full load. Add `data-spa="off"` to the snippet tag to keep that check on full loads only.
 6. Add `goals` to a variant (see below) to track clicks as conversions.
 7. **View results** on the dashboard by experiment ID.
 
