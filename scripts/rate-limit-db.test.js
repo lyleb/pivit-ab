@@ -336,6 +336,14 @@ async function main() {
       return rows.rows[0].n;
     }
 
+    // The cap is a fixed one-minute window. Wait out the tail so these posts
+    // stay in the same window. Crossing a minute boundary would let the third
+    // event through and fail the assertion below.
+    const windowTail = 60 * 1000 - (Date.now() % (60 * 1000));
+    if (windowTail < 5000) {
+      await new Promise((resolve) => setTimeout(resolve, windowTail + 50));
+    }
+
     const seen = await postEvent('v_normal', '198.51.100.40');
     assert.strictEqual(seen.status, 204);
     assert.strictEqual(seen.retry, undefined);

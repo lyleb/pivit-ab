@@ -31,6 +31,7 @@
     <li><a href="#team">The Team page and Viewers</a></li>
     <li><a href="#sign-in">How sign-in works</a></li>
     <li><a href="#audit">The audit log</a></li>
+    <li><a href="#ga4">Send to GA4</a></li>
   </ol>
 
   <h2 id="who">Who's who</h2>
@@ -125,6 +126,11 @@
     <li>After a delete, those rows name them as "Deleted user" and a short code, not their email or username.</li>
   </ol>
   <p><strong>Sign out everywhere</strong>, at the bottom of the sidebar, ends your other sessions.</p>
+
+  <h2 id="ga4">Send to GA4</h2>
+  <p>On Home, each site has <strong>Send to GA4</strong> and a box for that site's GA4 measurement ID. The ID starts with G-. This is included on paid plans. pivitlab has no priced plans yet. Paid plan is the switch that lets an agency use Send to GA4. A Platform admin sets it on Home, on the Send to GA4 card. That card also says how many sites have Send to GA4 switched on.</p>
+  <p>When Send to GA4 is switched on, the snippet sends that site's GA4 an event called <code>experience_impression</code>. The test name and id, and the variant name and id, are in the event. They are also joined in a parameter called <code>exp_variant_string</code>, which is the same shape VWO and Optimizely use. In GA4, register exp_variant_string as a custom dimension, then use it in a report or an exploration to compare variants.</p>
+  <p>pivitlab uses the gtag or dataLayer already on the page. It does not load Google Analytics, and it does not set Google cookies. If the page has neither, nothing is sent. If Google Consent Mode is in use, the event is sent only when analytics storage is allowed. A preview, or a visit with ?pivit_qa=1, is not sent. Each test is sent once for a page view. A single-page app sends it again when the address changes, and not twice for the same address.</p>
 </div>
 </body>
 </html>

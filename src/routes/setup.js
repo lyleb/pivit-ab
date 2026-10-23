@@ -5,6 +5,7 @@ const { publicServerError } = require('../public-error');
 const { markDomainConflict } = require('../auth-flow');
 const { newSiteKey } = require('../db/tenancy');
 const { recordAudit } = require('../audit');
+const { accountPaidPlan, parseGa4Update } = require('../ga4');
 const { installCheckPayload } = require('../site-verify');
 const { checklistFromFacts } = require('../checklist');
 const {
@@ -21,9 +22,9 @@ const setupRouter = express.Router();
 const sitesRouter = express.Router();
 const sql = (text, params) => db.query(text, params);
 
-const SITE_COLUMNS = `id, name, domains, public_key, verified_at, conflict, install_note, install_note_host, qa_seen_at`;
+const SITE_COLUMNS = `id, name, domains, public_key, verified_at, conflict, install_note, install_note_host, qa_seen_at, ga4_measurement_id, ga4_enabled`;
 
-function sitePayload(row) {
+function sitePayload(row, paidPlan) {
   if (!row) return null;
   return {
     id: row.id,
@@ -34,6 +35,9 @@ function sitePayload(row) {
     verified_at: row.verified_at,
     conflict: row.conflict === true,
     install_check: row.verified_at ? null : installCheckPayload(row.install_note, row.install_note_host),
+    ga4_measurement_id: row.ga4_measurement_id || '',
+    ga4_enabled: row.ga4_enabled === true,
+    ga4_available: paidPlan === true,
   };
 }
 
@@ -83,6 +87,7 @@ async function checklistFacts(accountId, siteId) {
 
 async function setupPayload(accountId) {
   const sites = await accountSites(accountId);
+  const paid = await accountPaidPlan(db, accountId);
   const activeId = await rememberedSiteId(accountId);
   const site = chosenSite(sites, activeId);
   const facts = await checklistFacts(accountId, site ? site.id : null);
@@ -98,8 +103,8 @@ async function setupPayload(accountId) {
       started: facts.started === true,
       dismissed: facts.dismissed === true,
     }),
-    sites: sites.map(sitePayload),
-    site: sitePayload(site),
+    sites: sites.map((row) => sitePayload(row, paid)),
+    site: sitePayload(site, paid),
   };
 }
 
@@ -161,7 +166,8 @@ async function loadOwnedSite(accountId, siteId) {
 sitesRouter.get('/', requireAuth(['owner']), async (req, res) => {
   try {
     const sites = await accountSites(req.account.id);
-    res.json({ sites: sites.map(sitePayload) });
+    const paid = await accountPaidPlan(db, req.account.id);
+    res.json({ sites: sites.map((row) => sitePayload(row, paid)) });
   } catch (err) {
     res.status(500).json(publicServerError(err));
   }
@@ -199,7 +205,8 @@ sitesRouter.post('/', requireAuth(['owner']), async (req, res) => {
       detail: { host },
       ip: req.ip,
     });
-    res.status(201).json({ site: sitePayload(inserted.rows[0]), domain_warning: warning });
+    const paid = await accountPaidPlan(db, req.account.id);
+    res.status(201).json({ site: sitePayload(inserted.rows[0], paid), domain_warning: warning });
   } catch (err) {
     res.status(500).json(publicServerError(err));
   }
@@ -248,7 +255,48 @@ sitesRouter.patch('/:id', requireAuth(['owner']), async (req, res) => {
       detail: { host },
       ip: req.ip,
     });
-    res.json({ site: sitePayload(updated.rows[0]), domain_warning: warning });
+    const paid = await accountPaidPlan(db, req.account.id);
+    res.json({ site: sitePayload(updated.rows[0], paid), domain_warning: warning });
+  } catch (err) {
+    res.status(500).json(publicServerError(err));
+  }
+});
+
+sitesRouter.patch('/:id/ga4', requireAuth(['owner']), async (req, res) => {
+  try {
+    const existing = await loadOwnedSite(req.account.id, req.params.id);
+    if (!existing) return res.status(404).json({ error: 'no site found with that id' });
+    const paid = await accountPaidPlan(db, req.account.id);
+    const parsed = parseGa4Update(req.body, existing, paid);
+    if (!parsed.ok) return res.status(parsed.status).json({ error: parsed.error });
+    const updated = await db.query(
+      `UPDATE sites
+       SET ga4_measurement_id = $2,
+           ga4_enabled = $3
+       WHERE id = $1 AND account_id = $4
+       RETURNING ${SITE_COLUMNS}`,
+      [existing.id, parsed.measurement_id, parsed.enabled, req.account.id]
+    );
+    const beforeId = existing.ga4_measurement_id || '';
+    const afterId = parsed.measurement_id || '';
+    const beforeOn = existing.ga4_enabled === true;
+    if (beforeOn !== parsed.enabled || beforeId !== afterId) {
+      await recordAudit(db, {
+        accountId: req.account.id,
+        userId: req.account.userId,
+        actorLabel: 'owner',
+        action: 'ga4_settings',
+        targetType: 'site',
+        targetId: existing.id,
+        detail: {
+          enabled: parsed.enabled,
+          measurement_id: afterId,
+          host: (existing.domains || [])[0] || existing.name,
+        },
+        ip: req.ip,
+      });
+    }
+    res.json({ site: sitePayload(updated.rows[0], paid) });
   } catch (err) {
     res.status(500).json(publicServerError(err));
   }

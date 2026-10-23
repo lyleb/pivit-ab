@@ -441,6 +441,8 @@
     'viewer.updated': 'Edited a Viewer',
     'viewer.password_reset': 'Reset a Viewer password',
     'viewer.deleted': 'Deleted a Viewer',
+    ga4_settings: 'Updated Send to GA4',
+    paid_plan: 'Changed the paid plan',
   };
 
   function auditActionLabel(action) {
@@ -470,6 +472,13 @@
       const role = membershipWord(detail.role);
       if (who && (role === 'Owner' || role === 'Member')) return `${who}, ${role}`;
       return who;
+    }
+    if (entry && entry.action === 'paid_plan') {
+      return detail.paid_plan === true ? 'Paid plan on' : 'Paid plan off';
+    }
+    if (entry && entry.action === 'ga4_settings') {
+      const state = detail.enabled === true ? 'On' : 'Off';
+      return detail.measurement_id ? `${state}. ${detail.measurement_id}` : state;
     }
     if (entry && String(entry.action || '').indexOf('viewer.') === 0) {
       const name = detail.name ? String(detail.name) : '';
@@ -1109,6 +1118,22 @@
     return row && row.last_sent_at ? 'Emailed' : 'Link only';
   }
 
+  const GA4_HELP = 'When this is switched on, pivitlab sends this site\'s GA4 an event called experience_impression each time a visitor is shown a variant, and again when a single-page app changes the address. The same page view is sent once. The event records the test name and id, and the variant name and id. GA4 also gets them together in exp_variant_string, which is the same shape VWO and Optimizely use. Register exp_variant_string as a custom dimension, then use it in a report or an exploration to compare variants. pivitlab uses the gtag or dataLayer already on the page. It does not load Google Analytics, and it does not set Google cookies. If the page has neither, nothing is sent. If Google Consent Mode is in use, the event is sent only when analytics storage is allowed. Preview links and visits with ?pivit_qa=1 are not sent.';
+  const GA4_UNPAID_NOTE = 'Send to GA4 is included on paid plans. A Platform admin has to mark this agency as paid in pivitlab before it can be switched on.';
+  const GA4_ADMIN_HELP = 'pivitlab has no priced plans yet. Paid plan is the switch that lets an agency use Send to GA4. The line above is how many sites have it switched on.';
+
+  function ga4UptakeText(count) {
+    const n = Math.max(0, Math.round(Number(count) || 0));
+    if (n === 1) return '1 site has Send to GA4 switched on.';
+    return `${n} sites have Send to GA4 switched on.`;
+  }
+
+  function ga4AgencySitesText(count) {
+    const n = Math.max(0, Math.round(Number(count) || 0));
+    if (n === 1) return '1 site switched on';
+    return `${n} sites switched on`;
+  }
+
   function demoPlanHtml() {
     return `<div class="demo-plan" data-demo-plan="1">
       <h2>Demo plan</h2>
@@ -1207,5 +1232,10 @@
     teamRoute,
     teamFreshMessage,
     teamSentLabel,
+    GA4_HELP,
+    GA4_UNPAID_NOTE,
+    GA4_ADMIN_HELP,
+    ga4UptakeText,
+    ga4AgencySitesText,
   };
 });

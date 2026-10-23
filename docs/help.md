@@ -99,3 +99,11 @@ The password page at the unlisted address is only a fallback for the platform ad
 6. After a delete, those rows name them as "Deleted user" and a short code, not their email or username.
 
 **Sign out everywhere**, at the bottom of the sidebar, ends your other sessions.
+
+## Send to GA4
+
+On Home, each site has **Send to GA4** and a box for that site's GA4 measurement ID. The ID starts with G-. This is included on paid plans. pivitlab has no priced plans yet. Paid plan is the switch that lets an agency use Send to GA4. A Platform admin sets it on Home, on the Send to GA4 card. That card also says how many sites have Send to GA4 switched on.
+
+When Send to GA4 is switched on, the snippet sends that site's GA4 an event called `experience_impression`. The test name and id, and the variant name and id, are in the event. They are also joined in a parameter called `exp_variant_string`, which is the same shape VWO and Optimizely use. In GA4, register exp_variant_string as a custom dimension, then use it in a report or an exploration to compare variants.
+
+pivitlab uses the gtag or dataLayer already on the page. It does not load Google Analytics, and it does not set Google cookies. If the page has neither, nothing is sent. If Google Consent Mode is in use, the event is sent only when analytics storage is allowed. A preview, or a visit with ?pivit_qa=1, is not sent. Each test is sent once for a page view. A single-page app sends it again when the address changes, and not twice for the same address.

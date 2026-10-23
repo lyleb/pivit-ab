@@ -23,6 +23,7 @@ const { applyAuditBackfill } = require('./audit-backfill');
 const { applyActiveSite } = require('./active-site');
 const { applyPeopleState } = require('./people-state');
 const { applyAccountInvites } = require('./account-invites');
+const { applyGa4 } = require('./ga4');
 
 const LOCK_KEY = 814021;
 
@@ -70,6 +71,9 @@ const VERSIONS = [
   // Invites that add someone to an existing agency. The token is hashed.
   // Stays out of schema.sql.
   { version: '017', name: 'account-invites', run: applyAccountInvites },
+  // Paid-plan flag and per-site GA4 measurement ID. Both default off.
+  // Stays out of schema.sql.
+  { version: '018', name: 'ga4', run: applyGa4 },
 ];
 
 async function ensureMigrationsTable(queryable) {

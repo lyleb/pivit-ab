@@ -134,6 +134,16 @@
   }
   .site-row:last-child { border-bottom: none; }
   .site-row .banner { margin: 8px 0 0; }
+  .site-ga4 { margin-top: 12px; max-width: 40rem; }
+  .site-ga4 .check { margin-top: 0; }
+  .site-ga4 .check:has(input:disabled) { color: var(--text-muted); }
+  .site-ga4 .check input:disabled { cursor: not-allowed; }
+  .ga4-agency {
+    display: flex; justify-content: space-between; gap: 12px; align-items: center;
+    padding: 8px 0; border-bottom: 1px solid var(--border);
+  }
+  .ga4-agency:last-child { border-bottom: none; }
+  .ga4-agency .check { margin: 0; }
   .plan-sentence { font-size: 1.08em; font-weight: 750; margin: 8px 0 6px; letter-spacing: -0.01em; }
   details.plan-more {
     border: 0; margin: 4px 0 0; overflow: visible; background: transparent; border-radius: 0;
@@ -660,6 +670,13 @@
         </div>
         <p id="access-requests-fresh" class="ok-msg" hidden></p>
         <p id="access-requests-error" class="error-msg"></p>
+      </div>
+      <div class="card" id="ga4-admin-card" hidden>
+        <h2>Send to GA4</h2>
+        <p class="hint" id="ga4-uptake" style="margin-top:0;"></p>
+        <p class="hint" id="ga4-admin-help"></p>
+        <div id="ga4-agencies"></div>
+        <p id="ga4-admin-error" class="error-msg"></p>
       </div>
     </div>
 
@@ -1268,6 +1285,8 @@ function applySessionChrome() {
   const bar = document.getElementById('view-as-bar');
   const invite = document.getElementById('invite-card');
   if (invite) invite.hidden = !(me.superadmin && !viewing);
+  const ga4Admin = document.getElementById('ga4-admin-card');
+  if (ga4Admin) ga4Admin.hidden = !(me.superadmin && !viewing);
   const select = document.getElementById('view-as-select');
   const go = document.getElementById('view-as-go');
   const stop = document.getElementById('view-as-stop');
@@ -1287,6 +1306,7 @@ function applySessionChrome() {
     loadViewAsAccounts();
     loadInvites();
     loadAccessRequests();
+    loadGa4Admin();
   } else if (bar) {
     bar.hidden = true;
   }
@@ -1353,6 +1373,45 @@ async function loadAccessRequests() {
       <td>${action}</td>
     </tr>`;
   }).join('');
+}
+
+function paintGa4Admin(data) {
+  const uptake = document.getElementById('ga4-uptake');
+  const help = document.getElementById('ga4-admin-help');
+  const list = document.getElementById('ga4-agencies');
+  if (help) help.textContent = UI.GA4_ADMIN_HELP;
+  if (uptake) uptake.textContent = UI.ga4UptakeText(data && data.sites_on);
+  if (!list) return;
+  const agencies = (data && data.agencies) || [];
+  if (!agencies.length) {
+    list.innerHTML = '<p class="hint">No agencies yet.</p>';
+    return;
+  }
+  list.innerHTML = agencies.map((agency) => `
+    <div class="ga4-agency">
+      <label class="check">
+        <input type="checkbox" data-paid-plan="${UI.escapeHtml(agency.id)}"${agency.paid_plan ? ' checked' : ''}>
+        Paid plan
+      </label>
+      <div>
+        <strong>${UI.escapeHtml(agency.name || '')}</strong>
+        <span class="hint">${UI.escapeHtml(UI.ga4AgencySitesText(agency.sites_on))}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function loadGa4Admin() {
+  const card = document.getElementById('ga4-admin-card');
+  if (!card || card.hidden) return;
+  const errorEl = document.getElementById('ga4-admin-error');
+  if (errorEl) errorEl.textContent = '';
+  const result = await callApi('/api/admin/ga4');
+  if (!result.ok) {
+    if (errorEl) errorEl.textContent = apiErrorText(result);
+    return;
+  }
+  paintGa4Admin(result.data);
 }
 
 function showTeamLink(result) {
@@ -1857,6 +1916,19 @@ function paintSitesCard(sites) {
     const warning = site.conflict
       ? `<p class="banner" role="status">${UI.escapeHtml(UI.DOMAIN_IN_USE_WARNING)}</p>`
       : '';
+    const paid = site.ga4_available === true;
+    const ga4On = site.ga4_enabled === true;
+    const toggleDisabled = readOnly || (!paid && !ga4On);
+    const ga4 = `
+      <form class="site-ga4" data-ga4-form="${UI.escapeHtml(site.id)}">
+        <label class="check"><input type="checkbox" data-ga4-enabled${ga4On ? ' checked' : ''}${toggleDisabled ? ' disabled' : ''}> Send to GA4</label>
+        <label for="ga4-id-${UI.escapeHtml(site.id)}">GA4 measurement ID</label>
+        <input id="ga4-id-${UI.escapeHtml(site.id)}" data-ga4-id value="${UI.escapeHtml(site.ga4_measurement_id || '')}" placeholder="G-XXXXXXXXXX" spellcheck="false" autocapitalize="off" autocomplete="off"${readOnly ? ' disabled' : ''}>
+        ${readOnly ? '' : '<button type="submit">Save GA4</button>'}
+        <p class="hint">${UI.escapeHtml(UI.GA4_HELP)}</p>
+        ${paid ? '' : `<p class="hint">${UI.escapeHtml(UI.GA4_UNPAID_NOTE)}</p>`}
+        <p class="error-msg" data-ga4-error></p>
+      </form>`;
     const edit = readOnly ? '' : `
       <button type="button" class="btn-ghost" data-site-edit-toggle="${UI.escapeHtml(site.id)}">Edit</button>`;
     const form = readOnly ? '' : `
@@ -1874,6 +1946,7 @@ function paintSitesCard(sites) {
         <span class="hint">${seen}</span>
         ${warning}
         ${form}
+        ${ga4}
       </div>
       ${edit}
     </div>`;
@@ -6123,6 +6196,30 @@ document.getElementById('sites-list').addEventListener('click', (event) => {
 });
 
 document.getElementById('sites-list').addEventListener('submit', async (event) => {
+  const ga4Form = event.target.closest('[data-ga4-form]');
+  if (ga4Form) {
+    event.preventDefault();
+    const siteId = ga4Form.getAttribute('data-ga4-form');
+    const errorEl = ga4Form.querySelector('[data-ga4-error]');
+    const idInput = ga4Form.querySelector('[data-ga4-id]');
+    const toggle = ga4Form.querySelector('[data-ga4-enabled]');
+    if (errorEl) errorEl.textContent = '';
+    const result = await callApi('/api/sites/' + encodeURIComponent(siteId) + '/ga4', {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        measurement_id: idInput ? idInput.value : '',
+        enabled: !!(toggle && toggle.checked),
+      }),
+    });
+    if (!result.ok) {
+      if (errorEl) errorEl.textContent = apiErrorText(result);
+      return;
+    }
+    await refreshFirstRun();
+    await loadGa4Admin();
+    return;
+  }
   const form = event.target.closest('[data-site-edit]');
   if (!form) return;
   event.preventDefault();
@@ -6177,6 +6274,25 @@ document.getElementById('team-body').addEventListener('click', async (event) => 
   }
   if (resend) showTeamLink(result.data);
   await loadTeamInvites();
+});
+
+document.getElementById('ga4-agencies').addEventListener('change', async (event) => {
+  const box = event.target.closest('[data-paid-plan]');
+  if (!box) return;
+  const errorEl = document.getElementById('ga4-admin-error');
+  if (errorEl) errorEl.textContent = '';
+  const result = await callApi('/api/admin/accounts/' + encodeURIComponent(box.getAttribute('data-paid-plan')) + '/paid-plan', {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ paid_plan: box.checked }),
+  });
+  if (!result.ok) {
+    box.checked = !box.checked;
+    if (errorEl) errorEl.textContent = apiErrorText(result);
+    return;
+  }
+  paintGa4Admin(result.data);
+  await refreshFirstRun();
 });
 
 document.getElementById('invite-create').addEventListener('click', async () => {
