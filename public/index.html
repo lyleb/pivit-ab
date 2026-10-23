@@ -138,6 +138,26 @@
   .site-ga4 .check { margin-top: 0; }
   .site-ga4 .check:has(input:disabled) { color: var(--text-muted); }
   .site-ga4 .check input:disabled { cursor: not-allowed; }
+  .site-ga4 details.ga4-more { margin-top: 10px; }
+  .site-ga4 details.ga4-more > summary {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+    line-height: 1.4; min-height: 44px; list-style: none; position: relative;
+    padding-right: 32px;
+  }
+  .site-ga4 details.ga4-more > summary::-webkit-details-marker { display: none; }
+  .site-ga4 details.ga4-more > summary::marker { content: ""; }
+  .site-ga4 details.ga4-more > summary::after {
+    content: ""; position: absolute; right: 16px; top: 18px;
+    width: 8px; height: 8px;
+    border-right: 2px solid var(--text-muted); border-bottom: 2px solid var(--text-muted);
+    transform: rotate(45deg);
+  }
+  .site-ga4 details.ga4-more[open] > summary::after { transform: rotate(-135deg); top: 22px; }
+  .site-ga4 details.ga4-more > summary .hint { font-weight: 500; margin: 0; }
+  .site-ga4 details.ga4-more > summary:focus-visible {
+    outline: 2px solid var(--indigo); outline-offset: -2px;
+  }
+  .site-ga4 details.ga4-more .accordion-body a { color: var(--mint-dark); }
   .ga4-agency {
     display: flex; justify-content: space-between; gap: 12px; align-items: center;
     padding: 8px 0; border-bottom: 1px solid var(--border);
@@ -1925,7 +1945,17 @@ function paintSitesCard(sites) {
         <label for="ga4-id-${UI.escapeHtml(site.id)}">GA4 measurement ID</label>
         <input id="ga4-id-${UI.escapeHtml(site.id)}" data-ga4-id value="${UI.escapeHtml(site.ga4_measurement_id || '')}" placeholder="G-XXXXXXXXXX" spellcheck="false" autocapitalize="off" autocomplete="off"${readOnly ? ' disabled' : ''}>
         ${readOnly ? '' : '<button type="submit">Save GA4</button>'}
-        <p class="hint">${UI.escapeHtml(UI.GA4_HELP)}</p>
+        <details class="ga4-more">
+          <summary>
+            <span>How Send to GA4 works</span>
+            <span class="hint">One event per page view, through the tag already on the site.</span>
+          </summary>
+          <div class="accordion-body">
+            <p class="hint">${UI.escapeHtml(UI.GA4_HELP)}</p>
+            <p><a href="/api/sites/${UI.escapeHtml(site.id)}/ga4/container.json">Download Tag Manager container</a></p>
+            <p class="hint">Import the file with Merge, not Overwrite. <a href="/help.html#ga4-setup">Step-by-step setup</a></p>
+          </div>
+        </details>
         ${paid ? '' : `<p class="hint">${UI.escapeHtml(UI.GA4_UNPAID_NOTE)}</p>`}
         <p class="error-msg" data-ga4-error></p>
       </form>`;

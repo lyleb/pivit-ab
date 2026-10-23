@@ -108,4 +108,37 @@ When Send to GA4 is switched on, the snippet sends that site's GA4 an event call
 
 pivitlab uses the gtag or dataLayer already on the page. It does not load Google Analytics, and it does not set Google cookies. If the page has neither, nothing is sent. If the page uses Google Tag Manager, pivitlab pushes one object onto dataLayer and does not also call gtag, so the visit is not counted twice. A page that uses gtag.js and not Tag Manager still receives the event through gtag. If Google Consent Mode is in use, the event is sent only when analytics storage is allowed. A preview, or a visit with ?pivit_qa=1, is not sent. Each test is sent once for a page view. A single-page app sends it again when the address changes, and not twice for the same address.
 
-In Tag Manager, the object carries `experience_impression` as its event name, plus `exp_variant_string`, `experiment_id`, `experiment_name`, `variant_id` and `variant_name`. Create a Data Layer Variable for each of those five names, and leave the version at Version 2. Create a Custom Event trigger whose event name is experience_impression. Create a GA4 Event tag, name the event experience_impression, and map each event parameter to the matching Data Layer Variable. Fire that tag on the Custom Event trigger. A gtag call would put those fields inside an arguments list, which a Data Layer Variable cannot read, and calling both would count the visit twice.
+The downloadable container file adds a Data Layer Variable for each of those fields, at Version 2, a Custom Event trigger named experience_impression, and a GA4 Event tag named pivitlab - experience_impression. It does not add a Google tag. A gtag call would hide the fields from a Data Layer Variable, and sending both would count the visit twice.
+
+### Set it up
+
+#### GA4 through Tag Manager
+
+1. On Home, open the site. Enter the measurement ID, the one that starts with G-, and choose Save GA4. Switch on Send to GA4 once a Platform admin has marked the agency as paid.
+2. Open How Send to GA4 works, then choose Download Tag Manager container.
+3. In Tag Manager, open Admin, then Import container.
+4. Choose the file, then choose the workspace you want to import into.
+5. Choose Merge. Then choose Rename conflicting tags, triggers and variables. Do not choose Overwrite. Overwrite would replace the whole container.
+6. Open the tag named pivitlab - experience_impression and check the measurement ID is this site's G- ID. If you had not saved an ID, the file uses a variable named pivitlab - GA4 measurement ID. Put the G- ID in that variable.
+7. The file does not add a Google tag. Keep the Google tag the site already has.
+8. Choose Preview. Open the site with Tag Assistant. Do not add ?pivit_qa=1 to the address.
+9. On a page in a running test, experience_impression should appear. exp_variant_string, experiment_id, experiment_name, variant_id and variant_name should show values, not undefined.
+10. Publish the workspace.
+
+#### GA4 directly with gtag.js
+
+If the site loads gtag.js and does not use Tag Manager, you do not add a tag. pivitlab calls gtag with experience_impression and the same fields. Save the measurement ID and switch Send to GA4 on.
+
+#### In GA4, for both paths
+
+1. In GA4, open Admin, then Custom definitions.
+2. Create a custom dimension. The scope is Event. The event parameter name is exp_variant_string. Give it a name you will recognise, such as Experiment variant.
+3. Open DebugView. You should see experience_impression, with exp_variant_string on it.
+4. A new event can take up to 24 hours to show in reports. DebugView is sooner.
+5. To compare variants, open Explore and start a free-form exploration. Add the dimension Experiment variant, then add the metrics you care about, such as users or conversions.
+
+#### If it does not work
+
+- The event is missing. The test may not be running, or the page address does not match the test's URL rule. Paid plan or Send to GA4 may be off. Analytics consent may not be granted. A visit with ?pivit_qa=1 is not sent.
+- The values are undefined. The Data Layer Variable names must match exactly: exp_variant_string, experiment_id, experiment_name, variant_id, variant_name.
+- The visit is counted twice. Do not add both a gtag event and a Tag Manager tag for experience_impression. pivitlab sends only one of them.

@@ -6,6 +6,7 @@ const { markDomainConflict } = require('../auth-flow');
 const { newSiteKey } = require('../db/tenancy');
 const { recordAudit } = require('../audit');
 const { accountPaidPlan, parseGa4Update } = require('../ga4');
+const { buildGtmContainer } = require('../ga4-container');
 const { installCheckPayload } = require('../site-verify');
 const { checklistFromFacts } = require('../checklist');
 const {
@@ -257,6 +258,20 @@ sitesRouter.patch('/:id', requireAuth(['owner']), async (req, res) => {
     });
     const paid = await accountPaidPlan(db, req.account.id);
     res.json({ site: sitePayload(updated.rows[0], paid), domain_warning: warning });
+  } catch (err) {
+    res.status(500).json(publicServerError(err));
+  }
+});
+
+sitesRouter.get('/:id/ga4/container.json', requireAuth(['owner']), async (req, res) => {
+  try {
+    const existing = await loadOwnedSite(req.account.id, req.params.id);
+    if (!existing) return res.status(404).json({ error: 'no site found with that id' });
+    const body = buildGtmContainer(existing.ga4_measurement_id);
+    res.set('Cache-Control', 'no-store');
+    res.set('Content-Type', 'application/json; charset=utf-8');
+    res.set('Content-Disposition', 'attachment; filename="pivitlab-ga4.json"');
+    res.send(`${JSON.stringify(body, null, 2)}\n`);
   } catch (err) {
     res.status(500).json(publicServerError(err));
   }

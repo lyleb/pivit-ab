@@ -26,7 +26,7 @@ function request(server, method, urlPath, body) {
         if (text && res.headers['content-type'] && res.headers['content-type'].includes('json')) {
           json = JSON.parse(text);
         }
-        resolve({ status: res.statusCode, text, json });
+        resolve({ status: res.statusCode, text, json, headers: res.headers });
       });
     });
     req.on('error', reject);
@@ -148,6 +148,17 @@ async function main() {
     const siteId = added.json.site.id;
     const siteKey = added.json.site.public_key;
 
+    const placeholderFile = await request(ownerServer, 'GET', `/api/sites/${siteId}/ga4/container.json`);
+    assert.strictEqual(placeholderFile.status, 200, placeholderFile.text);
+    assert.ok(String(placeholderFile.headers['content-disposition']).includes('pivitlab-ga4.json'));
+    assert.strictEqual(placeholderFile.json.exportFormatVersion, 2);
+    assert.ok(placeholderFile.json.containerVersion.variable.some((item) => item.name === 'pivitlab - GA4 measurement ID'));
+    assert.ok(!placeholderFile.text.includes('G-TEST1234'));
+    const strangerFile = await request(southServer, 'GET', `/api/sites/${siteId}/ga4/container.json`);
+    assert.strictEqual(strangerFile.status, 404);
+    const signedOutFile = await request(publicServer, 'GET', `/api/sites/${siteId}/ga4/container.json`);
+    assert.strictEqual(signedOutFile.status, 401);
+
     const tooSoon = await request(ownerServer, 'PATCH', `/api/sites/${siteId}/ga4`, {
       measurement_id: 'g-test1234',
       enabled: true,
@@ -165,6 +176,14 @@ async function main() {
     assert.strictEqual(stored.status, 200, stored.text);
     assert.strictEqual(stored.json.site.ga4_measurement_id, 'G-TEST1234');
     assert.strictEqual(stored.json.site.ga4_enabled, false);
+    const savedFile = await request(ownerServer, 'GET', `/api/sites/${siteId}/ga4/container.json`);
+    assert.strictEqual(savedFile.status, 200, savedFile.text);
+    const savedTag = savedFile.json.containerVersion.tag[0];
+    const savedId = savedTag.parameter.find((item) => item.key === 'measurementIdOverride');
+    assert.strictEqual(savedId.value, 'G-TEST1234');
+    assert.ok(!savedFile.json.containerVersion.variable.some((item) => item.type === 'c'));
+    const viewFile = await request(viewServer, 'GET', `/api/sites/${siteId}/ga4/container.json`);
+    assert.strictEqual(viewFile.status, 200, viewFile.text);
 
     const otherSite = await request(southServer, 'PATCH', `/api/sites/${siteId}/ga4`, {
       measurement_id: 'G-OTHER123',
