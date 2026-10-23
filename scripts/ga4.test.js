@@ -116,6 +116,96 @@ assert.strictEqual(gtagWin.dataLayer.length, 1);
 assert.strictEqual(cookieWrites, 0);
 assert.strictEqual(typeof gtagWin.document.createElement, 'function');
 
+// gtag('event', name, params) stores an arguments list. The fields are not
+// keys on that entry, which is why a Tag Manager Data Layer Variable reads
+// undefined when the snippet calls gtag.
+const shimLayer = [];
+function shimGtag() { shimLayer.push(arguments); }
+shimGtag('event', 'experience_impression', {
+  exp_variant_string: 'Home hero(exp-1):Control(var-1)',
+  experiment_id: 'exp-1',
+  variant_id: 'var-1',
+});
+assert.strictEqual(shimLayer[0][0], 'event');
+assert.strictEqual(shimLayer[0][2].exp_variant_string, 'Home hero(exp-1):Control(var-1)');
+assert.strictEqual(shimLayer[0].exp_variant_string, undefined);
+assert.strictEqual(shimLayer[0].experiment_id, undefined);
+assert.strictEqual(shimLayer[0].variant_id, undefined);
+
+function tags(scripts, frames) {
+  return {
+    getElementsByTagName(name) {
+      if (name === 'script') return scripts || [];
+      if (name === 'iframe') return frames || [];
+      return [];
+    },
+  };
+}
+const gtmCalls = [];
+const gtmWin = {
+  google_tag_manager: { 'GTM-NCMH928P': {} },
+  dataLayer: [],
+  gtag() { gtmCalls.push(Array.from(arguments)); this.dataLayer.push(arguments); },
+  document: tags([]),
+};
+assert.strictEqual(snippet.gtmOnPage(gtmWin), true);
+assert.strictEqual(snippet.ga4Transport(gtmWin), 'dataLayer');
+const gtmPlanned = plan({ transport: 'dataLayer' });
+assert.strictEqual(snippet.sendPlannedImpressions(gtmWin, gtmPlanned, {}, {}), 1);
+assert.strictEqual(gtmCalls.length, 0);
+assert.strictEqual(gtmWin.dataLayer.length, 1);
+assert.strictEqual(gtmWin.dataLayer[0].event, 'experience_impression');
+assert.strictEqual(gtmWin.dataLayer[0].exp_variant_string, 'Home hero(exp-1):Control(var-1)');
+assert.strictEqual(gtmWin.dataLayer[0].experiment_id, 'exp-1');
+assert.strictEqual(gtmWin.dataLayer[0].experiment_name, 'Home hero');
+assert.strictEqual(gtmWin.dataLayer[0].variant_id, 'var-1');
+assert.strictEqual(gtmWin.dataLayer[0].variant_name, 'Control');
+assert.strictEqual(gtmWin.dataLayer[0].send_to, 'G-TEST1234');
+
+const gtmScript = {
+  dataLayer: [],
+  gtag() { throw new Error('gtag and dataLayer both sent'); },
+  document: tags([{ src: 'https://www.googletagmanager.com/gtm.js?id=GTM-NCMH928P' }]),
+};
+assert.strictEqual(snippet.ga4Transport(gtmScript), 'dataLayer');
+const gtmInline = {
+  dataLayer: [],
+  document: tags([{ text: "j.src='https://www.googletagmanager.com/gtm.js?id='+i;})(window,document,'script','dataLayer','GTM-NCMH928P');" }]),
+};
+assert.strictEqual(snippet.gtmOnPage(gtmInline), true);
+const gtmFrame = {
+  dataLayer: [],
+  document: tags([], [{ src: 'https://www.googletagmanager.com/ns.html?id=GTM-NCMH928P' }]),
+};
+assert.strictEqual(snippet.gtmOnPage(gtmFrame), true);
+const gtagJsOnly = {
+  dataLayer: [],
+  google_tag_manager: { 'G-TEST1234': {} },
+  gtag() {},
+  document: tags([{ src: 'https://www.googletagmanager.com/gtag/js?id=G-TEST1234' }]),
+};
+assert.strictEqual(snippet.gtmOnPage(gtagJsOnly), false);
+assert.strictEqual(snippet.ga4Transport(gtagJsOnly), 'gtag');
+const gtmWithoutLayer = { google_tag_manager: { 'GTM-NCMH928P': {} }, gtag() {} };
+assert.strictEqual(snippet.ga4Transport(gtmWithoutLayer), null);
+assert.strictEqual(Object.prototype.hasOwnProperty.call(gtmWithoutLayer, 'dataLayer'), false);
+
+const gtmDenied = {
+  google_tag_manager: { 'GTM-NCMH928P': {} },
+  dataLayer: [['consent', 'default', { analytics_storage: 'denied' }]],
+  gtag() { throw new Error('denied consent still sent'); },
+  document: tags([]),
+};
+assert.strictEqual(snippet.ga4Transport(gtmDenied), 'dataLayer');
+assert.strictEqual(snippet.analyticsConsentAllows(gtmDenied), false);
+const deniedPlan = plan({
+  transport: snippet.ga4Transport(gtmDenied),
+  consentAllows: snippet.analyticsConsentAllows(gtmDenied),
+});
+assert.strictEqual(deniedPlan.events.length, 0);
+assert.strictEqual(snippet.sendPlannedImpressions(gtmDenied, deniedPlan, {}, {}), 0);
+assert.strictEqual(gtmDenied.dataLayer.length, 1);
+
 const layerWin = { dataLayer: [] };
 const layered = plan({ transport: 'dataLayer' });
 assert.strictEqual(snippet.deliverExperienceImpression(layerWin, layered.events[0]), true);
@@ -279,6 +369,21 @@ assert.ok(ui.GA4_HELP.includes('experience_impression'));
 assert.ok(ui.GA4_HELP.includes('exp_variant_string'));
 assert.ok(ui.GA4_HELP.includes('does not load Google Analytics'));
 assert.ok(ui.GA4_HELP.includes('does not set Google cookies'));
+assert.ok(ui.GA4_HELP.includes('Data Layer Variable'));
+assert.ok(ui.GA4_HELP.includes('Custom Event'));
+assert.ok(ui.GA4_HELP.includes('GA4 Event'));
+assert.ok(ui.GA4_HELP.includes('does not also call gtag'));
+const helpPage = read('public/help.html');
+const helpDoc = read('docs/help.md');
+for (const text of [helpPage, helpDoc]) {
+  assert.ok(text.includes('Data Layer Variable'));
+  assert.ok(text.includes('Custom Event'));
+  assert.ok(text.includes('GA4 Event'));
+  assert.ok(text.includes('does not also call gtag'));
+  assert.ok(text.includes('Version 2'));
+  assert.ok(text.includes('experiment_name'));
+  assert.ok(text.includes('variant_name'));
+}
 assert.ok(ui.GA4_ADMIN_HELP.includes('Paid plan is the switch'));
 assert.ok(ui.GA4_UNPAID_NOTE.includes('paid plans'));
 
@@ -295,6 +400,9 @@ assert.ok(!deliverSrc.includes('cookie'));
 assert.ok(!deliverSrc.includes('createElement'));
 assert.ok(snippetSrc.includes('experience_impression'));
 assert.ok(snippetSrc.includes('exp_variant_string'));
+assert.ok(snippetSrc.includes("indexOf('GTM-')"));
+assert.ok(snippetSrc.includes('gtm.js'));
+assert.strictEqual(typeof snippet.gtmOnPage, 'function');
 
 const migration = read('src/db/ga4.js');
 const migrateSrc = read('src/db/migrate.js');
@@ -317,6 +425,13 @@ assert.ok(dashboard.includes('await loadGa4Admin();'));
 assert.ok(dashboard.includes('>Send to GA4</h2>'));
 assert.ok(dashboard.includes('Send to GA4</label>'));
 assert.ok(dashboard.includes('UI.GA4_HELP'));
+assert.ok(dashboard.includes('<details class="ga4-more">'));
+assert.ok(!dashboard.includes('<details class="ga4-more" open>'));
+assert.ok(dashboard.includes('How Send to GA4 works'));
+assert.ok(dashboard.includes('One event per page view, through the tag already on the site.'));
+assert.ok(dashboard.includes('/ga4/container.json'));
+assert.ok(dashboard.includes('help.html#ga4-setup'));
+assert.ok(dashboard.includes('Merge, not Overwrite'));
 assert.ok(dashboard.includes('Paid plan'));
 assert.ok(dashboard.includes('class="brand-logo"'));
 assert.ok(dashboard.includes('aria-label="pivitlab"'));

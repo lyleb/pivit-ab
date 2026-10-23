@@ -97,7 +97,10 @@
  * file does not load Google Analytics, does not call gtag.js, and does not
  * set Google cookies. If gtag and dataLayer are both missing, nothing is
  * sent. If Google Consent Mode has already set analytics storage to denied,
- * nothing is sent until that state is granted.
+ * nothing is sent until that state is granted. Google Tag Manager gets one
+ * plain dataLayer object, because gtag('event', ...) hides the fields from
+ * Data Layer Variables. A gtag.js page with no Tag Manager still uses gtag.
+ * The two are never both used for the same impression.
  *
  * Selectors and applying changes live on PivitRuntime (also exported for tests).
  * The visual editor uses the same helpers, so a selector saved from the editor
@@ -133,6 +136,7 @@
   api.pageViewKey = pageViewKey;
   api.analyticsStorageState = analyticsStorageState;
   api.analyticsConsentAllows = analyticsConsentAllows;
+  api.gtmOnPage = gtmOnPage;
   api.ga4Transport = ga4Transport;
   api.planExperienceImpressions = planExperienceImpressions;
   api.deliverExperienceImpression = deliverExperienceImpression;
@@ -1295,10 +1299,73 @@
     return analyticsStorageState(win) !== 'denied';
   }
 
-  // gtag when the page already defined it, otherwise an existing dataLayer.
-  // Never creates either one.
+  function gtmContainerKey(name) {
+    return String(name || '').indexOf('GTM-') === 0;
+  }
+
+  function gtmScriptSrc(src) {
+    const value = String(src || '');
+    return value.indexOf('gtm.js') !== -1 && value.indexOf('id=GTM-') !== -1;
+  }
+
+  function gtmNoscriptSrc(src) {
+    const value = String(src || '');
+    return value.indexOf('ns.html') !== -1 && value.indexOf('id=GTM-') !== -1;
+  }
+
+  function gtmInline(text) {
+    const value = String(text || '');
+    return value.indexOf('gtm.js') !== -1 && value.indexOf('GTM-') !== -1;
+  }
+
+  function nodeSrc(node) {
+    if (!node) return '';
+    if (node.src) return String(node.src);
+    if (typeof node.getAttribute === 'function') {
+      const attr = node.getAttribute('src');
+      if (attr) return String(attr);
+    }
+    return '';
+  }
+
+  // Tag Manager is a GTM- container, the gtm.js snippet, or the noscript
+  // iframe. A gtag.js tag uses a G- id and is not Tag Manager.
+  function gtmOnPage(win) {
+    if (!win) return false;
+    try {
+      const manager = win.google_tag_manager;
+      if (manager && typeof manager === 'object') {
+        const keys = Object.keys(manager);
+        for (let i = 0; i < keys.length; i++) {
+          if (gtmContainerKey(keys[i])) return true;
+        }
+      }
+      const doc = win.document;
+      if (!doc || typeof doc.getElementsByTagName !== 'function') return false;
+      const scripts = doc.getElementsByTagName('script');
+      for (let i = 0; scripts && i < scripts.length; i++) {
+        const node = scripts[i];
+        const src = nodeSrc(node);
+        if (gtmScriptSrc(src)) return true;
+        if (!src && gtmInline(node && (node.text || node.textContent))) return true;
+      }
+      const frames = doc.getElementsByTagName('iframe');
+      for (let i = 0; frames && i < frames.length; i++) {
+        if (gtmNoscriptSrc(nodeSrc(frames[i]))) return true;
+      }
+    } catch (err) {
+      return false;
+    }
+    return false;
+  }
+
+  // Tag Manager gets a plain dataLayer object. gtag('event', name, params)
+  // pushes an arguments list, so Data Layer Variables cannot read the fields.
+  // gtag.js with no Tag Manager still uses gtag. Never both, and never
+  // creates gtag or dataLayer.
   function ga4Transport(win) {
     if (!win) return null;
+    if (gtmOnPage(win)) return Array.isArray(win.dataLayer) ? 'dataLayer' : null;
     if (typeof win.gtag === 'function') return 'gtag';
     if (Array.isArray(win.dataLayer)) return 'dataLayer';
     return null;
