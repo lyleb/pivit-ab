@@ -226,13 +226,22 @@ async function main() {
 
   const snippet = fs.readFileSync(path.join(__dirname, '../snippet/ab.js'), 'utf8');
   const init = snippet.slice(snippet.indexOf('async function init'));
-  const gate = init.indexOf('api.elementQuery(document, selector)');
-  const enroll = init.indexOf('function enroll(experiment)');
-  const send = init.indexOf('sendEvent(', enroll);
-  const wait = init.indexOf('api.exposeWhenReady(experiment');
-  assert.ok(gate !== -1 && enroll !== -1 && send !== -1 && wait !== -1);
-  assert.ok(gate < send);
-  assert.ok(wait > enroll);
+  // The element is checked before a view is sent. The first pass runs before
+  // the wait is started. A missing element enrols through that same function
+  // when it appears, and the wait does not send a view itself.
+  const applyFn = snippet.slice(snippet.indexOf('function applyMatchingExperiments'));
+  const gate = applyFn.indexOf('elementQuery(doc, selector)');
+  const send = applyFn.indexOf('sendEvent(');
+  assert.ok(gate !== -1 && send !== -1 && gate < send);
+  const firstApply = init.indexOf('const first = applyMatchingExperiments(');
+  const watchCall = init.indexOf('watchWaiting(first.waiting');
+  assert.ok(firstApply !== -1 && watchCall !== -1 && firstApply < watchCall);
+  const watchStart = init.indexOf('function watchWaiting');
+  const watchEnd = init.indexOf('const first = applyMatchingExperiments');
+  const watch = init.slice(watchStart, watchEnd);
+  assert.ok(watch.indexOf('api.exposeWhenReady(experiment') !== -1);
+  assert.ok(watch.indexOf('applyMatchingExperiments(') !== -1);
+  assert.ok(watch.indexOf('sendEvent(') === -1);
 
   console.log('element-target tests passed');
 }
