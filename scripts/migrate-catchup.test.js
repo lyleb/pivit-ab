@@ -94,7 +94,7 @@ async function main() {
     assert.strictEqual(await columnInfo(db), null);
 
     const applied = await migrate();
-    assert.deepStrictEqual(applied, ['003', '004', '005', '006', '007', '008', '009', '010', '011', '012', '013', '014', '015', '016', '017', '018']);
+    assert.deepStrictEqual(applied, ['003', '004', '005', '006', '007', '008', '009', '010', '011', '012', '013', '014', '015', '016', '017', '018', '019']);
     const index = await db.query(
       `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_rate_limits_window_start'`
     );
@@ -124,7 +124,7 @@ async function main() {
     assert.strictEqual(kept.rows[0].url_match_type, 'exact');
 
     const versions = await db.query(`SELECT version FROM schema_migrations ORDER BY version`);
-    assert.deepStrictEqual(versions.rows.map((row) => row.version), ['000', '001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012', '013', '014', '015', '016', '017', '018']);
+    assert.deepStrictEqual(versions.rows.map((row) => row.version), ['000', '001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012', '013', '014', '015', '016', '017', '018', '019']);
 
     const paid = await db.query(`SELECT bool_and(paid_plan = false) AS all_unpaid FROM accounts`);
     assert.strictEqual(paid.rows[0].all_unpaid, true);
@@ -146,6 +146,22 @@ async function main() {
     );
     assert.strictEqual(element.rows[0].element_selector, null);
     assert.strictEqual(element.rows[0].is_nullable, 'YES');
+
+    const activation = await db.query(
+      `SELECT e.activation_type, e.activation_value, t.column_default, t.is_nullable AS type_nullable, v.is_nullable AS value_nullable
+       FROM experiments e
+       JOIN information_schema.columns t
+         ON t.table_name = 'experiments' AND t.column_name = 'activation_type'
+       JOIN information_schema.columns v
+         ON v.table_name = 'experiments' AND v.column_name = 'activation_value'
+       WHERE e.id = $1`,
+      [experimentId]
+    );
+    assert.strictEqual(activation.rows[0].activation_type, 'page_load');
+    assert.strictEqual(activation.rows[0].activation_value, null);
+    assert.strictEqual(activation.rows[0].type_nullable, 'NO');
+    assert.strictEqual(activation.rows[0].value_nullable, 'YES');
+    assert.ok(String(activation.rows[0].column_default).includes('page_load'));
 
     const typed = await db.query(
       `SELECT e.test_type, c.column_default, c.is_nullable

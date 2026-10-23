@@ -24,6 +24,7 @@ const { applyActiveSite } = require('./active-site');
 const { applyPeopleState } = require('./people-state');
 const { applyAccountInvites } = require('./account-invites');
 const { applyGa4 } = require('./ga4');
+const { applyActivation } = require('./activation');
 
 const LOCK_KEY = 814021;
 
@@ -74,6 +75,10 @@ const VERSIONS = [
   // Paid-plan flag and per-site GA4 measurement ID. Both default off.
   // Stays out of schema.sql.
   { version: '018', name: 'ga4', run: applyGa4 },
+  // When the test starts. page_load is the default, so existing tests are
+  // unchanged. The element start keeps its selector in activation_value.
+  // Stays out of schema.sql.
+  { version: '019', name: 'activation', run: applyActivation },
 ];
 
 async function ensureMigrationsTable(queryable) {

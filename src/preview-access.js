@@ -80,6 +80,20 @@ function publicElementSelector(value) {
   return value.trim();
 }
 
+// Older snippets ignore these fields and keep starting on the page load.
+// page_load with an empty value is the default, including a row from before
+// the column existed. An element start with no selector is still sent as
+// element so the snippet does not count every visitor by mistake.
+function publicActivation(exp) {
+  const type = exp && exp.activation_type === 'element' ? 'element' : 'page_load';
+  const raw = exp && exp.activation_value;
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  return {
+    activation_type: type,
+    activation_value: type === 'element' ? value : '',
+  };
+}
+
 function publicVariant(variant) {
   return {
     id: variant.id,
@@ -103,6 +117,7 @@ function buildPublicExperimentList({ running, variants, previewExperiment, previ
   }
 
   const experiments = (running || []).map((exp) => {
+    const activation = publicActivation(exp);
     const row = {
       id: exp.id,
       name: exp.name,
@@ -110,6 +125,10 @@ function buildPublicExperimentList({ running, variants, previewExperiment, previ
       // Empty when the test has no element rule. Older snippets ignore this
       // field and keep running on the URL rule alone.
       element_selector: publicElementSelector(exp.element_selector),
+      // page_load and an empty value when the test starts on the page load.
+      // Older snippets ignore both fields.
+      activation_type: activation.activation_type,
+      activation_value: activation.activation_value,
       // Empty for a test whose goals still differ per variant. The snippet
       // then uses each variant's own list. Older snippets ignore this field.
       goals: Array.isArray(exp.goals) ? exp.goals : [],
@@ -136,6 +155,8 @@ function buildPublicExperimentList({ running, variants, previewExperiment, previ
           name: previewExperiment.name,
           url_match: previewExperiment.url_match,
           element_selector: publicElementSelector(previewExperiment.element_selector),
+          activation_type: publicActivation(previewExperiment).activation_type,
+          activation_value: publicActivation(previewExperiment).activation_value,
           goals: Array.isArray(previewExperiment.goals) ? previewExperiment.goals : [],
           variants: [],
         };

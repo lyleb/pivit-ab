@@ -35,7 +35,24 @@
  * waits up to about four seconds. If the element never appears there is no
  * assignment, no view, and nothing is applied. Pages that will never have
  * the element are not held blank for that wait. Preview uses the same gate
- * and names the selector in the preview note.
+ * and names the selector in the preview note. This is separate from when
+ * the test starts (below). A test that starts on page load keeps this wait.
+ *
+ * Start the test when: activation_type is page_load or element.
+ * page_load is the default and is today's behaviour, including the four
+ * second element_selector wait when that field is set. element waits for
+ * activation_value, a CSS selector, for as long as the visitor stays on
+ * this page. It does not use the four second limit. The visitor is assigned,
+ * the variant is applied, and the view and GA4 experience_impression are
+ * sent only after that element is in the document. A visitor who never sees
+ * it is not assigned and is not counted. If element_selector is also set,
+ * both have to be on the page, and the watch still lasts for the visit
+ * rather than four seconds. An invalid selector does not run the test.
+ * Leaving the address the test matched cancels the watch. Preview shows
+ * the variant straight away and does not wait for the activation element.
+ * The editor (ab_edit) does not wait and does not count the visit.
+ * pivit_qa is still stored as usual, and the view that is sent once the
+ * element appears is still marked as test traffic.
  *
  * Preview mode: the dashboard opens ?ab_preview=<variant_id>&ab_preview_token=<token>.
  * The token is signed and expires. It can show a draft, paused or disabled
@@ -153,10 +170,14 @@
   api.withSite = withSite;
   api.ELEMENT_WAIT_MS = ELEMENT_WAIT_MS;
   api.elementSelectorOf = elementSelectorOf;
+  api.activationOf = activationOf;
+  api.activationQuery = activationQuery;
   api.elementQuery = elementQuery;
   api.elementIsPresent = elementIsPresent;
   api.waitForElement = waitForElement;
   api.exposeWhenReady = exposeWhenReady;
+  api.createActivationSession = createActivationSession;
+  api.previewWaits = previewWaits;
   api.previewInfo = previewInfo;
   api.mayBucketExperiment = mayBucketExperiment;
   api.assignVariant = assignVariant;
@@ -612,6 +633,36 @@
     return typeof raw === 'string' ? raw.trim() : '';
   }
 
+  // page_load is the default, including a payload from before this field
+  // existed. element with an empty selector does not run: it must not fall
+  // through to counting every visitor.
+  function activationOf(experiment) {
+    const raw = experiment && experiment.activation_type;
+    const type = raw === 'element' ? 'element' : 'page_load';
+    const value = experiment && typeof experiment.activation_value === 'string'
+      ? experiment.activation_value.trim()
+      : '';
+    if (type === 'element') return { type: 'element', selector: value };
+    return { type: 'page_load', selector: '' };
+  }
+
+  // present when the test may start. missing when a watch should continue.
+  // invalid when a selector cannot be queried. page_load only looks at
+  // element_selector, which is what tests already do.
+  function activationQuery(doc, experiment) {
+    const activation = activationOf(experiment);
+    if (activation.type === 'element') {
+      if (!activation.selector) return { state: 'invalid', selector: '' };
+      const act = elementQuery(doc, activation.selector);
+      if (act.state !== 'present') return act;
+    }
+    const extra = elementQuery(doc, elementSelectorOf(experiment));
+    if (activation.type === 'element' && extra.state === 'none') {
+      return { state: 'present', selector: activation.selector };
+    }
+    return extra;
+  }
+
   // none: no selector, so the URL rule is enough.
   // present: the element is already in the document.
   // missing: not yet, and a wait may still find it.
@@ -692,16 +743,149 @@
     });
   }
 
+  // Watches until the activation selector is in the document, and until
+  // element_selector is too when that rule is set. There is no timer: the
+  // watch lasts for the visit. An invalid selector resolves immediately.
+  // hold.disconnect stops the observer, for a route change.
+  function waitForActivation(doc, activationSelector, elementSelector, options) {
+    const opts = options || {};
+    const act = typeof activationSelector === 'string' ? activationSelector.trim() : '';
+    const extra = typeof elementSelector === 'string' ? elementSelector.trim() : '';
+    if (!act) return Promise.resolve({ found: false, reason: 'invalid', selector: '' });
+    const selectors = extra && extra !== act ? [act, extra] : [act];
+
+    function combined() {
+      let missing = '';
+      for (let i = 0; i < selectors.length; i++) {
+        const query = elementQuery(doc, selectors[i]);
+        if (query.state === 'invalid') return { found: false, reason: 'invalid', selector: query.selector };
+        if (query.state === 'missing') missing = query.selector;
+      }
+      if (missing) return { found: false, reason: 'missing', selector: missing };
+      return { found: true, reason: 'present', selector: act };
+    }
+
+    const first = combined();
+    if (first.found || first.reason === 'invalid') return Promise.resolve(first);
+
+    const Observer = opts.MutationObserver || (typeof MutationObserver !== 'undefined' ? MutationObserver : null);
+    return new Promise(function (resolve) {
+      let settled = false;
+      let observer = null;
+      function finish(result) {
+        if (settled) return;
+        settled = true;
+        if (observer) {
+          try { observer.disconnect(); } catch (err) { /* already gone */ }
+        }
+        resolve(result);
+      }
+      function look(reason) {
+        if (typeof opts.isStale === 'function' && opts.isStale()) {
+          finish({ found: false, reason: 'stale', selector: act });
+          return;
+        }
+        const query = combined();
+        if (query.found) finish({ found: true, reason: reason, selector: act });
+        else if (query.reason === 'invalid') finish(query);
+      }
+      if (opts.hold) {
+        opts.hold.disconnect = function () {
+          finish({ found: false, reason: 'stale', selector: act });
+        };
+      }
+      if (Observer && doc) {
+        try {
+          observer = new Observer(function () { look('appeared'); });
+          const target = doc.documentElement || doc.body || doc;
+          if (target) observer.observe(target, { childList: true, subtree: true });
+        } catch (err) {
+          observer = null;
+        }
+      }
+      if (!observer) finish({ found: false, reason: 'unavailable', selector: act });
+    });
+  }
+
   // onExpose is the bucket: assignment, DOM changes, and the view. It is
-  // not called when the element never appears.
+  // not called when the element never appears. page_load uses the four
+  // second element_selector wait. An element start waits for the visit.
   function exposeWhenReady(experiment, deps) {
     const d = deps || {};
+    const activation = activationOf(experiment);
+    if (activation.type === 'element') {
+      return waitForActivation(d.document, activation.selector, elementSelectorOf(experiment), d).then(function (gate) {
+        if (!gate.found) return { exposed: false, reason: gate.reason, selector: gate.selector || activation.selector };
+        if (typeof d.isStale === 'function' && d.isStale()) {
+          return { exposed: false, reason: 'stale', selector: activation.selector };
+        }
+        if (typeof d.onExpose === 'function') d.onExpose(experiment);
+        return { exposed: true, reason: gate.reason, selector: activation.selector };
+      });
+    }
     const selector = elementSelectorOf(experiment);
     return waitForElement(d.document, selector, d).then(function (gate) {
       if (!gate.found) return { exposed: false, reason: gate.reason, selector: selector };
       if (typeof d.onExpose === 'function') d.onExpose(experiment);
       return { exposed: true, reason: gate.reason, selector: selector };
     });
+  }
+
+  // One watch per experiment. A later arm, or retain() dropping the id,
+  // disconnects the previous observer so a route change cannot assign late.
+  function createActivationSession() {
+    const cancels = Object.create(null);
+    return {
+      retain: function (keep) {
+        const ids = keep || {};
+        Object.keys(cancels).forEach(function (id) {
+          if (!ids[id]) {
+            cancels[id]();
+            delete cancels[id];
+          }
+        });
+      },
+      arm: function (experiment, context) {
+        const ctx = context || {};
+        const id = experiment && experiment.id;
+        if (id == null || id === '') return;
+        if (cancels[id]) cancels[id]();
+        let cancelled = false;
+        const hold = {};
+        cancels[id] = function () {
+          cancelled = true;
+          if (typeof hold.disconnect === 'function') hold.disconnect();
+        };
+        const pageKey = pageViewKey(ctx.href || '');
+        api.exposeWhenReady(experiment, {
+          document: ctx.document,
+          MutationObserver: ctx.MutationObserver,
+          hold: hold,
+          isStale: function () { return cancelled; },
+          onExpose: function () {
+            if (cancelled) return;
+            let current = ctx.href || '';
+            if (typeof ctx.currentHref === 'function') {
+              try { current = ctx.currentHref(); } catch (err) { return; }
+            }
+            if (pageViewKey(current) !== pageKey) return;
+            if (typeof ctx.onExpose === 'function') ctx.onExpose(experiment);
+          },
+        }).catch(function () { /* a later address can still watch */ });
+      },
+    };
+  }
+
+  // Preview does not wait for an element start. The older element rule
+  // still waits about four seconds, the same as before.
+  function previewWaits(experiment) {
+    const activation = activationOf(experiment);
+    const selector = elementSelectorOf(experiment);
+    return {
+      activation: activation.type === 'element',
+      selector: selector,
+      waitForElementRule: !!selector,
+    };
   }
 
   // A demo test never buckets a real visitor. Test traffic is pivit_qa or a
@@ -716,10 +900,17 @@
     const variantName = variant && variant.name ? variant.name : '';
     const experimentName = experiment && experiment.name ? experiment.name : '';
     const selector = elementSelectorOf(experiment);
+    const activation = activationOf(experiment);
     const found = !gate || gate.found !== false;
     if (selector && !found) {
       return '[ab] preview mode — not showing variant "' + variantName + '" for experiment "' + experimentName
         + '". This page has no element matching "' + selector + '", so nothing is applied. No events are being logged.';
+    }
+    if (activation.type === 'element' && activation.selector) {
+      let message = '[ab] preview mode — showing variant "' + variantName + '" for experiment "' + experimentName + '". ';
+      if (selector) message += 'It runs only when "' + selector + '" is on the page. ';
+      return message + 'Live visitors are counted only once "' + activation.selector
+        + '" appears. This preview shows the variant now, without waiting. No events are being logged.';
     }
     if (selector) {
       return '[ab] preview mode — showing variant "' + variantName + '" for experiment "' + experimentName
@@ -781,8 +972,10 @@
       const ready = [];
       for (let i = 0; i < list.length; i++) {
         const experiment = list[i];
-        const selector = api.elementSelectorOf(experiment);
-        const query = api.elementQuery(document, selector);
+        const activation = api.activationOf(experiment);
+        const query = activation.type === 'element'
+          ? api.activationQuery(document, experiment)
+          : api.elementQuery(document, api.elementSelectorOf(experiment));
         if (query.state === 'invalid') continue;
         if (query.state === 'missing') waiting.push(experiment);
         else ready.push(experiment);
@@ -805,8 +998,13 @@
     }
     const pageKey = pageViewKey(href || (window.location && window.location.href) || '');
     waiting.forEach(function (experiment) {
-      api.waitForElement(document, api.elementSelectorOf(experiment)).then(function (gate) {
-        if (!gate || !gate.found) return;
+      const pending = api.activationOf(experiment).type === 'element'
+        ? api.exposeWhenReady(experiment, { document: document })
+        : api.waitForElement(document, api.elementSelectorOf(experiment)).then(function (gate) {
+          return { exposed: !!(gate && gate.found) };
+        });
+      pending.then(function (gate) {
+        if (!gate || gate.exposed === false) return;
         if (pageViewKey(window.location && window.location.href) !== pageKey) return;
         reportExperienceImpressions([experiment], href);
       }).catch(function () { /* the impression is skipped if the wait fails */ });
@@ -956,11 +1154,39 @@
       // One record for this document. A test applied on the first load, or
       // on a later address, is not applied again until the next full load.
       const appliedOnPage = Object.create(null);
+      const activationSession = createActivationSession();
       const navigationGate = createNavigationGate();
 
       function watchWaiting(waiting, href, enrolled, stayOnPage) {
         const pageKey = pageViewKey(href || window.location.href);
+        const keep = Object.create(null);
         (waiting || []).forEach((experiment) => {
+          if (experiment && api.activationOf(experiment).type === 'element' && experiment.id != null) {
+            keep[experiment.id] = 1;
+          }
+        });
+        activationSession.retain(keep);
+        (waiting || []).forEach((experiment) => {
+          if (api.activationOf(experiment).type === 'element') {
+            activationSession.arm(experiment, {
+              document: document,
+              href: href || window.location.href,
+              currentHref: function () { return window.location.href; },
+              onExpose: function () {
+                if (!hasTrackingConsent()) return;
+                applyMatchingExperiments({
+                  experiments: [experiment],
+                  href: window.location.href,
+                  document: document,
+                  visitorId: visitorId,
+                  qaOn: qaOn,
+                  applied: appliedOnPage,
+                  enrolledThisView: enrolled,
+                });
+              },
+            });
+            return;
+          }
           api.exposeWhenReady(experiment, {
             document: document,
             onExpose: function () {
@@ -1846,8 +2072,11 @@
       if (applied[experiment.id]) return { reason: 'already' };
       if (!mayBucketExperiment(experiment, visitorId, qa)) return { reason: 'demo' };
       if (!experiment.variants || experiment.variants.length === 0) return { reason: 'no-variants' };
+      const activation = activationOf(experiment);
       const selector = elementSelectorOf(experiment);
-      const query = elementQuery(doc, selector);
+      const query = activation.type === 'element'
+        ? activationQuery(doc, experiment)
+        : elementQuery(doc, selector);
       if (query.state === 'invalid') return { reason: 'invalid' };
       if (query.state === 'missing') return { reason: 'waiting' };
       const stored = storedAssignment(experiment.id);
