@@ -48,8 +48,10 @@ function defsFromGoalList(goals) {
       existing.primary = existing.primary || !!g.primary;
     } else {
       const type = g.type || 'click';
-      const detail = type === 'url' ? (g.url_match || '') : (g.selector || '');
-      byKey.set(key, { key, type, label: goalLabel(g, key), detail, primary: !!g.primary });
+      const detail = type === 'url' ? (g.url_match || '') : (type === 'custom' ? (g.event || '') : (g.selector || ''));
+      const def = { key, type, label: goalLabel(g, key), detail, primary: !!g.primary };
+      if (type === 'custom' && Array.isArray(g.when) && g.when.length) def.when = g.when;
+      byKey.set(key, def);
     }
   });
   return Array.from(byKey.values());
@@ -133,8 +135,9 @@ function summariseByGoal(events, goals) {
     key: goal.key,
     type: goal.type,
     label: goal.label,
-    detail: goal.detail != null ? goal.detail : (goal.type === 'url' ? (goal.url_match || '') : (goal.selector || '')),
+    detail: goal.detail != null ? goal.detail : (goal.type === 'url' ? (goal.url_match || '') : (goal.type === 'custom' ? (goal.event || '') : (goal.selector || ''))),
     primary: !!goal.primary,
+    ...(goal.type === 'custom' && Array.isArray(goal.when) && goal.when.length ? { when: goal.when } : {}),
     variants: [...viewers.keys()].map((variantId) => {
       const viewed = viewers.get(variantId) || new Set();
       const perVisitor = hits.get(`${variantId}|${goal.key}`) || new Map();

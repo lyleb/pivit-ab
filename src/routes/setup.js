@@ -6,6 +6,7 @@ const { markDomainConflict } = require('../auth-flow');
 const { newSiteKey } = require('../db/tenancy');
 const { recordAudit } = require('../audit');
 const { accountPaidPlan, parseGa4Update } = require('../ga4');
+const { parseDatalayerEventsUpdate } = require('../datalayer-events');
 const { buildGtmContainer } = require('../ga4-container');
 const { installCheckPayload } = require('../site-verify');
 const { checklistFromFacts } = require('../checklist');
@@ -23,7 +24,7 @@ const setupRouter = express.Router();
 const sitesRouter = express.Router();
 const sql = (text, params) => db.query(text, params);
 
-const SITE_COLUMNS = `id, name, domains, public_key, verified_at, conflict, install_note, install_note_host, qa_seen_at, ga4_measurement_id, ga4_enabled`;
+const SITE_COLUMNS = `id, name, domains, public_key, verified_at, conflict, install_note, install_note_host, qa_seen_at, ga4_measurement_id, ga4_enabled, datalayer_events`;
 
 function sitePayload(row, paidPlan) {
   if (!row) return null;
@@ -39,6 +40,7 @@ function sitePayload(row, paidPlan) {
     ga4_measurement_id: row.ga4_measurement_id || '',
     ga4_enabled: row.ga4_enabled === true,
     ga4_available: paidPlan === true,
+    datalayer_events: row.datalayer_events === true,
   };
 }
 
@@ -272,6 +274,42 @@ sitesRouter.get('/:id/ga4/container.json', requireAuth(['owner']), async (req, r
     res.set('Content-Type', 'application/json; charset=utf-8');
     res.set('Content-Disposition', 'attachment; filename="pivitlab-ga4.json"');
     res.send(`${JSON.stringify(body, null, 2)}\n`);
+  } catch (err) {
+    res.status(500).json(publicServerError(err));
+  }
+});
+
+sitesRouter.patch('/:id/datalayer', requireAuth(['owner']), async (req, res) => {
+  try {
+    const existing = await loadOwnedSite(req.account.id, req.params.id);
+    if (!existing) return res.status(404).json({ error: 'no site found with that id' });
+    const parsed = parseDatalayerEventsUpdate(req.body);
+    if (!parsed.ok) return res.status(parsed.status).json({ error: parsed.error });
+    const updated = await db.query(
+      `UPDATE sites
+       SET datalayer_events = $2
+       WHERE id = $1 AND account_id = $3
+       RETURNING ${SITE_COLUMNS}`,
+      [existing.id, parsed.datalayer_events, req.account.id]
+    );
+    const beforeOn = existing.datalayer_events === true;
+    if (beforeOn !== parsed.datalayer_events) {
+      await recordAudit(db, {
+        accountId: req.account.id,
+        userId: req.account.userId,
+        actorLabel: 'owner',
+        action: 'datalayer_events',
+        targetType: 'site',
+        targetId: existing.id,
+        detail: {
+          datalayer_events: parsed.datalayer_events,
+          host: (existing.domains || [])[0] || existing.name,
+        },
+        ip: req.ip,
+      });
+    }
+    const paid = await accountPaidPlan(db, req.account.id);
+    res.json({ site: sitePayload(updated.rows[0], paid) });
   } catch (err) {
     res.status(500).json(publicServerError(err));
   }

@@ -236,6 +236,13 @@ for (const phrase of [
   'That sign-in isn\'t available.',
   'The address does not have to change.',
   'When this appears',
+  'Custom event',
+  'Count dataLayer events',
+  'window.pivit = window.pivit || []',
+  "pivit.track('payment_complete')",
+  'Only when…',
+  "pivit.track('checkout_step', { step_name: 'confirmation' })",
+  'step_name',
 ]) {
   assert.ok(helpPage.includes(phrase), `help.html missing ${phrase}`);
   assert.ok(helpDoc.includes(phrase), `help.md missing ${phrase}`);
