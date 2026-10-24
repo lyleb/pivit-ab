@@ -159,6 +159,36 @@ assert.strictEqual(elementRenamed[0].selector, CONFIRM);
 const elementDefault = goals.prepareGoalsForSave([{ type: 'element', selector: CONFIRM }], []);
 assert.strictEqual(elementDefault[0].name, 'Element appears');
 
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: ' payment_complete ' }]), null);
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: 'checkout_step', name: 'Paid' }]), null);
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: '' }]), 'a custom goal needs an event name');
+assert.strictEqual(goals.validateGoals([{ type: 'custom' }]), 'a custom goal needs an event name');
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: 'pay now' }]), 'an event name can use letters, digits, and _ - .');
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: 'a'.repeat(65) }]), 'an event name is too long');
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: 'experience_impression' }]), 'experience_impression is used by Send to GA4. Choose another event name.');
+assert.strictEqual(goals.normaliseCustomEventName(' checkout_step '), 'checkout_step');
+assert.strictEqual(goals.normaliseCustomEventName('experience_impression'), '');
+const customSaved = goals.prepareGoalsForSave([
+  { name: 'Paid', type: 'custom', event: ' payment_complete ' },
+], []);
+assert.strictEqual(customSaved[0].type, 'custom');
+assert.strictEqual(customSaved[0].event, 'payment_complete');
+assert.strictEqual(customSaved[0].name, 'Paid');
+assert.strictEqual(customSaved[0].selector, undefined);
+assert.ok(goals.GENERATED_ID.test(customSaved[0].id));
+const customRenamed = goals.prepareGoalsForSave([
+  { id: customSaved[0].id, name: 'Order paid', type: 'custom', event: 'payment_complete' },
+], customSaved);
+assert.strictEqual(customRenamed[0].id, customSaved[0].id);
+assert.strictEqual(customRenamed[0].event, 'payment_complete');
+const customDefault = goals.prepareGoalsForSave([{ type: 'custom', event: 'checkout_step' }], []);
+assert.strictEqual(customDefault[0].name, 'Custom event');
+const customDefs = metrics.defsFromGoalList(customSaved);
+assert.strictEqual(customDefs[0].type, 'custom');
+assert.strictEqual(customDefs[0].detail, 'payment_complete');
+assert.strictEqual(customDefs[0].label, 'Paid');
+assert.strictEqual(customDefs[0].key, customSaved[0].id);
+
 const elementShared = goals.planGoalMigration([
   { goals: [{ type: 'element', selector: CONFIRM, id: 'done' }] },
   { goals: [{ type: 'element', selector: CONFIRM, id: 'done' }] },

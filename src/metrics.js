@@ -48,7 +48,7 @@ function defsFromGoalList(goals) {
       existing.primary = existing.primary || !!g.primary;
     } else {
       const type = g.type || 'click';
-      const detail = type === 'url' ? (g.url_match || '') : (g.selector || '');
+      const detail = type === 'url' ? (g.url_match || '') : (type === 'custom' ? (g.event || '') : (g.selector || ''));
       byKey.set(key, { key, type, label: goalLabel(g, key), detail, primary: !!g.primary });
     }
   });
@@ -133,7 +133,7 @@ function summariseByGoal(events, goals) {
     key: goal.key,
     type: goal.type,
     label: goal.label,
-    detail: goal.detail != null ? goal.detail : (goal.type === 'url' ? (goal.url_match || '') : (goal.selector || '')),
+    detail: goal.detail != null ? goal.detail : (goal.type === 'url' ? (goal.url_match || '') : (goal.type === 'custom' ? (goal.event || '') : (goal.selector || ''))),
     primary: !!goal.primary,
     variants: [...viewers.keys()].map((variantId) => {
       const viewed = viewers.get(variantId) || new Set();

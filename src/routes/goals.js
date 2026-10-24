@@ -14,6 +14,7 @@ async function popularForSite(accountId, siteId, limit) {
          COALESCE(NULLIF(g->>'type', ''), 'click') AS type,
          CASE
            WHEN COALESCE(NULLIF(g->>'type', ''), 'click') = 'url' THEN COALESCE(g->>'url_match', '')
+           WHEN COALESCE(NULLIF(g->>'type', ''), 'click') = 'custom' THEN COALESCE(g->>'event', '')
            ELSE COALESCE(g->>'selector', '')
          END AS value,
          COALESCE(NULLIF(g->>'name', ''), NULLIF(g->>'id', ''), '') AS label
@@ -29,6 +30,7 @@ async function popularForSite(accountId, siteId, limit) {
          COALESCE(NULLIF(g->>'type', ''), 'click') AS type,
          CASE
            WHEN COALESCE(NULLIF(g->>'type', ''), 'click') = 'url' THEN COALESCE(g->>'url_match', '')
+           WHEN COALESCE(NULLIF(g->>'type', ''), 'click') = 'custom' THEN COALESCE(g->>'event', '')
            ELSE COALESCE(g->>'selector', '')
          END AS value,
          COALESCE(NULLIF(g->>'name', ''), NULLIF(g->>'id', ''), '') AS label
@@ -95,7 +97,7 @@ async function recordGoalUsage(goals, accountId) {
   if (!accountId) return;
   for (const goal of goals || []) {
     const type = goal.type || 'click';
-    const value = type === 'url' ? (goal.url_match || '') : (goal.selector || '');
+    const value = type === 'url' ? (goal.url_match || '') : (type === 'custom' ? (goal.event || '') : (goal.selector || ''));
     const label = goal.name || goal.id || '';
     if (!value) continue;
     try {

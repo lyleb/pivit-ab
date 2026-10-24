@@ -189,6 +189,17 @@ assert.strictEqual(
   ui.goalResultLabel({ type: 'element', label: 'Confirmation', detail: '#step-confirmation', key: 'done' }),
   'Confirmation · Element appears #step-confirmation'
 );
+assert.strictEqual(
+  ui.goalResultLabel({ type: 'custom', label: 'Paid', detail: 'payment_complete', key: 'paid' }),
+  'Paid · Custom event payment_complete'
+);
+assert.strictEqual(ui.goalResultLabel({ type: 'custom', label: 'Custom event', detail: 'payment_complete' }), 'Custom event payment_complete');
+assert.strictEqual(ui.describeGoal({ type: 'custom', name: 'Paid', event: 'payment_complete' }), 'Paid → custom event payment_complete');
+assert.ok(ui.CUSTOM_GOAL_HELP.includes('pivitlab'));
+assert.ok(ui.CUSTOM_GOAL_HELP.includes('payment_complete'));
+assert.ok(ui.CUSTOM_GOAL_HELP.includes('window.pivit = window.pivit || []'));
+assert.ok(!ui.CUSTOM_GOAL_HELP.includes('Pivitlab'));
+assert.strictEqual(ui.auditActionLabel('datalayer_events'), 'Updated dataLayer events');
 assert.strictEqual(ui.goalResultLabel({ type: 'click', label: 'Buy button', detail: '.buy' }), 'Buy button · Click .buy');
 assert.strictEqual(ui.goalResultLabel({ type: 'url', label: 'Thanks', detail: '/thanks' }), 'Thanks · Visited a URL /thanks');
 assert.ok(ui.ELEMENT_GOAL_HELP.includes('pivitlab'));

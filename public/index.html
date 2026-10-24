@@ -1974,6 +1974,11 @@ function paintSitesCard(sites) {
         </details>
         ${paid ? '' : `<p class="hint">${UI.escapeHtml(UI.GA4_UNPAID_NOTE)}</p>`}
         <p class="error-msg" data-ga4-error></p>
+      </form>
+      <form class="site-ga4" data-datalayer-form="${UI.escapeHtml(site.id)}">
+        <label class="check"><input type="checkbox" data-datalayer-events${site.datalayer_events === true ? ' checked' : ''}${readOnly ? ' disabled' : ''}> Count dataLayer events</label>
+        <p class="hint">Off until you switch it on. A dataLayer push of { event: 'payment_complete' } then counts for a custom event goal with that name. experience_impression is not counted. <a href="/help.html#custom-event">How to send the event</a></p>
+        <p class="error-msg" data-datalayer-error></p>
       </form>`;
     const edit = readOnly ? '' : `
       <button type="button" class="btn-ghost" data-site-edit-toggle="${UI.escapeHtml(site.id)}">Edit</button>`;
@@ -3518,12 +3523,13 @@ function renderDivergentGoals() {
           <option value="click">Click</option>
           <option value="url">Visited URL</option>
           <option value="element">When this element appears</option>
+          <option value="custom">Custom event</option>
         </select>
         <input class="g-value" type="text" placeholder="#cta-button" style="margin:0; flex:1;">
         <input class="g-id" type="text" placeholder="name" style="margin:0; width:140px;">
         <button type="button" data-action="add-goal" data-id="${v.id}">Add goal</button>
       </div>
-      <p class="hint g-element-help" data-goal-help="${v.id}" hidden>${UI.escapeHtml(UI.ELEMENT_GOAL_HELP)}</p>
+      <p class="hint g-element-help" data-goal-help="${v.id}" hidden></p>
     </div>`;
   }).join('');
 }
@@ -3712,10 +3718,15 @@ document.getElementById('page-detail').addEventListener('click', async (e) => {
     const type = draft.querySelector('.g-type').value;
     const value = draft.querySelector('.g-value').value.trim();
     const label = draft.querySelector('.g-id').value.trim();
-    if (!value) { detailError(type === 'url' ? 'Add the URL text to match.' : 'Add a selector.'); return; }
+    if (!value) {
+      detailError(type === 'url' ? 'Add the URL text to match.' : (type === 'custom' ? 'Add an event name.' : 'Add a selector.'));
+      return;
+    }
     const goal = type === 'url'
       ? { type: 'url', url_match: value, name: label, match: 'contains' }
-      : { type: type === 'element' ? 'element' : 'click', selector: value, name: label };
+      : (type === 'custom'
+        ? { type: 'custom', event: value, name: label }
+        : { type: type === 'element' ? 'element' : 'click', selector: value, name: label });
     await patchVariant(variant, { goals: [...(variant.goals || []), goal] });
     return;
   }
@@ -3841,8 +3852,19 @@ document.getElementById('page-detail').addEventListener('change', (e) => {
   const help = document.querySelector(`[data-goal-help="${draft.dataset.goalDraft}"]`);
   if (e.target.value === 'url') value.placeholder = '/thank-you';
   else if (e.target.value === 'element') value.placeholder = '#step-confirmation';
+  else if (e.target.value === 'custom') value.placeholder = 'payment_complete';
   else value.placeholder = '#cta-button';
-  if (help) help.hidden = e.target.value !== 'element';
+  if (help) {
+    if (e.target.value === 'element') {
+      help.hidden = false;
+      help.textContent = UI.ELEMENT_GOAL_HELP;
+    } else if (e.target.value === 'custom') {
+      help.hidden = false;
+      help.textContent = UI.CUSTOM_GOAL_HELP;
+    } else {
+      help.hidden = true;
+    }
+  }
 });
 
 function noDomainBadge(exp) {
@@ -5673,6 +5695,7 @@ function addGoalRow(prefill, listId) {
         <option value="click">Click on element</option>
         <option value="url">Visited a URL</option>
         <option value="element">When this element appears</option>
+        <option value="custom">Custom event</option>
       </select>
     </div>
     <div class="g-match-wrap full-width" hidden>
@@ -5693,6 +5716,7 @@ function addGoalRow(prefill, listId) {
       <input class="g-name" placeholder="Thank-you page">
     </div>
     <p class="hint g-element-help full-width" hidden></p>
+    <p class="hint g-custom-help full-width" hidden></p>
     <div class="g-test full-width" hidden>
       <label>Test this URL</label>
       <div class="goal-test">
@@ -5713,16 +5737,25 @@ function addGoalRow(prefill, listId) {
   const valueEl = row.querySelector('.g-value');
   const testWrap = row.querySelector('.g-test');
   const helpEl = row.querySelector('.g-element-help');
+  const customHelpEl = row.querySelector('.g-custom-help');
   if (helpEl) helpEl.textContent = UI.ELEMENT_GOAL_HELP;
+  if (customHelpEl) customHelpEl.textContent = UI.CUSTOM_GOAL_HELP;
   function renderValueField() {
     const url = typeEl.value === 'url';
     const element = typeEl.value === 'element';
+    const custom = typeEl.value === 'custom';
     matchWrap.hidden = !url;
     testWrap.hidden = !url;
     if (helpEl) helpEl.hidden = !element;
+    if (customHelpEl) customHelpEl.hidden = !custom;
     if (element) {
       valueLabelEl.textContent = 'Selector';
       valueEl.placeholder = '#step-confirmation';
+      return;
+    }
+    if (custom) {
+      valueLabelEl.textContent = 'Event name';
+      valueEl.placeholder = 'payment_complete';
       return;
     }
     if (!url) {
@@ -5745,7 +5778,9 @@ function addGoalRow(prefill, listId) {
     typeEl.value = prefill.type || 'click';
     row.querySelector('.g-name').value = prefill.name || prefill.id || '';
     if (prefill.match) matchEl.value = prefill.match;
-    valueEl.value = prefill.type === 'url' ? (prefill.url_match || '') : (prefill.selector || '');
+    if (prefill.type === 'url') valueEl.value = prefill.url_match || '';
+    else if (prefill.type === 'custom') valueEl.value = prefill.event || '';
+    else valueEl.value = prefill.selector || '';
   }
   renderValueField();
 }
@@ -5759,11 +5794,13 @@ function collectGoals(listId) {
     if (type === 'url') {
       goal.url_match = value;
       goal.match = row.querySelector('.g-match').value || 'contains';
+    } else if (type === 'custom') {
+      goal.event = value;
     } else {
       goal.selector = value;
     }
     return goal;
-  }).filter((g) => (g.type === 'url' ? g.url_match : g.selector));
+  }).filter((g) => (g.type === 'url' ? g.url_match : (g.type === 'custom' ? g.event : g.selector)));
 }
 
 async function loadPopularGoals(containerId, mode) {
@@ -5790,7 +5827,9 @@ async function loadPopularGoals(containerId, mode) {
   const chips = popularGoalsCache.map((g, i) => {
     const fallback = g.type === 'url'
       ? `Visited "${g.value}"`
-      : (g.type === 'element' ? `Element appears "${g.value}"` : `Click "${g.value}"`);
+      : (g.type === 'element'
+        ? `Element appears "${g.value}"`
+        : (g.type === 'custom' ? `Custom event "${g.value}"` : `Click "${g.value}"`));
     const display = g.label ? g.label : fallback;
     const tooltip = fallback;
     return `<button type="button" class="btn-ghost" style="margin:4px 4px 0 0; font-size:0.8em;" title="${UI.escapeHtml(tooltip)}" data-popular="${i}" data-popular-mode="${mode}">${UI.escapeHtml(display)}</button>`;
@@ -5807,6 +5846,7 @@ document.body.addEventListener('click', async (e) => {
     type: g.type,
     selector: g.type === 'click' || g.type === 'element' ? g.value : undefined,
     url_match: g.type === 'url' ? g.value : undefined,
+    event: g.type === 'custom' ? g.value : undefined,
     name: g.label || '',
     match: 'contains',
   };
@@ -5822,10 +5862,12 @@ document.body.addEventListener('click', async (e) => {
   }
   const goal = g.type === 'url'
     ? { type: 'url', url_match: g.value, name: g.label || '', match: 'contains' }
-    : { type: g.type === 'element' ? 'element' : 'click', selector: g.value, name: g.label || '' };
+    : (g.type === 'custom'
+      ? { type: 'custom', event: g.value, name: g.label || '' }
+      : { type: g.type === 'element' ? 'element' : 'click', selector: g.value, name: g.label || '' });
   const already = (currentDetail.goals || []).some((existing) =>
     (existing.name || existing.id) === (goal.name || '') &&
-    (existing.selector === goal.selector || existing.url_match === goal.url_match)
+    (existing.selector === goal.selector || existing.url_match === goal.url_match || (goal.event && existing.event === goal.event))
   );
   if (already) return;
   await saveExperimentGoals([...(currentDetail.goals || []), goal], false);
@@ -6377,6 +6419,28 @@ document.getElementById('sites-add-form').addEventListener('submit', async (even
   }
   input.value = '';
   showFormWarning(document.getElementById('sites-add-warning'), result.data.domain_warning || '');
+  await refreshFirstRun();
+});
+
+document.getElementById('sites-list').addEventListener('change', async (event) => {
+  const toggle = event.target.closest('[data-datalayer-events]');
+  if (!toggle || toggle.disabled) return;
+  const form = toggle.closest('[data-datalayer-form]');
+  if (!form) return;
+  const siteId = form.getAttribute('data-datalayer-form');
+  const errorEl = form.querySelector('[data-datalayer-error]');
+  if (errorEl) errorEl.textContent = '';
+  const wanted = toggle.checked === true;
+  const result = await callApi('/api/sites/' + encodeURIComponent(siteId) + '/datalayer', {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ datalayer_events: wanted }),
+  });
+  if (!result.ok) {
+    toggle.checked = !wanted;
+    if (errorEl) errorEl.textContent = apiErrorText(result);
+    return;
+  }
   await refreshFirstRun();
 });
 

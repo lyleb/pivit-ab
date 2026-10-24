@@ -36,6 +36,7 @@ const { isDemo, normaliseTestType, typeChangeError, demoPlan, countOptions } = r
 const { refreshDemoPlan } = require('../demo-sample');
 const { noteSnippetSeen, noteInstallCheck, noteQaPreview, installCheckPayload } = require('../site-verify');
 const { publicGa4ForScope } = require('../ga4');
+const { publicDatalayerEvents } = require('../datalayer-events');
 const { normaliseStatusChange } = require('../experiment-status');
 const {
   archivedBody,
@@ -138,8 +139,10 @@ router.get('/', async (req, res) => {
     const scope = await openPublicScope(req);
     if (!scope) return res.json({ experiments: [] });
     const ga4 = await publicGa4ForScope(db, scope);
+    const datalayerEvents = await publicDatalayerEvents(db, scope);
     const sendPublic = (body) => {
       if (ga4 && ga4.measurement_id) body.ga4 = { measurement_id: ga4.measurement_id };
+      if (datalayerEvents) body.datalayer_events = true;
       return res.json(body);
     };
 

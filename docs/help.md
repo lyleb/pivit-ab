@@ -157,6 +157,44 @@ A preview, and the editor, do not count. A visit with `?pivit_qa=1` is still tes
 
 This is separate from **Start the test when… This element appears**. That setting decides when someone joins the test. This goal decides when they have converted.
 
+## Custom event
+
+A goal can be a **Custom event**. You give it an event name, such as `payment_complete`. Letters, digits, and `_` `-` `.` are allowed. The name `experience_impression` is kept for Send to GA4, so it cannot be a goal.
+
+Each visitor counts once for that goal. A preview, and the editor, do not count. A visit with `?pivit_qa=1` is still test traffic.
+
+Add it from the create wizard or from the experiment’s Goals tab.
+
+### From your page
+
+Put this where the event happens. It is safe to run before the snippet has loaded. pivitlab keeps the calls and counts them once the snippet is ready:
+
+```
+window.pivit = window.pivit || [];
+window.pivit.push(['track', 'payment_complete']);
+```
+
+After the snippet has loaded, this does the same thing:
+
+```
+pivit.track('payment_complete');
+```
+
+If the page already uses `window.pivit` for something else, pivitlab leaves that object in place and adds `track`.
+
+### From the data layer
+
+This is off for each site until you switch it on. On Home, open the site and switch on **Count dataLayer events**.
+
+pivitlab then counts a push that looks like this, including one that is already on the page when the snippet loads:
+
+```
+window.dataLayer = window.dataLayer || [];
+window.dataLayer.push({ event: 'payment_complete' });
+```
+
+The push is left as it is, so Tag Manager still sees it. pivitlab does not count its own `experience_impression` event.
+
 ## Send to GA4
 
 On Home, each site has **Send to GA4** and a box for that site's GA4 measurement ID. The ID starts with G-. This is included on paid plans. pivitlab has no priced plans yet. Paid plan is the switch that lets an agency use Send to GA4. A Platform admin sets it on Home, on the Send to GA4 card. That card also says how many sites have Send to GA4 switched on.

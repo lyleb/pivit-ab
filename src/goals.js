@@ -17,6 +17,30 @@ const { normaliseElementSelector } = require('./element-selector');
 
 const MAX_VARIANTS = 3;
 const GENERATED_ID = /^g_[a-z0-9]{8,32}$/;
+// Keep this in step with snippet/ab.js. An event name is what the page
+// passes to pivit.track, and what a dataLayer object puts in event.
+// experience_impression is the Send to GA4 event, so it cannot be a goal.
+const CUSTOM_EVENT_MAX = 64;
+const CUSTOM_EVENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+const RESERVED_CUSTOM_EVENT = 'experience_impression';
+
+function normaliseCustomEventName(value) {
+  if (typeof value !== 'string') return '';
+  const name = value.trim();
+  if (!name || name.length > CUSTOM_EVENT_MAX) return '';
+  if (name === RESERVED_CUSTOM_EVENT) return '';
+  if (!CUSTOM_EVENT_PATTERN.test(name)) return '';
+  return name;
+}
+
+function customEventError(value) {
+  if (typeof value !== 'string' || !value.trim()) return 'a custom goal needs an event name';
+  const name = value.trim();
+  if (name.length > CUSTOM_EVENT_MAX) return 'an event name is too long';
+  if (name === RESERVED_CUSTOM_EVENT) return 'experience_impression is used by Send to GA4. Choose another event name.';
+  if (!CUSTOM_EVENT_PATTERN.test(name)) return 'an event name can use letters, digits, and _ - .';
+  return null;
+}
 
 function variantCapError() {
   return 'A test can have at most 3 variants, including Control.';
@@ -57,6 +81,10 @@ function normaliseLegacyGoal(goal) {
     base.selector = goal.selector || '';
     return base;
   }
+  if (type === 'custom') {
+    base.event = typeof goal.event === 'string' ? goal.event.trim() : '';
+    return base;
+  }
   const copy = Object.assign({}, goal, base);
   return copy;
 }
@@ -69,6 +97,7 @@ function goalIdentity(goal) {
   if (type === 'url') return ['url', id, goal.url_match || '', goal.match || 'contains'].join('\0');
   if (type === 'click') return ['click', id, goal.selector || ''].join('\0');
   if (type === 'element') return ['element', id, goal.selector || ''].join('\0');
+  if (type === 'custom') return ['custom', id, goal.event || ''].join('\0');
   return [type, id, goal.selector || '', goal.url_match || '', goal.event || ''].join('\0');
 }
 
@@ -108,6 +137,7 @@ function generateGoalId() {
 function defaultGoalName(type) {
   if (type === 'url') return 'Visited URL';
   if (type === 'element') return 'Element appears';
+  if (type === 'custom') return 'Custom event';
   return 'Click';
 }
 
@@ -127,7 +157,7 @@ function prepareGoalsForSave(incoming, existingGoals) {
   const used = new Set();
   const out = [];
   for (const raw of asGoalList(incoming)) {
-    const type = raw.type === 'url' || raw.type === 'element' ? raw.type : (raw.type || 'click');
+    const type = raw.type === 'url' || raw.type === 'element' || raw.type === 'custom' ? raw.type : (raw.type || 'click');
     let id = typeof raw.id === 'string' ? raw.id.trim() : '';
     let name = typeof raw.name === 'string' ? raw.name.trim() : '';
     if (id && existingById.has(id)) {
@@ -147,7 +177,7 @@ function prepareGoalsForSave(incoming, existingGoals) {
     }
     used.add(id);
 
-    const goal = { id: id, name: name, type: type === 'url' || type === 'element' ? type : (type === 'click' ? 'click' : type) };
+    const goal = { id: id, name: name, type: type === 'url' || type === 'element' || type === 'custom' ? type : (type === 'click' ? 'click' : type) };
     if (typeof raw.primary === 'boolean') {
       if (raw.primary) goal.primary = true;
     } else if (existingById.has(id) && existingById.get(id).primary) {
@@ -159,6 +189,8 @@ function prepareGoalsForSave(incoming, existingGoals) {
       goal.match = raw.match || 'contains';
     } else if (goal.type === 'click' || goal.type === 'element') {
       goal.selector = storedSelector(raw.selector);
+    } else if (goal.type === 'custom') {
+      goal.event = String(raw.event || '').trim();
     } else {
       Object.assign(goal, raw, { id: id, name: name, type: type });
     }
@@ -188,6 +220,9 @@ function validateGoals(goals) {
         if (element.error && element.error.indexOf('too long') !== -1) return 'a selector is too long';
         return 'an element goal needs a CSS selector';
       }
+    } else if (type === 'custom') {
+      const eventError = customEventError(g.event);
+      if (eventError) return eventError;
     } else {
       return `unknown goal type "${type}"`;
     }
@@ -305,6 +340,9 @@ async function backfillExperimentGoals(query = db.query.bind(db)) {
 module.exports = {
   MAX_VARIANTS,
   GENERATED_ID,
+  CUSTOM_EVENT_MAX,
+  RESERVED_CUSTOM_EVENT,
+  normaliseCustomEventName,
   variantCapError,
   variantAdditionAllowed,
   eventGoalId,

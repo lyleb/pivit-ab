@@ -1,5 +1,5 @@
 /**
- * pivitlab snippet — v0.9
+ * pivitlab snippet — v0.10
  *
  * Usage on client site:
  *   <script src="https://your-api.example.com/snippet/ab.js"
@@ -135,6 +135,23 @@
  * not send again. Preview and the editor do not watch. A pivit_qa visit
  * still sends the conversion as test traffic, on the same beacon as a click.
  *
+ * Custom goals (type "custom") count a conversion when the page calls
+ * pivit.track('payment_complete') with that goal's event name. A page can
+ * queue the call before this file loads with
+ * window.pivit = window.pivit || []; pivit.push(['track', 'payment_complete']).
+ * An array already stored on window.pivit is replayed. An existing object
+ * is kept, and track is added on it. One conversion per visitor per goal.
+ * Preview and the editor do not send. A pivit_qa visit still sends the
+ * conversion as test traffic.
+ *
+ * When the experiments response includes datalayer_events, the same goals
+ * also count a dataLayer.push({ event: 'payment_complete' }). Entries
+ * already on dataLayer are scanned, and later pushes are watched. The
+ * push itself is left alone. experience_impression, the Send to GA4 event,
+ * is ignored, including a push this file makes. The watch is not installed
+ * when the site has left the switch off. Preview and the editor do not
+ * watch dataLayer for goals.
+ *
  * Single-page apps: history.pushState, history.replaceState, popstate and
  * hashchange are watched. A change that leaves the address the same is
  * ignored. Changes inside about a tenth of a second collapse into one, so
@@ -166,15 +183,32 @@
   const api = buildPivitRuntime();
   const clickSeen = Object.create(null);
   const elementSeen = Object.create(null);
+  const customSeen = Object.create(null);
+  // Filled in once this file is running in a browser. Tests call the
+  // exported helpers and never reach the page wiring below.
+  let noteCustomEvent = function () {};
+  let addCustomGoals = function () {};
+  let customTracking = false;
   api.matchUrlGoal = matchUrlGoal;
   api.isSafeRegex = isSafeRegex;
   api.shouldCountUrlGoal = shouldCountUrlGoal;
   api.claimClick = claimClick;
   api.claimElement = claimElement;
+  api.claimCustom = claimCustom;
   api.clickStorageKey = clickStorageKey;
   api.elementStorageKey = elementStorageKey;
+  api.customStorageKey = customStorageKey;
   api.clickGoalsFrom = clickGoalsFrom;
   api.elementGoalsFrom = elementGoalsFrom;
+  api.customGoalsFrom = customGoalsFrom;
+  api.customGoalsFromExperiments = customGoalsFromExperiments;
+  api.normaliseCustomEventName = normaliseCustomEventName;
+  api.eventNameFromQueueItem = eventNameFromQueueItem;
+  api.dataLayerEntryEventName = dataLayerEntryEventName;
+  api.installPivitTracker = installPivitTracker;
+  api.hookDataLayer = hookDataLayer;
+  api.watchDataLayer = watchDataLayer;
+  api.customTrackingAllowed = customTrackingAllowed;
   api.createElementWatcher = createElementWatcher;
   api.clickGoalElement = clickGoalElement;
   api.createClickTracker = createClickTracker;
@@ -230,6 +264,48 @@
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (!root || !root.document) return;
   root.PivitRuntime = api;
+
+  // Calls made before this file loads sit on window.pivit as an array.
+  // Names are remembered now and sent only after a real visit is enrolled.
+  // Preview and the editor leave customTracking false, so nothing is sent.
+  const customNames = Object.create(null);
+  const customGoalList = [];
+  const customMemory = Object.create(null);
+  function flushCustom(onlyName) {
+    if (!customTracking) return;
+    for (let i = 0; i < customGoalList.length; i++) {
+      const goal = customGoalList[i];
+      if (!goal) continue;
+      if (onlyName && goal.event !== onlyName) continue;
+      if (!customNames[goal.event]) continue;
+      if (!claimCustom(localStorage, goal.visitorId, goal.experimentId, goal.goalId, customMemory)) continue;
+      sendEvent(goal.experimentId, goal.variantId, goal.visitorId, 'convert', goal.goalId);
+    }
+  }
+  noteCustomEvent = function (name) {
+    const clean = normaliseCustomEventName(name);
+    if (!clean) return;
+    customNames[clean] = 1;
+    flushCustom(clean);
+  };
+  addCustomGoals = function (list) {
+    const adding = list || [];
+    for (let i = 0; i < adding.length; i++) {
+      const goal = adding[i];
+      if (!goal || !goal.goalId || !goal.event) continue;
+      let duplicate = false;
+      for (let j = 0; j < customGoalList.length; j++) {
+        const existing = customGoalList[j];
+        if (existing.experimentId === goal.experimentId && existing.goalId === goal.goalId) {
+          duplicate = true;
+          break;
+        }
+      }
+      if (!duplicate) customGoalList.push(goal);
+    }
+    flushCustom(null);
+  };
+  installPivitTracker(root, noteCustomEvent);
 
   // document.currentScript can be unreliable when a script is injected
   // dynamically by a tag manager (GTM, etc.) rather than parsed directly from
@@ -583,6 +659,7 @@
     // including a render that does not change the address, then disconnect.
     // claimElement is the same once-per-visitor record as a click, on its
     // own key, so a repeat visit does not send a second conversion.
+    addCustomGoals(customGoalsFrom(goals, context));
     const elements = elementGoalsFrom(goals, context);
     if (!elements.length) return;
     if (!pageElementWatcher) {
@@ -663,6 +740,7 @@
         localStorage.setItem(item.key, '1');
         sendEvent(item.experimentId, item.variantId, visitorId, 'convert', item.goalId);
       });
+      addCustomGoals(customGoalsFromExperiments(data.experiments, assignments, visitorId));
     } catch (err) {
       console.warn('[ab] failed to check URL goals:', err);
     }
@@ -1197,6 +1275,7 @@
       }
 
       rememberPublicGa4(data);
+      if (customTrackingAllowed(mode)) customTracking = true;
 
       const visitorId = getVisitorId();
       const enrolledThisView = Object.create(null);
@@ -1267,6 +1346,7 @@
         enrolledThisView: enrolledThisView,
       });
       watchWaiting(first.waiting, window.location.href, enrolledThisView, false);
+      if (data && data.datalayer_events === true) watchDataLayer(window, noteCustomEvent);
 
       watchAnalyticsConsent(window, reportGa4FromConsent);
 
@@ -1283,6 +1363,7 @@
             if (!hasTrackingConsent()) return;
             rememberPublicGa4(next);
             watchAnalyticsConsent(window, reportGa4FromConsent);
+            if (next && next.datalayer_events === true) watchDataLayer(window, noteCustomEvent);
             const delivered = deliverNavigation({
               experiments: (next && next.experiments) || [],
               href: href,
@@ -1324,6 +1405,7 @@
               if (!hasTrackingConsent()) return;
               rememberPublicGa4(next);
               watchAnalyticsConsent(window, reportGa4FromConsent);
+              if (next && next.datalayer_events === true) watchDataLayer(window, noteCustomEvent);
               reportExperienceImpressions((next && next.experiments) || [], href);
             })
             .catch(function () { /* a later address change can still report */ });
@@ -1380,6 +1462,191 @@
   }
   function claimElement(storage, visitorId, experimentId, goalId, memory) {
     return claimOnce(storage, elementStorageKey(visitorId, experimentId, goalId), memory || elementSeen);
+  }
+  function customStorageKey(visitorId, experimentId, goalId) {
+    return '_ab_custom_' + visitorId + '_' + experimentId + '_' + goalId;
+  }
+  function claimCustom(storage, visitorId, experimentId, goalId, memory) {
+    return claimOnce(storage, customStorageKey(visitorId, experimentId, goalId), memory || customSeen);
+  }
+
+  // Keep this pattern in step with src/goals.js. experience_impression is
+  // the Send to GA4 event and is never a custom goal. The limits live in
+  // the function so a test that returns before this line still has them.
+  function normaliseCustomEventName(value) {
+    const max = 64;
+    const pattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+    if (typeof value !== 'string') return '';
+    const name = value.trim();
+    if (!name || name.length > max) return '';
+    if (name === 'experience_impression') return '';
+    if (!pattern.test(name)) return '';
+    return name;
+  }
+  function isQueueList(item) {
+    if (Array.isArray(item)) return true;
+    if (!item || typeof item !== 'object') return false;
+    if (typeof item.length !== 'number') return false;
+    return Object.prototype.toString.call(item) === '[object Arguments]';
+  }
+  function eventNameFromQueueItem(item) {
+    if (typeof item === 'string') return normaliseCustomEventName(item);
+    if (!item || typeof item !== 'object') return '';
+    if (isQueueList(item)) {
+      if (item[0] === 'track') return typeof item[1] === 'string' ? normaliseCustomEventName(item[1]) : '';
+      if (typeof item[0] === 'string') return normaliseCustomEventName(item[0]);
+      return '';
+    }
+    if (typeof item.event === 'string') return normaliseCustomEventName(item.event);
+    return '';
+  }
+  function dataLayerEntryEventName(entry) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return '';
+    if (Object.prototype.toString.call(entry) === '[object Arguments]') return '';
+    if (typeof entry.event !== 'string') return '';
+    return normaliseCustomEventName(entry.event);
+  }
+  function customGoalsFrom(goals, context) {
+    const ctx = context || {};
+    const list = goals || [];
+    const out = [];
+    for (let i = 0; i < list.length; i++) {
+      const goal = list[i] || {};
+      if (goal.type !== 'custom') continue;
+      const eventName = normaliseCustomEventName(goal.event);
+      if (!eventName) continue;
+      out.push({
+        experimentId: ctx.experimentId,
+        variantId: ctx.variantId,
+        visitorId: ctx.visitorId,
+        goalId: goal.id || eventName,
+        event: eventName,
+      });
+    }
+    return out;
+  }
+  function customGoalsFromExperiments(experiments, assignments, visitorId) {
+    const assigned = assignments || {};
+    const out = [];
+    (experiments || []).forEach(function (experiment) {
+      if (!experiment) return;
+      const variantId = assigned[experiment.id];
+      const variant = (experiment.variants || []).find(function (item) { return item.id === variantId; });
+      if (!variant) return;
+      const list = customGoalsFrom(goalsFor(experiment, variant), {
+        experimentId: experiment.id,
+        variantId: variantId,
+        visitorId: visitorId,
+      });
+      for (let i = 0; i < list.length; i++) out.push(list[i]);
+    });
+    return out;
+  }
+  function customTrackingAllowed(mode) {
+    if (mode && (mode.type === 'edit' || mode.type === 'preview')) return false;
+    return true;
+  }
+  function installPivitTracker(win, onTrack) {
+    if (!win) return null;
+    const previous = win.pivit;
+    if (previous && previous.__pivitTracker === true) return previous;
+    if (typeof previous === 'function') return previous;
+    const queued = Array.isArray(previous) ? previous.slice() : [];
+    function track(name) {
+      if (typeof onTrack === 'function') onTrack(name);
+    }
+    function replay() {
+      for (let i = 0; i < queued.length; i++) {
+        const name = eventNameFromQueueItem(queued[i]);
+        if (name) track(name);
+      }
+    }
+    if (previous && typeof previous === 'object' && !Array.isArray(previous)) {
+      const priorTrack = previous.track;
+      if (typeof priorTrack === 'function') {
+        previous.track = function (name) {
+          const result = priorTrack.apply(previous, arguments);
+          track(name);
+          return result;
+        };
+      } else {
+        previous.track = function (name) { track(name); };
+      }
+      previous.__pivitTracker = true;
+      replay();
+      return previous;
+    }
+    const tracker = { track: track, __pivitTracker: true };
+    try {
+      win.pivit = tracker;
+    } catch (err) {
+      return null;
+    }
+    replay();
+    return tracker;
+  }
+  function hookDataLayer(win, onEvent) {
+    if (!win || !Array.isArray(win.dataLayer)) return { hooked: false, scanned: 0 };
+    return hookDataLayerValue(win.dataLayer, onEvent);
+  }
+  function hookDataLayerValue(layer, onEvent) {
+    if (!Array.isArray(layer)) return { hooked: false, scanned: 0 };
+    if (layer.__pivitCustomEvents === true) return { hooked: true, scanned: 0 };
+    let scanned = 0;
+    for (let i = 0; i < layer.length; i++) {
+      const name = dataLayerEntryEventName(layer[i]);
+      if (!name) continue;
+      scanned += 1;
+      try { if (typeof onEvent === 'function') onEvent(name, layer[i]); } catch (err) { /* the entry stays on dataLayer */ }
+    }
+    const original = typeof layer.push === 'function' ? layer.push : Array.prototype.push;
+    function wrapped() {
+      const result = original.apply(layer, arguments);
+      try {
+        for (let i = 0; i < arguments.length; i++) {
+          const name = dataLayerEntryEventName(arguments[i]);
+          if (name && typeof onEvent === 'function') onEvent(name, arguments[i]);
+        }
+      } catch (err) { /* the push already landed */ }
+      return result;
+    }
+    wrapped.__pivitCustomEvents = true;
+    if (original && original.__pivitGa4Watch) wrapped.__pivitGa4Watch = true;
+    try {
+      layer.push = wrapped;
+      layer.__pivitCustomEvents = true;
+    } catch (err) {
+      return { hooked: false, scanned: scanned };
+    }
+    return { hooked: true, scanned: scanned };
+  }
+  function watchDataLayer(win, onEvent) {
+    if (!win) return { hooked: false, scanned: 0 };
+    if (win.__pivitDataLayerWatch === true) return hookDataLayer(win, onEvent);
+    let current = win.dataLayer;
+    let scanned = 0;
+    function attach(value) {
+      current = value;
+      const result = hookDataLayerValue(value, onEvent);
+      scanned += result.scanned || 0;
+      return result;
+    }
+    if (Array.isArray(current)) attach(current);
+    let defined = false;
+    try {
+      Object.defineProperty(win, 'dataLayer', {
+        configurable: true,
+        enumerable: true,
+        get: function () { return current; },
+        set: function (value) { attach(value); },
+      });
+      defined = true;
+    } catch (err) {
+      defined = false;
+    }
+    try { win.__pivitDataLayerWatch = true; } catch (err) { /* a sealed window still has the push hook */ }
+    const hooked = defined || (Array.isArray(current) && current.__pivitCustomEvents === true);
+    return { hooked: hooked, scanned: scanned };
   }
 
   // Goals saved before types existed have no "type" and are always click.
