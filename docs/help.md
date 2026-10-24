@@ -119,7 +119,17 @@ To turn this off, add data-spa="off" to the snippet tag:
 
 Tests and URL goals are then evaluated only when the page fully loads. Send to GA4 still sends experience_impression again when the address changes, and still only once for the same address.
 
-An address with ab_edit, or a preview token, is unchanged. It still opens that mode on a full load, and a later address change does not track it.
+An address with ab_edit, or a preview token, is not tracked. It still opens that mode on a full load. A later address change does not count a view. If the site drops ab_edit and the token while it changes the address, the editor puts them back.
+
+## Editing on a single-page app
+
+The visual editor has a switch, and a line under it that says which mode is on.
+
+**Browse** sends clicks to the site. Use it to move through a checkout. **Select** picks an element.
+
+To change or remove a change that is already in the list, choose **Apply without reloading**. pivitlab runs the change list again on the screen you are on, so you stay on this step. **Reload the page** starts again at the first step. The editor says so before you reload.
+
+**Steps note** is a short reminder on the variant, such as "Click Continue twice". It is shown in the editor and in previews. Save it with the other changes.
 
 ## When a test starts
 

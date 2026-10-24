@@ -198,7 +198,12 @@ async function flush() {
   assert.ok(pageBtn);
   assert.ok(pickBtn);
   assert.strictEqual(pageBtn.textContent, 'Whole page');
-  assert.strictEqual(pickBtn.textContent, '🎯 Select element');
+  assert.strictEqual(pickBtn.textContent, 'Select');
+  const browseBtn = fresh.document.getElementById('pivit-browse-btn');
+  const modeStatus = fresh.document.getElementById('pivit-mode-status');
+  assert.strictEqual(browseBtn.textContent, 'Browse');
+  assert.strictEqual(browseBtn.getAttribute('aria-pressed'), 'true');
+  assert.strictEqual(modeStatus.textContent, 'Browse is on. Clicks go to the site.');
 
   pageBtn.click();
   await flush();
@@ -251,6 +256,13 @@ async function flush() {
   assert.ok(editAreas[1].value.includes('data-runs'));
   editAreas[1].value = 'document.documentElement.setAttribute("data-runs", "99")';
   findButton(editPanel, 'Save change').click();
+  await flush();
+  const choice = existing.document.getElementById('pivit-replay-choice');
+  assert.ok(choice);
+  let choiceText = '';
+  walk(choice, (node) => { choiceText += node.textContent || ''; });
+  assert.ok(choiceText.includes('Reloading goes back to the first step.'));
+  findButton(choice, 'Reload the page').click();
   await flush();
   assert.strictEqual(existing.reloads.length, 1);
   assert.strictEqual(existing.document.documentElement.getAttribute('data-runs'), '1');

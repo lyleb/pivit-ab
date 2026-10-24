@@ -25,6 +25,7 @@ const { applyPeopleState } = require('./people-state');
 const { applyAccountInvites } = require('./account-invites');
 const { applyGa4 } = require('./ga4');
 const { applyActivation } = require('./activation');
+const { applyStepsNote } = require('./steps-note');
 
 const LOCK_KEY = 814021;
 
@@ -79,6 +80,9 @@ const VERSIONS = [
   // unchanged. The element start keeps its selector in activation_value.
   // Stays out of schema.sql.
   { version: '019', name: 'activation', run: applyActivation },
+  // A short reminder of how to reach this variant's screen. Empty by default,
+  // so existing variants gain no note. Stays out of schema.sql.
+  { version: '020', name: 'steps-note', run: applyStepsNote },
 ];
 
 async function ensureMigrationsTable(queryable) {
