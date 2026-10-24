@@ -160,7 +160,12 @@ async function main() {
     const saved = await request(ownerServer, 'PUT', `/api/experiments/${id}/goals`, {
       goals: [
         { type: 'click', selector: '#pay-now', name: 'Pay now' },
-        { type: 'custom', event: ' checkout_step ', name: 'Paid' },
+        {
+          type: 'custom',
+          event: ' checkout_step ',
+          name: 'Paid',
+          when: [{ key: ' step_name ', value: ' confirmation ' }],
+        },
       ],
     });
     assert.strictEqual(saved.status, 200, saved.text);
@@ -169,6 +174,7 @@ async function main() {
     assert.strictEqual(custom.event, 'checkout_step');
     assert.strictEqual(custom.name, 'Paid');
     assert.strictEqual(custom.selector, undefined);
+    assert.deepStrictEqual(custom.when, [{ key: 'step_name', value: 'confirmation' }]);
     assert.strictEqual(saved.json.goals.find((goal) => goal.type === 'click').selector, '#pay-now');
 
     const reserved = await request(ownerServer, 'PUT', `/api/experiments/${id}/goals`, {
@@ -181,9 +187,36 @@ async function main() {
     });
     assert.strictEqual(messy.status, 400);
     assert.strictEqual(messy.json.error, 'an event name can use letters, digits, and _ - .');
+    const tooMany = await request(ownerServer, 'PUT', `/api/experiments/${id}/goals`, {
+      goals: [{
+        type: 'custom',
+        event: 'checkout_step',
+        name: 'Paid',
+        when: [
+          { key: 'a', value: '1' },
+          { key: 'b', value: '2' },
+          { key: 'c', value: '3' },
+          { key: 'd', value: '4' },
+        ],
+      }],
+    });
+    assert.strictEqual(tooMany.status, 400);
+    assert.strictEqual(tooMany.json.error, 'a custom goal can have at most 3 conditions');
+    const longValue = await request(ownerServer, 'PUT', `/api/experiments/${id}/goals`, {
+      goals: [{ type: 'custom', event: 'checkout_step', name: 'Paid', when: [{ key: 'note', value: 'a'.repeat(101) }] }],
+    });
+    assert.strictEqual(longValue.status, 400);
+    assert.strictEqual(longValue.json.error, 'a condition value is too long');
+    const badKey = await request(ownerServer, 'PUT', `/api/experiments/${id}/goals`, {
+      goals: [{ type: 'custom', event: 'checkout_step', name: 'Paid', when: [{ key: 'step name', value: 'confirmation' }] }],
+    });
+    assert.strictEqual(badKey.status, 400);
+    assert.strictEqual(badKey.json.error, 'a condition key can use letters, digits, and _ - .');
 
     const kept = await db.query(`SELECT goals FROM experiments WHERE id = $1`, [id]);
-    assert.strictEqual(kept.rows[0].goals.find((goal) => goal.type === 'custom').event, 'checkout_step');
+    const stored = kept.rows[0].goals.find((goal) => goal.type === 'custom');
+    assert.strictEqual(stored.event, 'checkout_step');
+    assert.deepStrictEqual(stored.when, [{ key: 'step_name', value: 'confirmation' }]);
 
     await db.query(`UPDATE experiments SET status = 'running' WHERE id = $1`, [id]);
     await db.query(
@@ -199,6 +232,7 @@ async function main() {
     const servedOff = off.json.experiments.find((row) => row.id === id);
     assert.ok(servedOff);
     assert.strictEqual(servedOff.goals.find((goal) => goal.type === 'custom').event, 'checkout_step');
+    assert.deepStrictEqual(servedOff.goals.find((goal) => goal.type === 'custom').when, [{ key: 'step_name', value: 'confirmation' }]);
 
     const switched = await request(ownerServer, 'PATCH', `/api/sites/${siteId}/datalayer`, { datalayer_events: true });
     assert.strictEqual(switched.status, 200, switched.text);

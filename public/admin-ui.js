@@ -256,13 +256,27 @@
   }
 
   const ELEMENT_GOAL_HELP = 'A CSS selector. Once someone is in the test, pivitlab counts a conversion the first time this element is on the page. The address does not have to change. For example, #step-confirmation on a checkout.';
-  const CUSTOM_GOAL_HELP = 'The event name your site sends, such as payment_complete. pivitlab counts pivit.track(\'payment_complete\'), including a call queued before the snippet loads with window.pivit = window.pivit || []. A dataLayer push counts only when Count dataLayer events is switched on for the site. Each visitor counts once. Help has the code to paste.';
+  const CUSTOM_GOAL_HELP = 'The event name your site sends, such as payment_complete. pivitlab counts pivit.track(\'payment_complete\'), including a call queued before the snippet loads with window.pivit = window.pivit || []. Only when… can require up to 3 properties, such as step_name = confirmation. Every one has to match. pivit.track(\'checkout_step\', { step_name: \'confirmation\' }) sends those properties. A dataLayer push counts only when Count dataLayer events is switched on for the site. Each visitor counts once. Help has the code to paste.';
 
   function goalKind(type) {
     if (type === 'url') return 'Visited a URL';
     if (type === 'element') return 'Element appears';
     if (type === 'custom') return 'Custom event';
     return 'Click';
+  }
+
+  function customWhenText(when) {
+    if (!Array.isArray(when) || !when.length) return '';
+    const parts = [];
+    for (let i = 0; i < when.length && parts.length < 3; i++) {
+      const item = when[i];
+      if (!item || item.key == null || item.value == null) continue;
+      const key = String(item.key).trim();
+      const value = String(item.value).trim();
+      if (!key || !value) continue;
+      parts.push(key + ' = ' + value);
+    }
+    return parts.length ? ' where ' + parts.join(' and ') : '';
   }
 
   function describeGoal(goal) {
@@ -285,7 +299,8 @@
     }
     if (type === 'custom') {
       const eventName = goal.event || goal.detail || '';
-      return eventName ? `${label} → custom event ${eventName}` : label;
+      const where = customWhenText(goal.when);
+      return eventName ? `${label} → custom event ${eventName}${where}` : label;
     }
     const target = goal.selector || '';
     return target ? `${label} → ${target}` : label;
@@ -303,9 +318,11 @@
       return detail ? (name ? `${name} · Element appears ${detail}` : `Element appears ${detail}`) : (name ? `${name} · Element appears` : 'Element appears');
     }
     if (type === 'custom') {
-      const eventName = detail || '';
-      if (name && eventName && name !== eventName && name !== 'Custom event') return `${name} · Custom event ${eventName}`;
-      if (eventName) return `Custom event ${eventName}`;
+      const eventName = detail || goal.event || '';
+      const where = customWhenText(goal.when);
+      const body = eventName ? `Custom event ${eventName}${where}` : 'Custom event';
+      if (name && eventName && name !== eventName && name !== 'Custom event') return `${name} · ${body}`;
+      if (eventName) return body;
       return name || 'Custom event';
     }
     if (detail) return name ? `${name} · ${kind} ${detail}` : `${kind} ${detail}`;

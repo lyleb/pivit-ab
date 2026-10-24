@@ -136,21 +136,29 @@
  * still sends the conversion as test traffic, on the same beacon as a click.
  *
  * Custom goals (type "custom") count a conversion when the page calls
- * pivit.track('payment_complete') with that goal's event name. A page can
- * queue the call before this file loads with
+ * pivit.track('payment_complete') with that goal's event name. A second
+ * argument, pivit.track('checkout_step', { step_name: 'confirmation' }),
+ * is the properties. A goal may require up to 3 key = value conditions.
+ * Every condition has to match, compared as text, so the number 4 matches
+ * "4". A goal with no conditions counts every call with that event name.
+ * A page can queue the call before this file loads with
  * window.pivit = window.pivit || []; pivit.push(['track', 'payment_complete']).
+ * The queued form with properties is
+ * pivit.push(['track', 'checkout_step', { step_name: 'confirmation' }]).
  * An array already stored on window.pivit is replayed. An existing object
  * is kept, and track is added on it. One conversion per visitor per goal.
  * Preview and the editor do not send. A pivit_qa visit still sends the
  * conversion as test traffic.
  *
  * When the experiments response includes datalayer_events, the same goals
- * also count a dataLayer.push({ event: 'payment_complete' }). Entries
- * already on dataLayer are scanned, and later pushes are watched. The
- * push itself is left alone. experience_impression, the Send to GA4 event,
- * is ignored, including a push this file makes. The watch is not installed
- * when the site has left the switch off. Preview and the editor do not
- * watch dataLayer for goals.
+ * also count a dataLayer.push({ event: 'payment_complete' }). The same
+ * conditions are read from that object, so checkout_step with
+ * step_name confirmation counts and checkout_step with step_name basket
+ * does not. Entries already on dataLayer are scanned, and later pushes
+ * are watched. The push itself is left alone. experience_impression, the
+ * Send to GA4 event, is ignored, including a push this file makes. The
+ * watch is not installed when the site has left the switch off. Preview
+ * and the editor do not watch dataLayer for goals.
  *
  * Single-page apps: history.pushState, history.replaceState, popstate and
  * hashchange are watched. A change that leaves the address the same is
@@ -204,7 +212,9 @@
   api.customGoalsFromExperiments = customGoalsFromExperiments;
   api.normaliseCustomEventName = normaliseCustomEventName;
   api.eventNameFromQueueItem = eventNameFromQueueItem;
+  api.propsFromQueueItem = propsFromQueueItem;
   api.dataLayerEntryEventName = dataLayerEntryEventName;
+  api.customPropertiesMatch = customPropertiesMatch;
   api.installPivitTracker = installPivitTracker;
   api.hookDataLayer = hookDataLayer;
   api.watchDataLayer = watchDataLayer;
@@ -266,9 +276,13 @@
   root.PivitRuntime = api;
 
   // Calls made before this file loads sit on window.pivit as an array.
-  // Names are remembered now and sent only after a real visit is enrolled.
-  // Preview and the editor leave customTracking false, so nothing is sent.
-  const customNames = Object.create(null);
+  // The event name and its properties are remembered, and sent only after
+  // a real visit is enrolled. Preview and the editor leave customTracking
+  // false, so nothing is sent. A later goal can still match an earlier
+  // payload, which is how confirmation counts when basket was already
+  // on dataLayer. Fifty payloads is enough for a checkout and bounds a
+  // page that pushes on a timer.
+  const customEvents = [];
   const customGoalList = [];
   const customMemory = Object.create(null);
   function flushCustom(onlyName) {
@@ -277,15 +291,24 @@
       const goal = customGoalList[i];
       if (!goal) continue;
       if (onlyName && goal.event !== onlyName) continue;
-      if (!customNames[goal.event]) continue;
+      let matched = false;
+      for (let k = 0; k < customEvents.length; k++) {
+        const entry = customEvents[k];
+        if (entry.name !== goal.event) continue;
+        if (!customPropertiesMatch(goal.when, entry.props)) continue;
+        matched = true;
+        break;
+      }
+      if (!matched) continue;
       if (!claimCustom(localStorage, goal.visitorId, goal.experimentId, goal.goalId, customMemory)) continue;
       sendEvent(goal.experimentId, goal.variantId, goal.visitorId, 'convert', goal.goalId);
     }
   }
-  noteCustomEvent = function (name) {
+  noteCustomEvent = function (name, props) {
     const clean = normaliseCustomEventName(name);
     if (!clean) return;
-    customNames[clean] = 1;
+    customEvents.push({ name: clean, props: plainCustomProps(props) });
+    if (customEvents.length > 50) customEvents.shift();
     flushCustom(clean);
   };
   addCustomGoals = function (list) {
@@ -1500,6 +1523,67 @@
     if (typeof item.event === 'string') return normaliseCustomEventName(item.event);
     return '';
   }
+  // A plain object of properties. Arrays and argument lists are not props.
+  function plainCustomProps(value) {
+    if (!value || typeof value !== 'object') return null;
+    if (Array.isArray(value)) return null;
+    if (Object.prototype.toString.call(value) === '[object Arguments]') return null;
+    return value;
+  }
+  function propsFromQueueItem(item) {
+    if (!item || typeof item !== 'object') return null;
+    if (isQueueList(item)) {
+      if (item[0] === 'track') return plainCustomProps(item[2]);
+      return plainCustomProps(item[1]);
+    }
+    return plainCustomProps(item);
+  }
+  // Keep in step with src/goals.js. null means the conditions are not usable,
+  // so the goal must not convert. An empty list means the event name is enough.
+  function customWhenFromGoal(when) {
+    if (when == null) return [];
+    if (!Array.isArray(when)) return null;
+    const keyPattern = /^[A-Za-z0-9_.-]{1,64}$/;
+    const out = [];
+    for (let i = 0; i < when.length; i++) {
+      const item = when[i];
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+      const key = typeof item.key === 'string' ? item.key.trim() : '';
+      let value = '';
+      if (typeof item.value === 'string') value = item.value.trim();
+      else if (typeof item.value === 'number' && isFinite(item.value)) value = String(item.value);
+      else if (typeof item.value === 'boolean') value = item.value ? 'true' : 'false';
+      else return null;
+      if (!key && !value) continue;
+      if (!key || !value) return null;
+      if (key.length > 64 || !keyPattern.test(key)) return null;
+      if (value.length > 100) return null;
+      out.push({ key: key, value: value });
+    }
+    return out;
+  }
+  function customValueEquals(actual, expected) {
+    if (typeof actual === 'string' || typeof actual === 'boolean') {
+      return String(actual).trim() === String(expected).trim();
+    }
+    if (typeof actual === 'number' && isFinite(actual)) {
+      return String(actual).trim() === String(expected).trim();
+    }
+    return false;
+  }
+  function customPropertiesMatch(when, props) {
+    const conditions = customWhenFromGoal(when);
+    if (conditions === null) return false;
+    if (!conditions.length) return true;
+    const source = plainCustomProps(props);
+    if (!source) return false;
+    for (let i = 0; i < conditions.length; i++) {
+      const condition = conditions[i];
+      if (!Object.prototype.hasOwnProperty.call(source, condition.key)) return false;
+      if (!customValueEquals(source[condition.key], condition.value)) return false;
+    }
+    return true;
+  }
   function dataLayerEntryEventName(entry) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return '';
     if (Object.prototype.toString.call(entry) === '[object Arguments]') return '';
@@ -1515,12 +1599,15 @@
       if (goal.type !== 'custom') continue;
       const eventName = normaliseCustomEventName(goal.event);
       if (!eventName) continue;
+      const when = customWhenFromGoal(goal.when);
+      if (when === null) continue;
       out.push({
         experimentId: ctx.experimentId,
         variantId: ctx.variantId,
         visitorId: ctx.visitorId,
         goalId: goal.id || eventName,
         event: eventName,
+        when: when,
       });
     }
     return out;
@@ -1552,25 +1639,25 @@
     if (previous && previous.__pivitTracker === true) return previous;
     if (typeof previous === 'function') return previous;
     const queued = Array.isArray(previous) ? previous.slice() : [];
-    function track(name) {
-      if (typeof onTrack === 'function') onTrack(name);
+    function track(name, props) {
+      if (typeof onTrack === 'function') onTrack(name, props);
     }
     function replay() {
       for (let i = 0; i < queued.length; i++) {
         const name = eventNameFromQueueItem(queued[i]);
-        if (name) track(name);
+        if (name) track(name, propsFromQueueItem(queued[i]));
       }
     }
     if (previous && typeof previous === 'object' && !Array.isArray(previous)) {
       const priorTrack = previous.track;
       if (typeof priorTrack === 'function') {
-        previous.track = function (name) {
+        previous.track = function (name, props) {
           const result = priorTrack.apply(previous, arguments);
-          track(name);
+          track(name, props);
           return result;
         };
       } else {
-        previous.track = function (name) { track(name); };
+        previous.track = function (name, props) { track(name, props); };
       }
       previous.__pivitTracker = true;
       replay();

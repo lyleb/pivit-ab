@@ -183,11 +183,108 @@ assert.strictEqual(customRenamed[0].id, customSaved[0].id);
 assert.strictEqual(customRenamed[0].event, 'payment_complete');
 const customDefault = goals.prepareGoalsForSave([{ type: 'custom', event: 'checkout_step' }], []);
 assert.strictEqual(customDefault[0].name, 'Custom event');
+assert.strictEqual(customDefault[0].when, undefined);
 const customDefs = metrics.defsFromGoalList(customSaved);
 assert.strictEqual(customDefs[0].type, 'custom');
 assert.strictEqual(customDefs[0].detail, 'payment_complete');
 assert.strictEqual(customDefs[0].label, 'Paid');
 assert.strictEqual(customDefs[0].key, customSaved[0].id);
+assert.strictEqual(customDefs[0].when, undefined);
+
+const confirmationWhen = [{ key: ' step_name ', value: ' confirmation ' }];
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: 'checkout_step', when: confirmationWhen }]), null);
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: 'checkout_step', when: [] }]), null);
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: 'checkout_step', when: [{ key: '', value: '' }] }]), null);
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: 'checkout_step', when: [{ key: '_step', value: '4' }] }]), null);
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: 'checkout_step', when: [{ key: 'step', value: 4 }] }]), null);
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: 'checkout_step', when: [{ key: 'note', value: 'a'.repeat(100) }] }]), null);
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: 'checkout_step', when: 'confirmation' }]), 'conditions must be a list');
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: 'checkout_step', when: [{ key: 'step name', value: 'confirmation' }] }]), 'a condition key can use letters, digits, and _ - .');
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: 'checkout_step', when: [{ key: 'step_name' }] }]), 'a condition needs a value');
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: 'checkout_step', when: [{ value: 'confirmation' }] }]), 'a condition needs a key');
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: 'checkout_step', when: [{ key: 'note', value: 'a'.repeat(101) }] }]), 'a condition value is too long');
+assert.strictEqual(goals.validateGoals([{ type: 'custom', event: 'checkout_step', when: [{ key: 'a'.repeat(65), value: 'x' }] }]), 'a condition key is too long');
+assert.strictEqual(goals.validateGoals([{
+  type: 'custom',
+  event: 'checkout_step',
+  when: [
+    { key: 'step_name', value: 'confirmation' },
+    { key: 'step', value: '4' },
+    { key: 'step_name', value: 'basket' },
+  ],
+}]), 'two conditions use the same key');
+assert.strictEqual(goals.validateGoals([{
+  type: 'custom',
+  event: 'checkout_step',
+  when: [
+    { key: 'a', value: '1' },
+    { key: 'b', value: '2' },
+    { key: 'c', value: '3' },
+    { key: 'd', value: '4' },
+  ],
+}]), 'a custom goal can have at most 3 conditions');
+
+const withWhen = goals.prepareGoalsForSave([{
+  name: 'Paid',
+  type: 'custom',
+  event: 'checkout_step',
+  when: [{ key: ' step_name ', value: ' confirmation ' }, { key: 'step', value: 4 }, { key: '', value: '' }],
+}], []);
+assert.deepStrictEqual(withWhen[0].when, [
+  { key: 'step_name', value: 'confirmation' },
+  { key: 'step', value: '4' },
+]);
+const whenRenamed = goals.prepareGoalsForSave([{
+  id: withWhen[0].id,
+  name: 'Order paid',
+  type: 'custom',
+  event: 'checkout_step',
+  when: [{ key: 'step_name', value: 'confirmation' }],
+}], withWhen);
+assert.strictEqual(whenRenamed[0].id, withWhen[0].id);
+assert.deepStrictEqual(whenRenamed[0].when, [{ key: 'step_name', value: 'confirmation' }]);
+const whenDefs = metrics.defsFromGoalList(withWhen);
+assert.strictEqual(whenDefs[0].detail, 'checkout_step');
+assert.deepStrictEqual(whenDefs[0].when, withWhen[0].when);
+const lifted = goals.normaliseLegacyGoal({
+  type: 'custom',
+  id: 'paid',
+  event: 'checkout_step',
+  name: 'Paid',
+  when: [{ key: 'step_name', value: 'confirmation' }],
+});
+assert.deepStrictEqual(lifted.when, [{ key: 'step_name', value: 'confirmation' }]);
+const sameWhen = goals.goalIdentity({
+  type: 'custom',
+  id: 'paid',
+  event: 'checkout_step',
+  when: [{ key: 'step', value: '4' }, { key: 'step_name', value: 'confirmation' }],
+});
+const sameWhenOtherOrder = goals.goalIdentity({
+  type: 'custom',
+  id: 'paid',
+  event: 'checkout_step',
+  when: [{ key: 'step_name', value: 'confirmation' }, { key: 'step', value: '4' }],
+});
+assert.strictEqual(sameWhen, sameWhenOtherOrder);
+const basketWhen = goals.goalIdentity({
+  type: 'custom',
+  id: 'paid',
+  event: 'checkout_step',
+  when: [{ key: 'step_name', value: 'basket' }],
+});
+assert.notStrictEqual(sameWhen, basketWhen);
+const whenSplit = goals.planGoalMigration([
+  { goals: [{ type: 'custom', id: 'paid', event: 'checkout_step', when: [{ key: 'step_name', value: 'basket' }] }] },
+  { goals: [{ type: 'custom', id: 'paid', event: 'checkout_step', when: [{ key: 'step_name', value: 'confirmation' }] }] },
+]);
+assert.strictEqual(whenSplit.scope, 'divergent');
+const whenShared = goals.planGoalMigration([
+  { goals: [{ type: 'custom', id: 'paid', event: 'checkout_step', when: [{ key: 'step_name', value: 'confirmation' }] }] },
+  { goals: [{ type: 'custom', id: 'paid', event: 'checkout_step', when: [{ key: 'step_name', value: 'confirmation' }] }] },
+]);
+assert.strictEqual(whenShared.scope, 'shared');
+assert.deepStrictEqual(whenShared.goals[0].when, [{ key: 'step_name', value: 'confirmation' }]);
 
 const elementShared = goals.planGoalMigration([
   { goals: [{ type: 'element', selector: CONFIRM, id: 'done' }] },

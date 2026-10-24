@@ -20,9 +20,15 @@ const GENERATED_ID = /^g_[a-z0-9]{8,32}$/;
 // Keep this in step with snippet/ab.js. An event name is what the page
 // passes to pivit.track, and what a dataLayer object puts in event.
 // experience_impression is the Send to GA4 event, so it cannot be a goal.
+// Optional when conditions live on the same goal JSON. Every one has to
+// match. Keys use letters, digits, and _ - . Values are text, max 100.
 const CUSTOM_EVENT_MAX = 64;
 const CUSTOM_EVENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 const RESERVED_CUSTOM_EVENT = 'experience_impression';
+const CUSTOM_WHEN_MAX = 3;
+const CUSTOM_KEY_MAX = 64;
+const CUSTOM_VALUE_MAX = 100;
+const CUSTOM_KEY_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
 
 function normaliseCustomEventName(value) {
   if (typeof value !== 'string') return '';
@@ -40,6 +46,54 @@ function customEventError(value) {
   if (name === RESERVED_CUSTOM_EVENT) return 'experience_impression is used by Send to GA4. Choose another event name.';
   if (!CUSTOM_EVENT_PATTERN.test(name)) return 'an event name can use letters, digits, and _ - .';
   return null;
+}
+
+function customWhenValue(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return null;
+}
+
+function customWhenParts(item) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) {
+    return { error: 'each condition needs a key and a value' };
+  }
+  const key = typeof item.key === 'string' ? item.key.trim() : '';
+  const value = customWhenValue(item.value);
+  if (value == null) return { error: 'a condition value must be text' };
+  if (!key && !value) return { empty: true };
+  if (!key) return { error: 'a condition needs a key' };
+  if (!value) return { error: 'a condition needs a value' };
+  if (key.length > CUSTOM_KEY_MAX) return { error: 'a condition key is too long' };
+  if (!CUSTOM_KEY_PATTERN.test(key)) return { error: 'a condition key can use letters, digits, and _ - .' };
+  if (value.length > CUSTOM_VALUE_MAX) return { error: 'a condition value is too long' };
+  return { key: key, value: value };
+}
+
+// null when means "no conditions". An error is a problem to show the user.
+// Empty rows are skipped. The stored list keeps the order they were typed.
+function parseCustomWhen(when) {
+  if (when == null) return { when: [] };
+  if (!Array.isArray(when)) return { error: 'conditions must be a list' };
+  if (when.length > CUSTOM_WHEN_MAX) return { error: 'a custom goal can have at most 3 conditions' };
+  const out = [];
+  const seen = new Set();
+  for (const item of when) {
+    const parsed = customWhenParts(item);
+    if (parsed.error) return { error: parsed.error };
+    if (parsed.empty) continue;
+    if (seen.has(parsed.key)) return { error: 'two conditions use the same key' };
+    seen.add(parsed.key);
+    out.push({ key: parsed.key, value: parsed.value });
+  }
+  return { when: out };
+}
+
+function customWhenError(when) {
+  const parsed = parseCustomWhen(when);
+  return parsed.error || null;
 }
 
 function variantCapError() {
@@ -83,6 +137,8 @@ function normaliseLegacyGoal(goal) {
   }
   if (type === 'custom') {
     base.event = typeof goal.event === 'string' ? goal.event.trim() : '';
+    const parsed = parseCustomWhen(goal.when);
+    if (!parsed.error && parsed.when.length) base.when = parsed.when;
     return base;
   }
   const copy = Object.assign({}, goal, base);
@@ -97,7 +153,11 @@ function goalIdentity(goal) {
   if (type === 'url') return ['url', id, goal.url_match || '', goal.match || 'contains'].join('\0');
   if (type === 'click') return ['click', id, goal.selector || ''].join('\0');
   if (type === 'element') return ['element', id, goal.selector || ''].join('\0');
-  if (type === 'custom') return ['custom', id, goal.event || ''].join('\0');
+  if (type === 'custom') {
+    const parsed = parseCustomWhen(goal.when);
+    const when = (parsed.when || []).map((item) => item.key + '=' + item.value).sort().join('\u0001');
+    return ['custom', id, goal.event || '', when].join('\0');
+  }
   return [type, id, goal.selector || '', goal.url_match || '', goal.event || ''].join('\0');
 }
 
@@ -191,6 +251,13 @@ function prepareGoalsForSave(incoming, existingGoals) {
       goal.selector = storedSelector(raw.selector);
     } else if (goal.type === 'custom') {
       goal.event = String(raw.event || '').trim();
+      const parsed = parseCustomWhen(raw.when);
+      if (parsed.error) {
+        const err = new Error(parsed.error);
+        err.status = 400;
+        throw err;
+      }
+      if (parsed.when.length) goal.when = parsed.when;
     } else {
       Object.assign(goal, raw, { id: id, name: name, type: type });
     }
@@ -223,6 +290,8 @@ function validateGoals(goals) {
     } else if (type === 'custom') {
       const eventError = customEventError(g.event);
       if (eventError) return eventError;
+      const whenError = customWhenError(g.when);
+      if (whenError) return whenError;
     } else {
       return `unknown goal type "${type}"`;
     }
@@ -341,8 +410,11 @@ module.exports = {
   MAX_VARIANTS,
   GENERATED_ID,
   CUSTOM_EVENT_MAX,
+  CUSTOM_WHEN_MAX,
+  CUSTOM_VALUE_MAX,
   RESERVED_CUSTOM_EVENT,
   normaliseCustomEventName,
+  parseCustomWhen,
   variantCapError,
   variantAdditionAllowed,
   eventGoalId,

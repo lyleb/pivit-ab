@@ -240,6 +240,9 @@ for (const phrase of [
   'Count dataLayer events',
   'window.pivit = window.pivit || []',
   "pivit.track('payment_complete')",
+  'Only when…',
+  "pivit.track('checkout_step', { step_name: 'confirmation' })",
+  'step_name',
 ]) {
   assert.ok(helpPage.includes(phrase), `help.html missing ${phrase}`);
   assert.ok(helpDoc.includes(phrase), `help.md missing ${phrase}`);

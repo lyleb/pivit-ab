@@ -161,6 +161,8 @@ This is separate from **Start the test when… This element appears**. That sett
 
 A goal can be a **Custom event**. You give it an event name, such as `payment_complete`. Letters, digits, and `_` `-` `.` are allowed. The name `experience_impression` is kept for Send to GA4, so it cannot be a goal.
 
+You can also say **Only when…** and add up to 3 conditions, such as `step_name` = `confirmation`. Every condition has to match. pivitlab compares them as text, so `4` matches the number 4. A key uses letters, digits, and `_` `-` `.`. A value can be up to 100 characters. Leave Only when empty to count every event with that name. A checkout that sends `checkout_step` on every step can require `step_name` = `confirmation`, so the basket step does not count.
+
 Each visitor counts once for that goal. A preview, and the editor, do not count. A visit with `?pivit_qa=1` is still test traffic.
 
 Add it from the create wizard or from the experiment’s Goals tab.
@@ -180,6 +182,17 @@ After the snippet has loaded, this does the same thing:
 pivit.track('payment_complete');
 ```
 
+To send properties, add an object. The goal counts only when its conditions match:
+
+```
+window.pivit = window.pivit || [];
+window.pivit.push(['track', 'checkout_step', { step_name: 'confirmation' }]);
+```
+
+```
+pivit.track('checkout_step', { step_name: 'confirmation' });
+```
+
 If the page already uses `window.pivit` for something else, pivitlab leaves that object in place and adds `track`.
 
 ### From the data layer
@@ -191,6 +204,13 @@ pivitlab then counts a push that looks like this, including one that is already 
 ```
 window.dataLayer = window.dataLayer || [];
 window.dataLayer.push({ event: 'payment_complete' });
+```
+
+The same conditions are read from that object:
+
+```
+window.dataLayer = window.dataLayer || [];
+window.dataLayer.push({ event: 'checkout_step', step_name: 'confirmation' });
 ```
 
 The push is left as it is, so Tag Manager still sees it. pivitlab does not count its own `experience_impression` event.

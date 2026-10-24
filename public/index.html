@@ -235,6 +235,10 @@
     margin-top: 10px; background: var(--card-2); border: 1px solid var(--border); border-radius: 8px;
   }
   .goal-row .full-width { grid-column: 1 / -1; }
+  .g-when-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  .g-when-row input { margin: 0; flex: 1; min-width: 0; }
+  .g-when-eq { color: var(--text-muted); }
+  .add-row .g-when { flex: 1 0 100%; }
   .picker-link {
     display: inline-block; padding: 8px 12px; background: #fff; color: #131723;
     border-radius: 8px; text-decoration: none; font-weight: 700; cursor: grab; font-size: 0.85em;
@@ -3528,6 +3532,12 @@ function renderDivergentGoals() {
         <input class="g-value" type="text" placeholder="#cta-button" style="margin:0; flex:1;">
         <input class="g-id" type="text" placeholder="name" style="margin:0; width:140px;">
         <button type="button" data-action="add-goal" data-id="${v.id}">Add goal</button>
+        <div class="g-when" hidden>
+          <label>Only when…</label>
+          <div class="g-when-rows"></div>
+          <button type="button" class="btn-ghost g-when-add">Add a condition</button>
+          <p class="hint">Every condition has to match. Up to 3. For example, step_name = confirmation.</p>
+        </div>
       </div>
       <p class="hint g-element-help" data-goal-help="${v.id}" hidden></p>
     </div>`;
@@ -3722,10 +3732,11 @@ document.getElementById('page-detail').addEventListener('click', async (e) => {
       detailError(type === 'url' ? 'Add the URL text to match.' : (type === 'custom' ? 'Add an event name.' : 'Add a selector.'));
       return;
     }
+    const when = type === 'custom' ? readWhen(draft) : [];
     const goal = type === 'url'
       ? { type: 'url', url_match: value, name: label, match: 'contains' }
       : (type === 'custom'
-        ? { type: 'custom', event: value, name: label }
+        ? { type: 'custom', event: value, name: label, ...(when.length ? { when } : {}) }
         : { type: type === 'element' ? 'element' : 'click', selector: value, name: label });
     await patchVariant(variant, { goals: [...(variant.goals || []), goal] });
     return;
@@ -3854,6 +3865,11 @@ document.getElementById('page-detail').addEventListener('change', (e) => {
   else if (e.target.value === 'element') value.placeholder = '#step-confirmation';
   else if (e.target.value === 'custom') value.placeholder = 'payment_complete';
   else value.placeholder = '#cta-button';
+  const when = draft.querySelector('.g-when');
+  if (when) {
+    when.hidden = e.target.value !== 'custom';
+    if (!when.hidden) ensureWhenRow(when);
+  }
   if (help) {
     if (e.target.value === 'element') {
       help.hidden = false;
@@ -5682,6 +5698,48 @@ document.getElementById('page-create').addEventListener('change', (e) => {
 
 // --- Goals helpers ---
 
+function whenRowHtml(key, value) {
+  const safeKey = UI.escapeHtml(key || '');
+  const safeValue = UI.escapeHtml(value || '');
+  return `<div class="g-when-row">
+    <input class="g-when-key" type="text" placeholder="step_name" spellcheck="false" maxlength="64" value="${safeKey}">
+    <span class="g-when-eq">=</span>
+    <input class="g-when-value" type="text" placeholder="confirmation" maxlength="100" value="${safeValue}">
+    <button type="button" class="remove-row g-when-remove">Remove</button>
+  </div>`;
+}
+
+function readWhen(root) {
+  if (!root) return [];
+  return Array.from(root.querySelectorAll('.g-when-row')).map((row) => ({
+    key: row.querySelector('.g-when-key').value.trim(),
+    value: row.querySelector('.g-when-value').value.trim(),
+  })).filter((item) => item.key || item.value);
+}
+
+function syncWhenAdd(host) {
+  if (!host) return;
+  const add = host.querySelector('.g-when-add');
+  if (add) add.hidden = host.querySelectorAll('.g-when-row').length >= 3;
+}
+
+function fillWhen(host, when) {
+  if (!host) return;
+  const rows = host.querySelector('.g-when-rows');
+  if (!rows) return;
+  const list = Array.isArray(when) ? when.slice(0, 3) : [];
+  rows.innerHTML = list.map((item) => whenRowHtml(item && item.key, item && item.value)).join('');
+  syncWhenAdd(host);
+}
+
+function ensureWhenRow(host) {
+  if (!host) return;
+  const rows = host.querySelector('.g-when-rows');
+  if (!rows) return;
+  if (!rows.querySelector('.g-when-row')) rows.insertAdjacentHTML('beforeend', whenRowHtml('', ''));
+  syncWhenAdd(host);
+}
+
 function addGoalRow(prefill, listId) {
   const list = document.getElementById(listId || 'wizard-goals-list');
   if (!list) return;
@@ -5716,6 +5774,12 @@ function addGoalRow(prefill, listId) {
       <input class="g-name" placeholder="Thank-you page">
     </div>
     <p class="hint g-element-help full-width" hidden></p>
+    <div class="g-when full-width" hidden>
+      <label>Only when…</label>
+      <div class="g-when-rows"></div>
+      <button type="button" class="btn-ghost g-when-add">Add a condition</button>
+      <p class="hint">Every condition has to match. Up to 3. For example, step_name = confirmation. Leave this empty to count every event with that name.</p>
+    </div>
     <p class="hint g-custom-help full-width" hidden></p>
     <div class="g-test full-width" hidden>
       <label>Test this URL</label>
@@ -5738,6 +5802,7 @@ function addGoalRow(prefill, listId) {
   const testWrap = row.querySelector('.g-test');
   const helpEl = row.querySelector('.g-element-help');
   const customHelpEl = row.querySelector('.g-custom-help');
+  const whenEl = row.querySelector('.g-when');
   if (helpEl) helpEl.textContent = UI.ELEMENT_GOAL_HELP;
   if (customHelpEl) customHelpEl.textContent = UI.CUSTOM_GOAL_HELP;
   function renderValueField() {
@@ -5748,6 +5813,10 @@ function addGoalRow(prefill, listId) {
     testWrap.hidden = !url;
     if (helpEl) helpEl.hidden = !element;
     if (customHelpEl) customHelpEl.hidden = !custom;
+    if (whenEl) {
+      whenEl.hidden = !custom;
+      if (custom) ensureWhenRow(whenEl);
+    }
     if (element) {
       valueLabelEl.textContent = 'Selector';
       valueEl.placeholder = '#step-confirmation';
@@ -5779,7 +5848,10 @@ function addGoalRow(prefill, listId) {
     row.querySelector('.g-name').value = prefill.name || prefill.id || '';
     if (prefill.match) matchEl.value = prefill.match;
     if (prefill.type === 'url') valueEl.value = prefill.url_match || '';
-    else if (prefill.type === 'custom') valueEl.value = prefill.event || '';
+    else if (prefill.type === 'custom') {
+      valueEl.value = prefill.event || '';
+      fillWhen(whenEl, prefill.when);
+    }
     else valueEl.value = prefill.selector || '';
   }
   renderValueField();
@@ -5796,6 +5868,8 @@ function collectGoals(listId) {
       goal.match = row.querySelector('.g-match').value || 'contains';
     } else if (type === 'custom') {
       goal.event = value;
+      const when = readWhen(row);
+      if (when.length) goal.when = when;
     } else {
       goal.selector = value;
     }
@@ -5874,6 +5948,25 @@ document.body.addEventListener('click', async (e) => {
 });
 
 document.body.addEventListener('click', (e) => {
+  const add = e.target.closest('.g-when-add');
+  if (add) {
+    const host = add.closest('.g-when');
+    const rows = host && host.querySelector('.g-when-rows');
+    if (!rows || rows.querySelectorAll('.g-when-row').length >= 3) return;
+    rows.insertAdjacentHTML('beforeend', whenRowHtml('', ''));
+    syncWhenAdd(host);
+    const input = rows.querySelector('.g-when-row:last-child .g-when-key');
+    if (input) input.focus();
+    return;
+  }
+  const remove = e.target.closest('.g-when-remove');
+  if (remove) {
+    const host = remove.closest('.g-when');
+    const row = remove.closest('.g-when-row');
+    if (row) row.remove();
+    syncWhenAdd(host);
+    return;
+  }
   const btn = e.target.closest('.g-test-btn');
   if (!btn || !window.PivitUrl) return;
   const row = btn.closest('.goal-row');
