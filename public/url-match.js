@@ -352,6 +352,16 @@
     return "This test only runs when '" + sel + "' is on the page. Preview waits for that element and applies nothing if it never appears.";
   }
 
+  // The dashboard cannot see the customer's DOM. This says that a live
+  // visitor is counted only once the element appears, and that preview
+  // does not wait for it.
+  function previewActivationNote(type, selector) {
+    if (type !== 'element') return '';
+    const sel = String(selector == null ? '' : selector).trim();
+    if (!sel) return '';
+    return "Live visitors are counted only once '" + sel + "' appears. Preview shows the variant straight away, and it does not wait for that element.";
+  }
+
   function previewUrlWarning(pattern, href, matchType) {
     const page = String(href == null ? '' : href).trim();
     const pat = String(pattern == null ? '' : pattern).trim();
@@ -488,6 +498,7 @@
     pageMatchLabel: pageMatchLabel,
     pageMatchHint: pageMatchHint,
     previewElementNote: previewElementNote,
+    previewActivationNote: previewActivationNote,
     previewUrlWarning: previewUrlWarning,
     defaultPreviewPage: defaultPreviewPage,
     matchingPreviewPage: matchingPreviewPage,

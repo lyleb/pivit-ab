@@ -121,6 +121,20 @@ Tests and URL goals are then evaluated only when the page fully loads. Send to G
 
 An address with ab_edit, or a preview token, is unchanged. It still opens that mode on a full load, and a later address change does not track it.
 
+## When a test starts
+
+Each test has **Start the test when…**.
+
+**The page loads** is the usual setting. pivitlab counts a visitor when the address matches. An older option, **Only run when this element is on the page**, can still wait about four seconds for an element. If that element is not there, the visitor is not counted. Tests that already use it keep that behaviour.
+
+**This element appears** waits for a CSS selector for the whole visit. The visitor is counted, the variant is shown, and the view is sent only after that element is on the page. A visitor who never sees it is not counted. A checkout can use `#step-payment` so only people who reach payment are in the test. The four-second wait does not apply here.
+
+A single-page app still checks the address. If the visitor moves to a page the test does not match before the element appears, they are not counted. If the address stays the same, as on a checkout that swaps the step in place, pivitlab keeps watching until they leave.
+
+Preview shows the variant straight away, so you can look at it without waiting for the element. That visit is not counted. The editor is unchanged. A visit with `?pivit_qa=1` is still marked as test traffic, and only once the element has appeared.
+
+If you set both the element rule and this element appears, both have to be on the page. pivitlab keeps watching for the whole visit, rather than giving up after four seconds.
+
 ## Send to GA4
 
 On Home, each site has **Send to GA4** and a box for that site's GA4 measurement ID. The ID starts with G-. This is included on paid plans. pivitlab has no priced plans yet. Paid plan is the switch that lets an agency use Send to GA4. A Platform admin sets it on Home, on the Send to GA4 card. That card also says how many sites have Send to GA4 switched on.

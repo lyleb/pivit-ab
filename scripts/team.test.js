@@ -18,7 +18,7 @@ const migrate = read('src/db/migrate.js');
 
 assert.ok(!schema.includes('team_people'));
 assert.ok(migrate.includes("{ version: '017', name: 'account-invites', run: applyAccountInvites }"));
-assert.ok(!migrate.includes("version: '019'"));
+assert.ok(!migrate.includes("{ version: '019', name: 'account-invites'"));
 assert.ok(team.includes('membership.removed'));
 assert.ok(team.includes('LAST_ACCOUNT_OWNER'));
 assert.ok(team.includes('NOT_YOURSELF'));

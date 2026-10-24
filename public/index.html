@@ -742,13 +742,24 @@
           <p class="hint" id="wizard-match-hint">Contains. The test runs on any page whose address includes this text.</p>
           <label for="wizard-element">Only run when this element is on the page</label>
           <input id="wizard-element" placeholder='button[name="add"]' spellcheck="false" autocomplete="off">
-          <p class="hint" id="wizard-element-hint">Optional. The URL rule still applies. For example, <span class="mono">button[name="add"]</span> or <span class="mono">.product-form__submit</span>.</p>
+          <p class="hint" id="wizard-element-hint">Optional. The URL rule still applies. For example, <span class="mono">button[name="add"]</span> or <span class="mono">.product-form__submit</span>. This looks for about four seconds. It is separate from when the test starts.</p>
+          <label for="wizard-activation">Start the test when…</label>
+          <select id="wizard-activation">
+            <option value="page_load">the page loads</option>
+            <option value="element">this element appears</option>
+          </select>
+          <p class="hint" id="wizard-activation-hint">The test starts when the address matches. This is the usual setting, and it is how tests work today.</p>
+          <div id="wizard-activation-wrap" hidden>
+            <label for="wizard-activation-value">Element that starts the test</label>
+            <input id="wizard-activation-value" placeholder="#step-payment" spellcheck="false" autocomplete="off">
+            <p class="hint">A CSS selector. pivitlab watches for it for the whole visit, then counts the visitor and shows the variant. Visitors who never see it are left out. For example, <span class="mono">#step-payment</span> on a checkout.</p>
+          </div>
           <label for="wizard-hosts">Site domain(s)</label>
           <textarea id="wizard-hosts" class="hosts" placeholder="example.com" spellcheck="false"></textarea>
           <p class="hint">Sites this experiment may run on. Separate extra domains with a comma or a new line. www and the bare domain count as the same.</p>
           <label for="wizard-client">Viewer (optional)</label>
           <select id="wizard-client"><option value="">None — internal only</option></select>
-          <p id="wizard-lock-hint" class="hint" hidden>Name, URL and test type are fixed once the draft exists. A demo test cannot be switched to live. Match, the element rule, the viewer and site domains can still be changed. Match and the element rule can also be changed later in Settings.</p>
+          <p id="wizard-lock-hint" class="hint" hidden>Name, URL and test type are fixed once the draft exists. A demo test cannot be switched to live. Match, the element rule, when the test starts, the viewer and site domains can still be changed. Match, the element rule and when the test starts can also be changed later in Settings.</p>
         </div>
 
         <div id="wizard-step-2" class="wizard-step" hidden>
@@ -760,6 +771,7 @@
             <button type="button" class="btn-ghost" id="wizard-url-use-match">Use a matching page</button>
           </div>
           <p id="wizard-element-note" class="preview-element-note" hidden></p>
+          <p id="wizard-activation-note" class="preview-element-note" hidden></p>
           <div id="wizard-variants"></div>
           <p id="wizard-split-note" class="hint"></p>
           <button type="button" class="btn-ghost" id="wizard-add-variant" style="margin-top:10px;">+ Add variant</button>
@@ -826,6 +838,7 @@
           <button type="button" class="btn-ghost" id="manage-url-use-match">Use a matching page</button>
         </div>
         <p id="manage-element-note" class="preview-element-note" hidden></p>
+        <p id="manage-activation-note" class="preview-element-note" hidden></p>
         <div style="margin-top:14px;"><button type="button" onclick="loadManageVariants()">Load variants</button></div>
         <p id="manage-msg" class="hint"></p>
         <div id="manage-variants-list"></div>
@@ -1217,6 +1230,9 @@ const wizard = {
   url: '',
   match: 'contains',
   matchTouched: false,
+  elementSelector: '',
+  activationType: 'page_load',
+  activationValue: '',
   clientId: '',
   pageUrl: '',
   hosts: '',
@@ -2734,6 +2750,8 @@ function previewRule(source) {
     allowedHosts: Array.isArray(hosts) ? hosts : [],
     origin: (source && source.origin) || '',
     elementSelector: (source && (source.elementSelector || source.element_selector)) || '',
+    activationType: (source && (source.activationType || source.activation_type)) || 'page_load',
+    activationValue: (source && (source.activationValue || source.activation_value)) || '',
   };
 }
 
@@ -2742,6 +2760,46 @@ function showPreviewElementNote(el, selector) {
   const message = PivitUrl.previewElementNote(selector);
   el.textContent = message;
   el.hidden = !message;
+}
+
+function showPreviewActivationNote(el, rule) {
+  if (!el || !window.PivitUrl) return;
+  const message = PivitUrl.previewActivationNote(rule && rule.activationType, rule && rule.activationValue);
+  el.textContent = message;
+  el.hidden = !message;
+}
+
+function syncActivationInputs(prefix) {
+  const typeEl = document.getElementById(prefix + '-activation');
+  const wrap = document.getElementById(prefix + '-activation-wrap');
+  const hint = document.getElementById(prefix + '-activation-hint');
+  if (!typeEl) return;
+  const element = typeEl.value === 'element';
+  if (wrap) wrap.hidden = !element;
+  if (hint) {
+    hint.textContent = element
+      ? 'pivitlab watches for this element for the whole visit. The visitor is counted only after it appears. Visitors who never see it are left out.'
+      : 'The test starts when the address matches. This is the usual setting, and it is how tests work today.';
+  }
+}
+
+function readActivation(prefix) {
+  const typeEl = document.getElementById(prefix + '-activation');
+  const valueEl = document.getElementById(prefix + '-activation-value');
+  const type = typeEl && typeEl.value === 'element' ? 'element' : 'page_load';
+  const value = valueEl ? valueEl.value.trim() : '';
+  return { activation_type: type, activation_value: type === 'element' ? value : '' };
+}
+
+function activationClientError(activation) {
+  if (!activation || activation.activation_type !== 'element') return '';
+  const value = String(activation.activation_value || '');
+  if (!value) return 'Enter the CSS selector for the element that starts the test.';
+  if (value.length > 500) return 'That selector is too long.';
+  if (/[{}<>]/.test(value) || /[\u0000-\u001f]/.test(value)) {
+    return 'Enter a CSS selector, for example #step-payment.';
+  }
+  return '';
 }
 
 function showPreviewUrlWarning(box, textEl, button, rule, pageUrl) {
@@ -2847,6 +2905,7 @@ function renderDetail() {
           ${UI.isDemoTest(exp) ? UI.demoBadgeHtml() : ''}
           <span class="mono">${UI.escapeHtml(exp.url_match || '—')}</span>
           ${exp.element_selector ? `<span class="mono" title="Only runs when this element is on the page">${UI.escapeHtml(exp.element_selector)}</span>` : ''}
+          ${exp.activation_type === 'element' && exp.activation_value ? `<span class="mono" title="The test starts when this element appears">Starts when ${UI.escapeHtml(exp.activation_value)} appears</span>` : ''}
           ${matchBadge(exp)}
           ${noDomainBadge(exp)}
           <span>Viewer · ${UI.escapeHtml(client)}</span>
@@ -2866,6 +2925,7 @@ function renderDetail() {
       <button type="button" class="btn-ghost" data-action="use-matching-page">Use a matching page</button>
     </div>
     <p id="detail-element-note" class="preview-element-note" hidden></p>
+    <p id="detail-activation-note" class="preview-element-note" hidden></p>
     <div class="tabs" role="tablist">
       ${['overview', 'variants', 'goals', 'results', 'settings'].map((tab) =>
         `<button type="button" role="tab" data-action="tab" data-tab="${tab}" aria-selected="false">${tab[0].toUpperCase()}${tab.slice(1)}</button>`
@@ -2908,6 +2968,7 @@ function renderDetail() {
           <button type="button" class="btn-ghost" data-action="use-matching-page">Use a matching page</button>
         </div>
         <p id="detail-field-element-note" class="preview-element-note" hidden></p>
+        <p id="detail-field-activation-note" class="preview-element-note" hidden></p>
         <p id="variant-warnings" class="hint"></p>
         <p id="variant-cap-note" class="hint"></p>
         <div id="detail-variants"></div>
@@ -3044,7 +3105,18 @@ function renderDetail() {
         <p class="hint" id="settings-match-hint"></p>
         <label for="settings-element">Only run when this element is on the page</label>
         <input id="settings-element" spellcheck="false" autocomplete="off" placeholder='button[name="add"]' value="${UI.escapeHtml(exp.element_selector || '')}">
-        <p class="hint">Optional. The URL rule still applies. For example, <span class="mono">button[name="add"]</span> or <span class="mono">.product-form__submit</span>.</p>
+        <p class="hint">Optional. The URL rule still applies. For example, <span class="mono">button[name="add"]</span> or <span class="mono">.product-form__submit</span>. This looks for about four seconds. It is separate from when the test starts.</p>
+        <label for="settings-activation">Start the test when…</label>
+        <select id="settings-activation">
+          <option value="page_load"${exp.activation_type === 'element' ? '' : ' selected'}>the page loads</option>
+          <option value="element"${exp.activation_type === 'element' ? ' selected' : ''}>this element appears</option>
+        </select>
+        <p class="hint" id="settings-activation-hint"></p>
+        <div id="settings-activation-wrap"${exp.activation_type === 'element' ? '' : ' hidden'}>
+          <label for="settings-activation-value">Element that starts the test</label>
+          <input id="settings-activation-value" spellcheck="false" autocomplete="off" placeholder="#step-payment" value="${UI.escapeHtml(exp.activation_value || '')}">
+          <p class="hint">A CSS selector. pivitlab watches for it for the whole visit, then counts the visitor and shows the variant. Visitors who never see it are left out. For example, <span class="mono">#step-payment</span> on a checkout.</p>
+        </div>
         <label for="settings-hosts">Site domain(s)</label>
         <textarea id="settings-hosts" class="hosts" spellcheck="false" placeholder="example.com">${UI.escapeHtml((exp.allowed_hosts || []).join('\n'))}</textarea>
         <p class="hint">The experiment only runs on these sites. www and the bare domain are the same. Other subdomains must be listed.</p>
@@ -3071,6 +3143,9 @@ function renderDetail() {
 
   fillClientSelect(document.getElementById('settings-client'), 'None — internal only', exp.client_id || '');
   document.getElementById('settings-status').value = exp.status;
+  const activationSelect = document.getElementById('settings-activation');
+  if (activationSelect) activationSelect.addEventListener('change', () => syncActivationInputs('settings'));
+  syncActivationInputs('settings');
   refreshSettingsMatchHint();
   loadSeenHosts(exp.id);
   renderVariantRows();
@@ -3112,6 +3187,12 @@ function refreshDetailPreviewWarning() {
   showPreviewElementNote(fieldNote, rule.elementSelector);
   if (headerNote) headerNote.hidden = !headerNote.textContent || onVariants;
   if (fieldNote) fieldNote.hidden = !fieldNote.textContent || !onVariants;
+  const headerStart = document.getElementById('detail-activation-note');
+  const fieldStart = document.getElementById('detail-field-activation-note');
+  showPreviewActivationNote(headerStart, rule);
+  showPreviewActivationNote(fieldStart, rule);
+  if (headerStart) headerStart.hidden = !headerStart.textContent || onVariants;
+  if (fieldStart) fieldStart.hidden = !fieldStart.textContent || !onVariants;
 }
 
 function applyMatchingPreviewPage() {
@@ -3815,6 +3896,17 @@ async function saveDetailSettings() {
   });
   if (!elementResult.ok) { msg.className = 'error-msg'; msg.textContent = elementResult.message; return; }
   currentDetail.element_selector = elementResult.data.element_selector;
+  const activation = readActivation('settings');
+  const activationError = activationClientError(activation);
+  if (activationError) { msg.className = 'error-msg'; msg.textContent = activationError; return; }
+  const activationResult = await callApi(`/api/experiments/${currentDetail.id}/activation`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify(activation),
+  });
+  if (!activationResult.ok) { msg.className = 'error-msg'; msg.textContent = activationResult.message; return; }
+  currentDetail.activation_type = activationResult.data.activation_type;
+  currentDetail.activation_value = activationResult.data.activation_value;
   const hostsResult = await callApi(`/api/experiments/${currentDetail.id}/hosts`, {
     method: 'PATCH',
     headers: authHeaders(),
@@ -4841,6 +4933,8 @@ function resetWizard() {
   wizard.match = 'contains';
   wizard.matchTouched = false;
   wizard.elementSelector = '';
+  wizard.activationType = 'page_load';
+  wizard.activationValue = '';
   wizard.clientId = '';
   wizard.pageUrl = '';
   wizard.hosts = '';
@@ -4881,6 +4975,9 @@ function readWizardBasics() {
   if (matchEl) wizard.match = matchEl.value || 'contains';
   const elementEl = document.getElementById('wizard-element');
   if (elementEl) wizard.elementSelector = elementEl.value.trim();
+  const activation = readActivation('wizard');
+  wizard.activationType = activation.activation_type;
+  wizard.activationValue = activation.activation_value;
   wizard.hosts = document.getElementById('wizard-hosts').value.trim();
   wizard.clientId = document.getElementById('wizard-client').value;
   updateWizardTypeHint();
@@ -4949,6 +5046,11 @@ async function renderWizard() {
   document.getElementById('wizard-url').value = wizard.url;
   const elementField = document.getElementById('wizard-element');
   if (elementField) elementField.value = wizard.elementSelector || '';
+  const activationType = document.getElementById('wizard-activation');
+  if (activationType) activationType.value = wizard.activationType === 'element' ? 'element' : 'page_load';
+  const activationValue = document.getElementById('wizard-activation-value');
+  if (activationValue) activationValue.value = wizard.activationValue || '';
+  syncActivationInputs('wizard');
   syncWizardMatch(false);
   if (!wizard.hostsEdited) wizard.hosts = suggestedSiteDomains();
   document.getElementById('wizard-hosts').value = wizard.hosts || '';
@@ -5080,6 +5182,8 @@ async function persistWizardBasics() {
     return false;
   }
   if (!wizard.hosts) { wizardMsg('Add at least one site domain.'); return false; }
+  const activationError = activationClientError(readActivation('wizard'));
+  if (activationError) { wizardMsg(activationError); return false; }
   if (!wizard.expId) {
     const result = await callApi('/api/experiments', {
       method: 'POST', headers: authHeaders(),
@@ -5088,6 +5192,8 @@ async function persistWizardBasics() {
         url_match: wizard.url,
         url_match_type: wizard.match || (window.PivitUrl ? PivitUrl.defaultPageMatch(wizard.url) : 'contains'),
         element_selector: wizard.elementSelector || '',
+        activation_type: wizard.activationType || 'page_load',
+        activation_value: wizard.activationType === 'element' ? (wizard.activationValue || '') : '',
         client_id: wizard.clientId || null,
         allowed_hosts: wizard.hosts,
         test_type: wizard.testType === 'demo' ? 'demo' : 'live',
@@ -5107,6 +5213,8 @@ async function persistWizardBasics() {
     if (/^https?:\/\//i.test(wizard.url)) wizard.pageUrl = wizard.url;
     if (result.data.url_match_type) wizard.match = result.data.url_match_type;
     if (result.data.element_selector != null) wizard.elementSelector = result.data.element_selector || '';
+    if (result.data.activation_type) wizard.activationType = result.data.activation_type;
+    wizard.activationValue = result.data.activation_value || '';
     saveWizard();
     loadExperimentList();
     return true;
@@ -5117,6 +5225,16 @@ async function persistWizardBasics() {
   });
   if (!elementResult.ok) { wizardMsg(elementResult.message); return false; }
   wizard.elementSelector = elementResult.data.element_selector || '';
+  const activationResult = await callApi(`/api/experiments/${wizard.expId}/activation`, {
+    method: 'PATCH', headers: authHeaders(),
+    body: JSON.stringify({
+      activation_type: wizard.activationType || 'page_load',
+      activation_value: wizard.activationType === 'element' ? (wizard.activationValue || '') : '',
+    }),
+  });
+  if (!activationResult.ok) { wizardMsg(activationResult.message); return false; }
+  wizard.activationType = activationResult.data.activation_type || 'page_load';
+  wizard.activationValue = activationResult.data.activation_value || '';
   const matchResult = await callApi(`/api/experiments/${wizard.expId}/url-match`, {
     method: 'PATCH', headers: authHeaders(),
     body: JSON.stringify({ url_match_type: wizard.match || 'contains' }),
@@ -5216,6 +5334,7 @@ function renderWizardSummary() {
     <dt>Match</dt><dd>${UI.escapeHtml(window.PivitUrl ? PivitUrl.pageMatchLabel(wizard.match || 'contains') : (wizard.match || 'Contains'))}</dd>
     <dt>Where it runs</dt><dd>${UI.escapeHtml(window.PivitUrl ? PivitUrl.pageMatchHint(wizard.match || 'contains', wizard.url) : '')}</dd>
     <dt>Element</dt><dd class="mono">${wizard.elementSelector ? UI.escapeHtml(wizard.elementSelector) : 'Any page that matches the URL rule'}</dd>
+    <dt>Starts</dt><dd>${wizard.activationType === 'element' ? 'When this element appears: ' + UI.escapeHtml(wizard.activationValue || '') : 'When the page loads'}</dd>
     <dt>Site domain(s)</dt><dd class="mono">${UI.escapeHtml(wizard.hosts || '—')}</dd>
     <dt>Viewer</dt><dd>${UI.escapeHtml(client)}</dd>
     <dt>Variants</dt><dd>${UI.escapeHtml(variants)}</dd>
@@ -5468,6 +5587,8 @@ function wizardPreviewRule() {
     matchType: wizard.match || 'contains',
     allowedHosts: wizardAllowedHosts(),
     elementSelector: wizard.elementSelector || '',
+    activationType: wizard.activationType || 'page_load',
+    activationValue: wizard.activationValue || '',
   });
 }
 
@@ -5483,6 +5604,7 @@ function refreshWizardPreviewWarning() {
     input.value.trim()
   );
   showPreviewElementNote(document.getElementById('wizard-element-note'), rule.elementSelector);
+  showPreviewActivationNote(document.getElementById('wizard-activation-note'), rule);
 }
 
 document.getElementById('wizard-url-use-match').addEventListener('click', () => {
@@ -5501,10 +5623,19 @@ document.getElementById('wizard-page-url').addEventListener('input', (e) => {
   saveWizard();
   refreshWizardPreviewWarning();
 });
-['wizard-name', 'wizard-url', 'wizard-element', 'wizard-client', 'wizard-type'].forEach((id) => {
-  document.getElementById(id).addEventListener('input', readWizardBasics);
-  document.getElementById(id).addEventListener('change', readWizardBasics);
+['wizard-name', 'wizard-url', 'wizard-element', 'wizard-activation-value', 'wizard-client', 'wizard-type'].forEach((id) => {
+  const field = document.getElementById(id);
+  if (!field) return;
+  field.addEventListener('input', readWizardBasics);
+  field.addEventListener('change', readWizardBasics);
 });
+const wizardActivation = document.getElementById('wizard-activation');
+if (wizardActivation) {
+  wizardActivation.addEventListener('change', () => {
+    syncActivationInputs('wizard');
+    readWizardBasics();
+  });
+}
 document.getElementById('wizard-goals-list').addEventListener('input', rememberWizardGoals);
 document.getElementById('wizard-goals-list').addEventListener('click', () => setTimeout(rememberWizardGoals, 0));
 document.getElementById('page-create').addEventListener('change', (e) => {
@@ -5702,6 +5833,8 @@ document.getElementById('manage-exp-id').addEventListener('change', (e) => {
     if (box) box.hidden = true;
     const note = document.getElementById('manage-element-note');
     if (note) note.hidden = true;
+    const startNote = document.getElementById('manage-activation-note');
+    if (startNote) startNote.hidden = true;
   }
 });
 
@@ -5721,6 +5854,8 @@ function refreshManagePreviewWarning(exp) {
     if (box) box.hidden = true;
     const note = document.getElementById('manage-element-note');
     if (note) note.hidden = true;
+    const startNote = document.getElementById('manage-activation-note');
+    if (startNote) startNote.hidden = true;
     return;
   }
   const rule = previewRule(ruleSource);
@@ -5732,6 +5867,7 @@ function refreshManagePreviewWarning(exp) {
     input.value.trim()
   );
   showPreviewElementNote(document.getElementById('manage-element-note'), rule.elementSelector);
+  showPreviewActivationNote(document.getElementById('manage-activation-note'), rule);
 }
 
 function applyManagePreviewDefault(exp) {

@@ -31,6 +31,7 @@ const { markDomainConflict } = require('../auth-flow');
 const { DOMAIN_IN_USE_WARNING, routeStatus } = require('../site-domain');
 const { matchPageUrl, resolvePageMatch } = require('../../public/url-match');
 const { normaliseElementSelector } = require('../element-selector');
+const { normaliseActivation } = require('../activation');
 const { isDemo, normaliseTestType, typeChangeError, demoPlan, countOptions } = require('../demo-test');
 const { refreshDemoPlan } = require('../demo-sample');
 const { noteSnippetSeen, noteInstallCheck, noteQaPreview, installCheckPayload } = require('../site-verify');
@@ -143,7 +144,7 @@ router.get('/', async (req, res) => {
     };
 
     const { rows: experiments } = await db.query(
-      `SELECT id, name, url_match, url_match_type, element_selector, test_type, allowed_hosts, goals FROM experiments
+      `SELECT id, name, url_match, url_match_type, element_selector, activation_type, activation_value, test_type, allowed_hosts, goals FROM experiments
        WHERE ${sqlPageMatch(1)} AND status = 'running'
          AND (${publicScopeSql(2, 3)})`,
       [url, scope.accountId, scope.siteId]
@@ -157,7 +158,7 @@ router.get('/', async (req, res) => {
     let previewExpired = null;
     if (previewAuth.ok) {
       const { rows: previewRows } = await db.query(
-        `SELECT e.id, e.name, e.url_match, e.url_match_type, e.element_selector, e.test_type, e.allowed_hosts, e.status, e.goals, e.account_id, e.site_id,
+        `SELECT e.id, e.name, e.url_match, e.url_match_type, e.element_selector, e.activation_type, e.activation_value, e.test_type, e.allowed_hosts, e.status, e.goals, e.account_id, e.site_id,
                 v.id AS variant_id, v.name AS variant_name
          FROM variants v
          JOIN experiments e ON e.id = v.experiment_id
@@ -532,6 +533,8 @@ router.post('/', async (req, res) => {
   if (!pageMatch.ok) return res.status(400).json({ error: pageMatch.error });
   const element = normaliseElementSelector(req.body.element_selector);
   if (!element.ok) return res.status(400).json({ error: element.error });
+  const activation = normaliseActivation(req.body.activation_type, req.body.activation_value);
+  if (!activation.ok) return res.status(400).json({ error: activation.error });
 
   let hosts = [];
   if (allowed_hosts !== undefined) {
@@ -568,9 +571,9 @@ router.post('/', async (req, res) => {
 
     const planJson = testType.type === 'demo' ? JSON.stringify(demoPlan({ variantCount: 2 })) : null;
     const { rows: expRows } = await client.query(
-      `INSERT INTO experiments (name, url_match, url_match_type, element_selector, client_id, allowed_hosts, goals, goals_scope, goals_migrated, account_id, site_id, needs_site, test_type, plan)
-       VALUES ($1, $2, $3, $4, $5, $6::text[], '[]'::jsonb, 'shared', true, $7, $8, $9, $10, $11::jsonb) RETURNING *`,
-      [name, url_match, pageMatch.type, element.selector, client_id || null, hosts, accountId, placed.siteId, placed.needsSite, testType.type, planJson]
+      `INSERT INTO experiments (name, url_match, url_match_type, element_selector, client_id, allowed_hosts, goals, goals_scope, goals_migrated, account_id, site_id, needs_site, test_type, plan, activation_type, activation_value)
+       VALUES ($1, $2, $3, $4, $5, $6::text[], '[]'::jsonb, 'shared', true, $7, $8, $9, $10, $11::jsonb, $12, $13) RETURNING *`,
+      [name, url_match, pageMatch.type, element.selector, client_id || null, hosts, accountId, placed.siteId, placed.needsSite, testType.type, planJson, activation.type, activation.value]
     );
     const experiment = expRows[0];
 
@@ -931,6 +934,33 @@ router.delete('/:id', async (req, res) => {
     }
     await db.query(`DELETE FROM experiments WHERE id = $1 AND account_id = $2`, [id, req.account.id]);
     res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
+// PATCH /api/experiments/:id/activation  { activation_type, activation_value }
+// Owner-only. page_load clears the selector. element requires a CSS selector.
+// Omitting activation_type does not change the row, so another save cannot
+// reset when the test starts.
+router.patch('/:id/activation', async (req, res) => {
+  try {
+    const experiment = await ownedExperiment(req.account.id, req.params.id);
+    if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (!req.body || !Object.prototype.hasOwnProperty.call(req.body, 'activation_type')) {
+      return res.status(400).json({ error: 'activation_type is required' });
+    }
+    const activation = normaliseActivation(req.body.activation_type, req.body.activation_value);
+    if (!activation.ok) return res.status(400).json({ error: activation.error });
+    const { rows } = await db.query(
+      `UPDATE experiments SET activation_type = $1, activation_value = $2
+       WHERE id = $3 AND account_id = $4
+       RETURNING id, activation_type, activation_value`,
+      [activation.type, activation.value, req.params.id, req.account.id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
+    res.json(rows[0]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });
