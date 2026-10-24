@@ -2697,13 +2697,16 @@ function renderTestTrafficResults(data) {
     <td class="num">${row.conversion_events != null ? row.conversion_events : ''}</td>
     <td class="num">${row.conversion_rate}%</td>
   </tr>`).join('');
-  const goals = (data.goals || []).length > 1
-    ? (data.goals || []).map((goal) => {
-      const goalRows = (goal.variants || []).map((row) => `<tr><td>${UI.escapeHtml(row.variant_name)}</td><td class="num">${row.conversions}</td><td class="num">${row.conversion_events}</td><td class="num">${row.conversion_rate}%</td></tr>`).join('');
-      return `<h4 style="margin-top:14px;">${UI.escapeHtml(goal.label || goal.key)}</h4>
-        <div class="table-scroll"><table><thead><tr><th>Variant</th><th class="num">Conversions</th><th class="num">Conversion events</th><th class="num">Rate</th></tr></thead><tbody>${goalRows}</tbody></table></div>`;
-    }).join('')
-    : '';
+  const listedGoals = data.goals || [];
+  const goals = listedGoals.length === 1
+    ? `<p class="hint" style="margin-top:14px;">Goal: ${UI.escapeHtml(UI.goalResultLabel(listedGoals[0]))}. Each visitor counts once.</p>`
+    : (listedGoals.length > 1
+      ? listedGoals.map((goal) => {
+        const goalRows = (goal.variants || []).map((row) => `<tr><td>${UI.escapeHtml(row.variant_name)}</td><td class="num">${row.conversions}</td><td class="num">${row.conversion_events}</td><td class="num">${row.conversion_rate}%</td></tr>`).join('');
+        return `<h4 style="margin-top:14px;">${UI.escapeHtml(UI.goalResultLabel(goal))}</h4>
+          <div class="table-scroll"><table><thead><tr><th>Variant</th><th class="num">Conversions</th><th class="num">Conversion events</th><th class="num">Rate</th></tr></thead><tbody>${goalRows}</tbody></table></div>`;
+      }).join('')
+      : '');
   return `<div class="table-scroll" tabindex="0" role="region" aria-label="Test traffic results (scrolls sideways)">
     <table>
       <thead><tr><th>Variant</th><th class="num">Visitors</th><th class="num">Conversions</th><th class="num">Conversion events</th><th class="num">Rate</th></tr></thead>
@@ -3514,11 +3517,13 @@ function renderDivergentGoals() {
         <select class="g-type" style="width:auto; margin:0;">
           <option value="click">Click</option>
           <option value="url">Visited URL</option>
+          <option value="element">When this element appears</option>
         </select>
         <input class="g-value" type="text" placeholder="#cta-button" style="margin:0; flex:1;">
         <input class="g-id" type="text" placeholder="name" style="margin:0; width:140px;">
         <button type="button" data-action="add-goal" data-id="${v.id}">Add goal</button>
       </div>
+      <p class="hint g-element-help" data-goal-help="${v.id}" hidden>${UI.escapeHtml(UI.ELEMENT_GOAL_HELP)}</p>
     </div>`;
   }).join('');
 }
@@ -3710,7 +3715,7 @@ document.getElementById('page-detail').addEventListener('click', async (e) => {
     if (!value) { detailError(type === 'url' ? 'Add the URL text to match.' : 'Add a selector.'); return; }
     const goal = type === 'url'
       ? { type: 'url', url_match: value, name: label, match: 'contains' }
-      : { type: 'click', selector: value, name: label };
+      : { type: type === 'element' ? 'element' : 'click', selector: value, name: label };
     await patchVariant(variant, { goals: [...(variant.goals || []), goal] });
     return;
   }
@@ -3833,8 +3838,11 @@ document.getElementById('page-detail').addEventListener('change', (e) => {
   const draft = e.target.closest('[data-goal-draft]');
   if (!draft) return;
   const value = draft.querySelector('.g-value');
+  const help = document.querySelector(`[data-goal-help="${draft.dataset.goalDraft}"]`);
   if (e.target.value === 'url') value.placeholder = '/thank-you';
+  else if (e.target.value === 'element') value.placeholder = '#step-confirmation';
   else value.placeholder = '#cta-button';
+  if (help) help.hidden = e.target.value !== 'element';
 });
 
 function noDomainBadge(exp) {
@@ -4600,11 +4608,16 @@ async function loadResults() {
 function renderGoalBreakdown(goals, primaryGoal) {
   const mount = document.getElementById('goal-breakdown');
   if (!mount) return;
-  if (!goals || goals.length < 2) { mount.hidden = true; mount.innerHTML = ''; return; }
+  if (!goals || !goals.length) { mount.hidden = true; mount.innerHTML = ''; return; }
+  if (goals.length < 2) {
+    mount.hidden = false;
+    mount.innerHTML = `<p class="hint" style="margin-top:18px;">Goal: ${UI.escapeHtml(UI.goalResultLabel(goals[0]))}. Each visitor counts once.</p>`;
+    return;
+  }
   const blocks = goals.map((goal) => {
     const rows = (goal.variants || []).map((v) => `<tr><td>${UI.escapeHtml(v.variant_name)}</td><td class="num">${v.conversions}</td><td class="num">${v.conversion_events}</td><td class="num">${v.conversion_rate}%</td></tr>`).join('');
     const primary = goal.primary || goal.key === primaryGoal ? ' · primary' : '';
-    return `<h3 style="margin-top:18px;">${UI.escapeHtml(goal.label || goal.key)}${primary ? `<span class="hint">${UI.escapeHtml(primary)}</span>` : ''}</h3>
+    return `<h3 style="margin-top:18px;">${UI.escapeHtml(UI.goalResultLabel(goal))}${primary ? `<span class="hint">${UI.escapeHtml(primary)}</span>` : ''}</h3>
       <div class="table-scroll"><table><thead><tr><th>Variant</th><th class="num">Conversions</th><th class="num">Conversion events</th><th class="num">Rate</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   }).join('');
   mount.hidden = false;
@@ -5659,6 +5672,7 @@ function addGoalRow(prefill, listId) {
       <select class="g-type">
         <option value="click">Click on element</option>
         <option value="url">Visited a URL</option>
+        <option value="element">When this element appears</option>
       </select>
     </div>
     <div class="g-match-wrap full-width" hidden>
@@ -5678,6 +5692,7 @@ function addGoalRow(prefill, listId) {
       <label>Name</label>
       <input class="g-name" placeholder="Thank-you page">
     </div>
+    <p class="hint g-element-help full-width" hidden></p>
     <div class="g-test full-width" hidden>
       <label>Test this URL</label>
       <div class="goal-test">
@@ -5697,10 +5712,19 @@ function addGoalRow(prefill, listId) {
   const valueLabelEl = row.querySelector('.g-value-label');
   const valueEl = row.querySelector('.g-value');
   const testWrap = row.querySelector('.g-test');
+  const helpEl = row.querySelector('.g-element-help');
+  if (helpEl) helpEl.textContent = UI.ELEMENT_GOAL_HELP;
   function renderValueField() {
     const url = typeEl.value === 'url';
+    const element = typeEl.value === 'element';
     matchWrap.hidden = !url;
     testWrap.hidden = !url;
+    if (helpEl) helpEl.hidden = !element;
+    if (element) {
+      valueLabelEl.textContent = 'Selector';
+      valueEl.placeholder = '#step-confirmation';
+      return;
+    }
     if (!url) {
       valueLabelEl.textContent = 'Selector';
       valueEl.placeholder = '#cta-button';
@@ -5764,9 +5788,11 @@ async function loadPopularGoals(containerId, mode) {
   }
   popularGoalsCache = result.data.goals;
   const chips = popularGoalsCache.map((g, i) => {
-    const fallback = g.type === 'url' ? `Visited "${g.value}"` : `Click "${g.value}"`;
+    const fallback = g.type === 'url'
+      ? `Visited "${g.value}"`
+      : (g.type === 'element' ? `Element appears "${g.value}"` : `Click "${g.value}"`);
     const display = g.label ? g.label : fallback;
-    const tooltip = g.type === 'url' ? `Visited "${g.value}"` : `Click "${g.value}"`;
+    const tooltip = fallback;
     return `<button type="button" class="btn-ghost" style="margin:4px 4px 0 0; font-size:0.8em;" title="${UI.escapeHtml(tooltip)}" data-popular="${i}" data-popular-mode="${mode}">${UI.escapeHtml(display)}</button>`;
   }).join('');
   container.innerHTML = '<div class="hint" style="margin-top:8px;">Frequently used — click to add:</div>' + chips;
@@ -5779,7 +5805,7 @@ document.body.addEventListener('click', async (e) => {
   if (!g) return;
   const prefill = {
     type: g.type,
-    selector: g.type === 'click' ? g.value : undefined,
+    selector: g.type === 'click' || g.type === 'element' ? g.value : undefined,
     url_match: g.type === 'url' ? g.value : undefined,
     name: g.label || '',
     match: 'contains',
@@ -5796,7 +5822,7 @@ document.body.addEventListener('click', async (e) => {
   }
   const goal = g.type === 'url'
     ? { type: 'url', url_match: g.value, name: g.label || '', match: 'contains' }
-    : { type: 'click', selector: g.value, name: g.label || '' };
+    : { type: g.type === 'element' ? 'element' : 'click', selector: g.value, name: g.label || '' };
   const already = (currentDetail.goals || []).some((existing) =>
     (existing.name || existing.id) === (goal.name || '') &&
     (existing.selector === goal.selector || existing.url_match === goal.url_match)

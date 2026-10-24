@@ -131,6 +131,52 @@ assert.strictEqual(legacy[0].name, 'cta_click');
 
 assert.strictEqual(goals.validateGoals([{ type: 'url', url_match: '(a+)+', match: 'regex' }]), 'that regular expression is not safe to run');
 assert.strictEqual(goals.validateGoals([{ type: 'url', url_match: '/thanks', match: 'contains' }]), null);
+
+// An element goal stores one CSS selector. Click and URL goals are unchanged.
+const CONFIRM = '#step-confirmation';
+assert.strictEqual(goals.validateGoals([{ type: 'element', selector: '  ' + CONFIRM + '  ', name: 'Confirmation' }]), null);
+assert.strictEqual(goals.validateGoals([{ type: 'element', selector: '' }]), 'an element goal needs a selector');
+assert.strictEqual(goals.validateGoals([{ type: 'element' }]), 'an element goal needs a selector');
+assert.strictEqual(goals.validateGoals([{ type: 'element', selector: 'div { color: red }' }]), 'an element goal needs a CSS selector');
+assert.strictEqual(goals.validateGoals([{ type: 'element', selector: '<section>' }]), 'an element goal needs a CSS selector');
+assert.strictEqual(goals.validateGoals([{ type: 'element', selector: 'a'.repeat(501) }]), 'a selector is too long');
+assert.strictEqual(goals.validateGoals([{ type: 'later', selector: CONFIRM }]), 'unknown goal type "later"');
+assert.strictEqual(goals.validateGoals([{ type: 'click', selector: '.buy' }, { type: 'element', selector: CONFIRM }]), null);
+
+const elementSaved = goals.prepareGoalsForSave([
+  { name: 'Confirmation', type: 'element', selector: '  ' + CONFIRM + '  ' },
+], []);
+assert.strictEqual(elementSaved[0].type, 'element');
+assert.strictEqual(elementSaved[0].selector, CONFIRM);
+assert.strictEqual(elementSaved[0].name, 'Confirmation');
+assert.ok(goals.GENERATED_ID.test(elementSaved[0].id));
+assert.strictEqual(elementSaved[0].url_match, undefined);
+const elementRenamed = goals.prepareGoalsForSave([
+  { id: elementSaved[0].id, name: 'Order confirmed', type: 'element', selector: CONFIRM },
+], elementSaved);
+assert.strictEqual(elementRenamed[0].id, elementSaved[0].id);
+assert.strictEqual(elementRenamed[0].selector, CONFIRM);
+const elementDefault = goals.prepareGoalsForSave([{ type: 'element', selector: CONFIRM }], []);
+assert.strictEqual(elementDefault[0].name, 'Element appears');
+
+const elementShared = goals.planGoalMigration([
+  { goals: [{ type: 'element', selector: CONFIRM, id: 'done' }] },
+  { goals: [{ type: 'element', selector: CONFIRM, id: 'done' }] },
+]);
+assert.strictEqual(elementShared.scope, 'shared');
+assert.strictEqual(elementShared.goals.length, 1);
+assert.strictEqual(elementShared.goals[0].selector, CONFIRM);
+const elementSplit = goals.planGoalMigration([
+  { goals: [{ type: 'element', selector: CONFIRM, id: 'done' }] },
+  { goals: [{ type: 'click', selector: CONFIRM, id: 'done' }] },
+]);
+assert.strictEqual(elementSplit.scope, 'divergent');
+assert.strictEqual(goals.goalIdentity({ type: 'element', id: 'done', selector: CONFIRM }).startsWith('element'), true);
+assert.strictEqual(metrics.goalKey({ type: 'element', selector: CONFIRM }), CONFIRM);
+const elementDefs = metrics.defsFromGoalList(elementSaved);
+assert.strictEqual(elementDefs[0].type, 'element');
+assert.strictEqual(elementDefs[0].detail, CONFIRM);
+assert.strictEqual(elementDefs[0].label, 'Confirmation');
 assert.strictEqual(goals.variantAdditionAllowed(2), true);
 assert.strictEqual(goals.variantAdditionAllowed(3), false);
 assert.strictEqual(goals.variantAdditionAllowed(5), false);

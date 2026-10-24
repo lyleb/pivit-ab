@@ -18,7 +18,7 @@
 
 const db = require('./db');
 
-const GOAL_TYPES = ['click', 'url', 'form', 'custom', 'revenue'];
+const GOAL_TYPES = ['click', 'url', 'element', 'form', 'custom', 'revenue'];
 
 function goalKey(goal) {
   if (!goal) return '';
@@ -47,7 +47,9 @@ function defsFromGoalList(goals) {
     if (existing) {
       existing.primary = existing.primary || !!g.primary;
     } else {
-      byKey.set(key, { key, type: g.type || 'click', label: goalLabel(g, key), primary: !!g.primary });
+      const type = g.type || 'click';
+      const detail = type === 'url' ? (g.url_match || '') : (g.selector || '');
+      byKey.set(key, { key, type, label: goalLabel(g, key), detail, primary: !!g.primary });
     }
   });
   return Array.from(byKey.values());
@@ -131,6 +133,7 @@ function summariseByGoal(events, goals) {
     key: goal.key,
     type: goal.type,
     label: goal.label,
+    detail: goal.detail != null ? goal.detail : (goal.type === 'url' ? (goal.url_match || '') : (goal.selector || '')),
     primary: !!goal.primary,
     variants: [...viewers.keys()].map((variantId) => {
       const viewed = viewers.get(variantId) || new Set();

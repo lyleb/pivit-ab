@@ -135,6 +135,18 @@ Preview shows the variant straight away, so you can look at it without waiting f
 
 If you set both the element rule and this element appears, both have to be on the page. pivitlab keeps watching for the whole visit, rather than giving up after four seconds.
 
+## When this element appears
+
+A goal can be **When this element appears**. You give it a CSS selector, such as `#step-confirmation`.
+
+Once a visitor is in the test, pivitlab watches the page. The first time that element is there, it counts one conversion for that visitor, then stops watching. A later visit does not count again. The address does not have to change. A checkout that stays on the same page and swaps in a confirmation step still converts.
+
+Add it from the create wizard, from the experiment’s Goals tab, or in the editor with **When this appears** on the element you selected.
+
+A preview, and the editor, do not count. A visit with `?pivit_qa=1` is still test traffic.
+
+This is separate from **Start the test when… This element appears**. That setting decides when someone joins the test. This goal decides when they have converted.
+
 ## Send to GA4
 
 On Home, each site has **Send to GA4** and a box for that site's GA4 measurement ID. The ID starts with G-. This is included on paid plans. pivitlab has no priced plans yet. Paid plan is the switch that lets an agency use Send to GA4. A Platform admin sets it on Home, on the Send to GA4 card. That card also says how many sites have Send to GA4 switched on.

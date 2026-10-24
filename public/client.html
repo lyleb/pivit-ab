@@ -696,6 +696,7 @@ async function loadLiveResults(exp) {
     note.innerHTML = '';
   }
   document.getElementById('results-live').hidden = false;
+  renderClientGoals(result.data.goals, result.data.primary_goal);
   document.getElementById('results-body').innerHTML = results.map((item) => `<tr>
     <td>${UI.escapeHtml(item.variant_name)}</td>
     <td class="num">${item.visitors}</td>
@@ -740,6 +741,25 @@ async function loadLiveResults(exp) {
     summaryEl.hidden = false;
     summaryEl.textContent = `Probability best, as a secondary detail only: ${line}. The decision is the verdict above.`;
   }
+}
+
+function renderClientGoals(goals, primaryGoal) {
+  const mount = document.getElementById('goal-breakdown');
+  if (!mount) return;
+  if (!goals || !goals.length) { mount.hidden = true; mount.innerHTML = ''; return; }
+  if (goals.length < 2) {
+    mount.hidden = false;
+    mount.innerHTML = `<p class="muted">Goal: ${UI.escapeHtml(UI.goalResultLabel(goals[0]))}. Each visitor counts once.</p>`;
+    return;
+  }
+  const blocks = goals.map((goal) => {
+    const rows = (goal.variants || []).map((row) => `<tr><td>${UI.escapeHtml(row.variant_name)}</td><td class="num">${row.conversions}</td><td class="num">${row.conversion_events}</td><td class="num">${row.conversion_rate}%</td></tr>`).join('');
+    const primary = goal.primary || goal.key === primaryGoal ? ' · primary' : '';
+    return `<h3>${UI.escapeHtml(UI.goalResultLabel(goal))}${primary ? `<span class="muted">${UI.escapeHtml(primary)}</span>` : ''}</h3>
+      <div class="table-scroll"><table><thead><tr><th>Variant</th><th class="num">Conversions</th><th class="num">Conversion events</th><th class="num">Rate</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }).join('');
+  mount.hidden = false;
+  mount.innerHTML = `<p class="muted">Each goal counts a visitor once, even if they trigger it several times.</p>${blocks}`;
 }
 
 function boundedRate(visitors, conversions) {

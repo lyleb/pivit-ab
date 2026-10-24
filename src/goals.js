@@ -13,6 +13,7 @@
 const crypto = require('crypto');
 const db = require('./db');
 const { MATCH_TYPES, isSafeRegex } = require('../public/url-match');
+const { normaliseElementSelector } = require('./element-selector');
 
 const MAX_VARIANTS = 3;
 const GENERATED_ID = /^g_[a-z0-9]{8,32}$/;
@@ -51,8 +52,8 @@ function normaliseLegacyGoal(goal) {
     base.match = goal.match || 'contains';
     return base;
   }
-  if (type === 'click') {
-    base.type = 'click';
+  if (type === 'click' || type === 'element') {
+    base.type = type === 'element' ? 'element' : 'click';
     base.selector = goal.selector || '';
     return base;
   }
@@ -67,6 +68,7 @@ function goalIdentity(goal) {
   const id = goal.id || '';
   if (type === 'url') return ['url', id, goal.url_match || '', goal.match || 'contains'].join('\0');
   if (type === 'click') return ['click', id, goal.selector || ''].join('\0');
+  if (type === 'element') return ['element', id, goal.selector || ''].join('\0');
   return [type, id, goal.selector || '', goal.url_match || '', goal.event || ''].join('\0');
 }
 
@@ -103,6 +105,18 @@ function generateGoalId() {
   return 'g_' + crypto.randomBytes(8).toString('hex');
 }
 
+function defaultGoalName(type) {
+  if (type === 'url') return 'Visited URL';
+  if (type === 'element') return 'Element appears';
+  return 'Click';
+}
+
+function storedSelector(value) {
+  const element = normaliseElementSelector(value);
+  if (element.ok && element.selector) return element.selector;
+  return String(value || '').trim();
+}
+
 function prepareGoalsForSave(incoming, existingGoals) {
   const existingById = new Map();
   asGoalList(existingGoals).forEach((goal) => {
@@ -113,18 +127,18 @@ function prepareGoalsForSave(incoming, existingGoals) {
   const used = new Set();
   const out = [];
   for (const raw of asGoalList(incoming)) {
-    const type = raw.type || 'click';
+    const type = raw.type === 'url' || raw.type === 'element' ? raw.type : (raw.type || 'click');
     let id = typeof raw.id === 'string' ? raw.id.trim() : '';
     let name = typeof raw.name === 'string' ? raw.name.trim() : '';
     if (id && existingById.has(id)) {
       if (!name) name = existingById.get(id).name || id;
     } else if (id && GENERATED_ID.test(id)) {
-      if (!name) name = type === 'url' ? 'Visited URL' : 'Click';
+      if (!name) name = defaultGoalName(type);
     } else if (id) {
       if (!name) name = id;
     } else {
       id = generateGoalId();
-      if (!name) name = type === 'url' ? 'Visited URL' : 'Click';
+      if (!name) name = defaultGoalName(type);
     }
     if (used.has(id)) {
       const err = new Error('two goals share the same id');
@@ -133,7 +147,7 @@ function prepareGoalsForSave(incoming, existingGoals) {
     }
     used.add(id);
 
-    const goal = { id: id, name: name, type: type === 'url' ? 'url' : (type === 'click' ? 'click' : type) };
+    const goal = { id: id, name: name, type: type === 'url' || type === 'element' ? type : (type === 'click' ? 'click' : type) };
     if (typeof raw.primary === 'boolean') {
       if (raw.primary) goal.primary = true;
     } else if (existingById.has(id) && existingById.get(id).primary) {
@@ -143,8 +157,8 @@ function prepareGoalsForSave(incoming, existingGoals) {
     if (goal.type === 'url') {
       goal.url_match = String(raw.url_match || '').trim();
       goal.match = raw.match || 'contains';
-    } else if (goal.type === 'click') {
-      goal.selector = String(raw.selector || '').trim();
+    } else if (goal.type === 'click' || goal.type === 'element') {
+      goal.selector = storedSelector(raw.selector);
     } else {
       Object.assign(goal, raw, { id: id, name: name, type: type });
     }
@@ -167,6 +181,13 @@ function validateGoals(goals) {
       const match = g.match || 'contains';
       if (!MATCH_TYPES.includes(match)) return 'match must be contains, exact, starts_with, or regex';
       if (match === 'regex' && !isSafeRegex(g.url_match.trim())) return 'that regular expression is not safe to run';
+    } else if (type === 'element') {
+      if (typeof g.selector !== 'string' || !g.selector.trim()) return 'an element goal needs a selector';
+      const element = normaliseElementSelector(g.selector);
+      if (!element.ok || !element.selector) {
+        if (element.error && element.error.indexOf('too long') !== -1) return 'a selector is too long';
+        return 'an element goal needs a CSS selector';
+      }
     } else {
       return `unknown goal type "${type}"`;
     }
