@@ -255,10 +255,19 @@
     return '';
   }
 
+  const ELEMENT_GOAL_HELP = 'A CSS selector. Once someone is in the test, pivitlab counts a conversion the first time this element is on the page. The address does not have to change. For example, #step-confirmation on a checkout.';
+
+  function goalKind(type) {
+    if (type === 'url') return 'Visited a URL';
+    if (type === 'element') return 'Element appears';
+    return 'Click';
+  }
+
   function describeGoal(goal) {
     if (!goal) return '';
-    const label = goal.name || goal.id || (goal.type === 'url' ? 'Visited URL' : 'Click');
-    if (goal.type === 'url') {
+    const type = goal.type || 'click';
+    const label = goal.name || goal.id || (type === 'url' ? 'Visited URL' : (type === 'element' ? 'Element appears' : 'Click'));
+    if (type === 'url') {
       const target = goal.url_match || '';
       const how = {
         contains: 'contains',
@@ -268,8 +277,27 @@
       }[goal.match || 'contains'] || 'contains';
       return target ? `${label} → URL ${how} ${target}` : label;
     }
+    if (type === 'element') {
+      const target = goal.selector || goal.detail || '';
+      return target ? `${label} → element appears ${target}` : label;
+    }
     const target = goal.selector || '';
     return target ? `${label} → ${target}` : label;
+  }
+
+  // Results headings name the type, so a click, a URL and an element that
+  // appears are not just three names in a list.
+  function goalResultLabel(goal) {
+    if (!goal) return '';
+    const type = goal.type || 'click';
+    const name = goal.label || goal.name || goal.key || goal.id || '';
+    const detail = goal.detail || (type === 'url' ? (goal.url_match || '') : (goal.selector || ''));
+    const kind = goalKind(type);
+    if (type === 'element') {
+      return detail ? (name ? `${name} · Element appears ${detail}` : `Element appears ${detail}`) : (name ? `${name} · Element appears` : 'Element appears');
+    }
+    if (detail) return name ? `${name} · ${kind} ${detail}` : `${kind} ${detail}`;
+    return name ? `${name} · ${kind}` : kind;
   }
 
   function renderHealth(report) {
@@ -1165,7 +1193,9 @@
     auditActorLabel,
     OWNER_PASSWORD_BANNER,
     showOwnerPasswordBanner,
+    ELEMENT_GOAL_HELP,
     describeGoal,
+    goalResultLabel,
     MAX_VARIANTS,
     canAddVariant,
     variantCapMessage,

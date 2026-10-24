@@ -184,6 +184,17 @@ assert.strictEqual(ui.describeGoal({ type: 'click', selector: '.hero-cta', id: '
 assert.strictEqual(ui.describeGoal({ type: 'click', selector: '.hero-cta', id: 'g_abc', name: 'Buy button' }), 'Buy button → .hero-cta');
 assert.strictEqual(ui.describeGoal({ type: 'url', url_match: '/checkout', id: 'g_1', name: 'Checkout', match: 'exact' }), 'Checkout → URL is exactly /checkout');
 assert.strictEqual(ui.describeGoal({ type: 'url', url_match: '/thanks', id: 'thanks' }), 'thanks → URL contains /thanks');
+assert.strictEqual(ui.describeGoal({ type: 'element', selector: '#step-confirmation', name: 'Confirmation' }), 'Confirmation → element appears #step-confirmation');
+assert.strictEqual(
+  ui.goalResultLabel({ type: 'element', label: 'Confirmation', detail: '#step-confirmation', key: 'done' }),
+  'Confirmation · Element appears #step-confirmation'
+);
+assert.strictEqual(ui.goalResultLabel({ type: 'click', label: 'Buy button', detail: '.buy' }), 'Buy button · Click .buy');
+assert.strictEqual(ui.goalResultLabel({ type: 'url', label: 'Thanks', detail: '/thanks' }), 'Thanks · Visited a URL /thanks');
+assert.ok(ui.ELEMENT_GOAL_HELP.includes('pivitlab'));
+assert.ok(ui.ELEMENT_GOAL_HELP.includes('#step-confirmation'));
+assert.ok(ui.ELEMENT_GOAL_HELP.includes('The address does not have to change.'));
+assert.ok(!ui.ELEMENT_GOAL_HELP.includes('Pivitlab'));
 
 assert.strictEqual(ui.canAddVariant(2), true);
 assert.strictEqual(ui.canAddVariant(3), false);

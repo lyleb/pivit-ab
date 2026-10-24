@@ -1,6 +1,6 @@
 /**
  * Pivit visual editor — v0.5 (similar-element selector, custom CSS, HTML/CSS/JS)
- * Add above/below, Set as goal, plus Changes and Goals lists)
+ * Add above/below, Set as goal, When this appears, plus Changes and Goals lists)
  *
  * Loaded by ab.js only when it sees ?ab_edit=<variant_id>&token=<token> in the
  * URL — never downloaded by a real visitor. Runs entirely on the client's own
@@ -671,9 +671,14 @@
   }
 
   function describeGoal(g) {
-    return (g.type || 'click') === 'url'
-      ? `Visit goal "${g.name || g.id || g.url_match}" — URL ${g.match && g.match !== 'contains' ? g.match : 'contains'} ${g.url_match}`
-      : `Click goal "${g.name || g.id || g.selector}" on ${g.selector}`;
+    const type = g.type || 'click';
+    if (type === 'url') {
+      return `Visit goal "${g.name || g.id || g.url_match}" — URL ${g.match && g.match !== 'contains' ? g.match : 'contains'} ${g.url_match}`;
+    }
+    if (type === 'element') {
+      return `Element appears "${g.name || g.id || g.selector}" — ${g.selector}`;
+    }
+    return `Click goal "${g.name || g.id || g.selector}" on ${g.selector}`;
   }
 
   function renderGoalsList() {
@@ -686,7 +691,7 @@
       const empty = document.createElement('div');
       styleReset(empty);
       Object.assign(empty.style, { fontSize: '12px', color: '#6b6f83', padding: '6px 2px' });
-      empty.textContent = 'No goals yet — select the button or link that counts as a conversion, then "Set as goal".';
+      empty.textContent = 'No goals yet — select an element, then "Set as goal" for a click, or "When this appears" for an element that appears later.';
       goalsListEl.appendChild(empty);
       return;
     }
@@ -1435,7 +1440,7 @@
     actionPopup = document.createElement('div');
     styleReset(actionPopup);
     Object.assign(actionPopup.style, {
-      position: 'fixed', left: Math.min(x, window.innerWidth - 260) + 'px', top: Math.min(y, window.innerHeight - 380) + 'px',
+      position: 'fixed', left: Math.min(x, window.innerWidth - 260) + 'px', top: Math.min(y, window.innerHeight - 430) + 'px',
       zIndex: String(Z), background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: '10px',
       boxShadow: '0 8px 28px rgba(19,23,35,0.2)', padding: '8px', width: '240px', fontSize: '13px',
     });
@@ -1467,6 +1472,7 @@
       ['⬇ Add below', () => openInsertPanel(selector, 'insert_after')],
       ['⧉ Duplicate', () => { recordAndApply({ selector, type: 'duplicate' }); closeActionPopup(); }],
       ['🎯 Set as goal', () => openGoalPanel(el, selector, scope)],
+      ['When this appears', () => openElementGoalPanel(el, selector, scope)],
       ['🗑 Remove', () => { recordAndApply({ selector, type: 'remove' }); closeActionPopup(); }],
     ];
     actions.forEach(([label, handler]) => {
@@ -1809,14 +1815,15 @@
   // Goals are stored once for the experiment and apply to every variant.
   // The id is generated and stays put if the name is renamed. A test whose
   // variants were saved with different goals still writes this variant only.
-  function suggestGoalLabel(el) {
+  function suggestGoalLabel(el, suffix) {
     const slug = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30);
-    let base = el.id ? slug(el.id) : '';
-    if (!base) base = slug((el.textContent || '').trim().split(/\s+/).slice(0, 3).join(' '));
-    if (!base) base = el.tagName.toLowerCase();
-    let label = `${base}_click`;
+    let base = el && el.id ? slug(el.id) : '';
+    if (!base && el) base = slug((el.textContent || '').trim().split(/\s+/).slice(0, 3).join(' '));
+    if (!base) base = el && el.tagName ? el.tagName.toLowerCase() : 'element';
+    const tail = suffix || 'click';
+    let label = `${base}_${tail}`;
     let n = 2;
-    while (allGoals.some((g) => (g.name || g.id) === label)) label = `${base}_click_${n++}`;
+    while (allGoals.some((g) => (g.name || g.id) === label)) label = `${base}_${tail}_${n++}`;
     return label;
   }
   function newGoalId() {
@@ -1853,6 +1860,32 @@
         if (!label || label.length > 100) return { error: 'Give the goal a name of 100 characters or fewer.' };
         if (allGoals.some((g) => (g.name || g.id) === label)) return { error: `A goal called "${label}" already exists — choose a different name.` };
         allGoals.push({ type: 'click', selector, id: newGoalId(), name: label });
+        persistWorkingSet();
+        refreshToolbarState();
+      },
+    });
+  }
+
+  // The selected element itself, not the button around it. Appearing is not
+  // a click. The address does not have to change.
+  function openElementGoalPanel(pickedEl, chosenSelector) {
+    const selector = chosenSelector || getSelector(pickedEl);
+    const existing = allGoals.find((g) => g.type === 'element' && g.selector === selector);
+    showEditorPanel({
+      title: 'When this element appears',
+      subtitle: selector,
+      fields: [{
+        key: 'label', label: 'Goal name', line: true, value: suggestGoalLabel(pickedEl, 'appears'),
+        hint: 'When this element appears on the page, it counts as a conversion for every variant, including Control. The address does not have to change. Each visitor is counted once. The name is what you see in results. ' +
+          (variantGoalsDiffer() ? 'This test’s variants do not share the same goals, so this one is saved on this variant only.' : ''),
+      }],
+      applyLabel: 'Set goal',
+      onApply: (v) => {
+        const label = v.label.trim();
+        if (existing) return { error: `This element is already a goal ("${existing.name || existing.id || existing.selector}"). Remove it from the Goals list first to change its name.` };
+        if (!label || label.length > 100) return { error: 'Give the goal a name of 100 characters or fewer.' };
+        if (allGoals.some((g) => (g.name || g.id) === label)) return { error: `A goal called "${label}" already exists — choose a different name.` };
+        allGoals.push({ type: 'element', selector, id: newGoalId(), name: label });
         persistWorkingSet();
         refreshToolbarState();
       },

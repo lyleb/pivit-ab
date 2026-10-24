@@ -1,5 +1,5 @@
 /**
- * pivitlab snippet — v0.8
+ * pivitlab snippet — v0.9
  *
  * Usage on client site:
  *   <script src="https://your-api.example.com/snippet/ab.js"
@@ -126,6 +126,15 @@
  * the conversion beacon is sent with that click. One beacon per visitor
  * per goal. Preview and the editor do not install the listener.
  *
+ * Element goals (type "element") count a conversion when a CSS selector
+ * appears in the document. The check runs as soon as the visitor is in the
+ * test, then a MutationObserver watches for a later render, including a
+ * checkout that swaps the step in place and leaves the address unchanged.
+ * The first time the element is there, one conversion is sent and that
+ * watch disconnects. A second appearance, including a later page load, does
+ * not send again. Preview and the editor do not watch. A pivit_qa visit
+ * still sends the conversion as test traffic, on the same beacon as a click.
+ *
  * Single-page apps: history.pushState, history.replaceState, popstate and
  * hashchange are watched. A change that leaves the address the same is
  * ignored. Changes inside about a tenth of a second collapse into one, so
@@ -154,12 +163,17 @@
   const ASSIGNMENT_PREFIX = '_ab_assign_';
   const api = buildPivitRuntime();
   const clickSeen = Object.create(null);
+  const elementSeen = Object.create(null);
   api.matchUrlGoal = matchUrlGoal;
   api.isSafeRegex = isSafeRegex;
   api.shouldCountUrlGoal = shouldCountUrlGoal;
   api.claimClick = claimClick;
+  api.claimElement = claimElement;
   api.clickStorageKey = clickStorageKey;
+  api.elementStorageKey = elementStorageKey;
   api.clickGoalsFrom = clickGoalsFrom;
+  api.elementGoalsFrom = elementGoalsFrom;
+  api.createElementWatcher = createElementWatcher;
   api.clickGoalElement = clickGoalElement;
   api.createClickTracker = createClickTracker;
   api.qaFlagFromSearch = qaFlagFromSearch;
@@ -538,24 +552,44 @@
   // The event is left alone, so that still happens. claimClick keeps a
   // single beacon per visitor per goal.
   let pageClickTracker = null;
+  let pageElementWatcher = null;
   function wireConversionTracking(experimentId, variantId, visitorId, goals) {
-    const list = clickGoalsFrom(goals, {
+    const context = {
       experimentId: experimentId,
       variantId: variantId,
       visitorId: visitorId,
-    });
-    if (!list.length) return;
-    if (!pageClickTracker) {
-      pageClickTracker = createClickTracker(document, {
+    };
+    const list = clickGoalsFrom(goals, context);
+    if (list.length) {
+      if (!pageClickTracker) {
+        pageClickTracker = createClickTracker(document, {
+          claim: function (goal) {
+            return claimClick(localStorage, goal.visitorId, goal.experimentId, goal.goalId);
+          },
+          send: function (goal) {
+            sendEvent(goal.experimentId, goal.variantId, goal.visitorId, 'convert', goal.goalId);
+          },
+        });
+      }
+      pageClickTracker.track(list);
+    }
+    // The visitor is already in the test. Watch until the element appears,
+    // including a render that does not change the address, then disconnect.
+    // claimElement is the same once-per-visitor record as a click, on its
+    // own key, so a repeat visit does not send a second conversion.
+    const elements = elementGoalsFrom(goals, context);
+    if (!elements.length) return;
+    if (!pageElementWatcher) {
+      pageElementWatcher = createElementWatcher(document, {
         claim: function (goal) {
-          return claimClick(localStorage, goal.visitorId, goal.experimentId, goal.goalId);
+          return claimElement(localStorage, goal.visitorId, goal.experimentId, goal.goalId);
         },
         send: function (goal) {
           sendEvent(goal.experimentId, goal.variantId, goal.visitorId, 'convert', goal.goalId);
         },
       });
     }
-    pageClickTracker.track(list);
+    pageElementWatcher.watch(elements);
   }
 
   // A URL goal must not convert on the page view that first enrolled the
@@ -1308,21 +1342,29 @@
   function clickStorageKey(visitorId, experimentId, goalId) {
     return '_ab_click_' + visitorId + '_' + experimentId + '_' + goalId;
   }
-  function claimClick(storage, visitorId, experimentId, goalId, memory) {
-    const mem = memory || clickSeen;
-    const key = clickStorageKey(visitorId, experimentId, goalId);
-    if (mem[key]) return false;
+  function elementStorageKey(visitorId, experimentId, goalId) {
+    return '_ab_element_' + visitorId + '_' + experimentId + '_' + goalId;
+  }
+  function claimOnce(storage, key, memory) {
+    if (!memory || !key) return false;
+    if (memory[key]) return false;
     try {
       if (storage && storage.getItem && storage.getItem(key)) {
-        mem[key] = 1;
+        memory[key] = 1;
         return false;
       }
     } catch (e) { /* private mode or a blocked store — fall through to memory */ }
-    mem[key] = 1;
+    memory[key] = 1;
     try {
       if (storage && storage.setItem) storage.setItem(key, '1');
     } catch (e) { /* the memory flag above is the fallback */ }
     return true;
+  }
+  function claimClick(storage, visitorId, experimentId, goalId, memory) {
+    return claimOnce(storage, clickStorageKey(visitorId, experimentId, goalId), memory || clickSeen);
+  }
+  function claimElement(storage, visitorId, experimentId, goalId, memory) {
+    return claimOnce(storage, elementStorageKey(visitorId, experimentId, goalId), memory || elementSeen);
   }
 
   // Goals saved before types existed have no "type" and are always click.
@@ -1341,6 +1383,28 @@
         visitorId: ctx.visitorId,
         goalId: goal.id || goal.selector,
         selector: goal.selector,
+      });
+    }
+    return out;
+  }
+
+  // type must be element. A goal saved before types existed is a click, and
+  // a click goal is left to the document listener.
+  function elementGoalsFrom(goals, context) {
+    const ctx = context || {};
+    const list = goals || [];
+    const out = [];
+    for (let i = 0; i < list.length; i++) {
+      const goal = list[i] || {};
+      if (goal.type !== 'element' || typeof goal.selector !== 'string') continue;
+      const selector = goal.selector.trim();
+      if (!selector) continue;
+      out.push({
+        experimentId: ctx.experimentId,
+        variantId: ctx.variantId,
+        visitorId: ctx.visitorId,
+        goalId: goal.id || selector,
+        selector: selector,
       });
     }
     return out;
@@ -1413,6 +1477,102 @@
         listening = true;
         doc.addEventListener('click', onClick, true);
       },
+    };
+  }
+
+  // One observer for every element goal on this document. An initial
+  // querySelector covers an element that is already there. Later renders,
+  // including a step swap that does not change the address, notify the
+  // observer. Each goal is removed when it is found or its selector cannot
+  // be queried. The observer disconnects when none are left. A later test
+  // that enrols on this document starts a fresh observer.
+  function createElementWatcher(doc, hooks) {
+    const goals = [];
+    const claim = hooks && hooks.claim;
+    const send = hooks && hooks.send;
+    const Observer = (hooks && hooks.MutationObserver) || (typeof MutationObserver !== 'undefined' ? MutationObserver : null);
+    let observer = null;
+    let looking = false;
+
+    function disconnect() {
+      if (!observer) return;
+      try { observer.disconnect(); } catch (err) { /* already gone */ }
+      observer = null;
+    }
+
+    function drop(goal) {
+      const index = goals.indexOf(goal);
+      if (index !== -1) goals.splice(index, 1);
+      if (!goals.length) disconnect();
+    }
+
+    function sameGoal(left, right) {
+      return left.visitorId === right.visitorId
+        && left.experimentId === right.experimentId
+        && left.goalId === right.goalId
+        && left.selector === right.selector;
+    }
+
+    function look() {
+      if (looking) return;
+      looking = true;
+      try {
+        const pending = goals.slice();
+        for (let i = 0; i < pending.length; i++) {
+          const goal = pending[i];
+          if (goals.indexOf(goal) === -1) continue;
+          const query = elementQuery(doc, goal.selector);
+          if (query.state === 'invalid') {
+            drop(goal);
+            continue;
+          }
+          if (query.state !== 'present') continue;
+          drop(goal);
+          let claimed = false;
+          try { claimed = typeof claim === 'function' && claim(goal); }
+          catch (err) { claimed = false; }
+          if (!claimed || typeof send !== 'function') continue;
+          try { send(goal); }
+          catch (err) { /* the claim is already stored, so this is not retried */ }
+        }
+      } finally {
+        looking = false;
+      }
+    }
+
+    function ensureObserver() {
+      if (observer || !goals.length || !Observer || !doc) return;
+      try {
+        observer = new Observer(function () { look(); });
+        const target = doc.documentElement || doc.body || doc;
+        if (!target || typeof observer.observe !== 'function') {
+          observer = null;
+          return;
+        }
+        observer.observe(target, { childList: true, subtree: true });
+      } catch (err) {
+        observer = null;
+      }
+    }
+
+    return {
+      watch: function (list) {
+        const adding = list || [];
+        for (let i = 0; i < adding.length; i++) {
+          const goal = adding[i];
+          if (!goal || typeof goal.selector !== 'string' || !goal.selector) continue;
+          let seen = false;
+          for (let j = 0; j < goals.length; j++) {
+            if (sameGoal(goals[j], goal)) { seen = true; break; }
+          }
+          if (!seen) goals.push(goal);
+        }
+        look();
+        if (!goals.length) return;
+        ensureObserver();
+        look();
+      },
+      disconnect: disconnect,
     };
   }
 

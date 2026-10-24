@@ -33,6 +33,7 @@
     <li><a href="#audit">The audit log</a></li>
     <li><a href="#spa">Single-page apps</a></li>
     <li><a href="#activation">When a test starts</a></li>
+    <li><a href="#element-goal">When this element appears</a></li>
     <li><a href="#ga4">Send to GA4</a></li>
   </ol>
 
@@ -148,6 +149,13 @@
   <p>A single-page app still checks the address. If the visitor moves to a page the test does not match before the element appears, they are not counted. If the address stays the same, as on a checkout that swaps the step in place, pivitlab keeps watching until they leave.</p>
   <p>Preview shows the variant straight away, so you can look at it without waiting for the element. That visit is not counted. The editor is unchanged. A visit with <code>?pivit_qa=1</code> is still marked as test traffic, and only once the element has appeared.</p>
   <p>If you set both the element rule and this element appears, both have to be on the page. pivitlab keeps watching for the whole visit, rather than giving up after four seconds.</p>
+
+  <h2 id="element-goal">When this element appears</h2>
+  <p>A goal can be <strong>When this element appears</strong>. You give it a CSS selector, such as <code>#step-confirmation</code>.</p>
+  <p>Once a visitor is in the test, pivitlab watches the page. The first time that element is there, it counts one conversion for that visitor, then stops watching. A later visit does not count again. The address does not have to change. A checkout that stays on the same page and swaps in a confirmation step still converts.</p>
+  <p>Add it from the create wizard, from the experiment’s Goals tab, or in the editor with <strong>When this appears</strong> on the element you selected.</p>
+  <p>A preview, and the editor, do not count. A visit with <code>?pivit_qa=1</code> is still test traffic.</p>
+  <p>This is separate from <strong>Start the test when… This element appears</strong>. That setting decides when someone joins the test. This goal decides when they have converted.</p>
 
   <h2 id="ga4">Send to GA4</h2>
   <p>On Home, each site has <strong>Send to GA4</strong> and a box for that site's GA4 measurement ID. The ID starts with G-. This is included on paid plans. pivitlab has no priced plans yet. Paid plan is the switch that lets an agency use Send to GA4. A Platform admin sets it on Home, on the Send to GA4 card. That card also says how many sites have Send to GA4 switched on.</p>

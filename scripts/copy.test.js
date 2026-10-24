@@ -234,6 +234,8 @@ for (const phrase of [
   'Join this agency',
   'Deleted user',
   'That sign-in isn\'t available.',
+  'The address does not have to change.',
+  'When this appears',
 ]) {
   assert.ok(helpPage.includes(phrase), `help.html missing ${phrase}`);
   assert.ok(helpDoc.includes(phrase), `help.md missing ${phrase}`);
