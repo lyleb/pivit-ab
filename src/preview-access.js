@@ -95,7 +95,7 @@ function publicActivation(exp) {
 }
 
 function publicVariant(variant) {
-  return {
+  const row = {
     id: variant.id,
     experiment_id: variant.experiment_id,
     name: variant.name,
@@ -103,6 +103,13 @@ function publicVariant(variant) {
     changes: variant.changes,
     goals: variant.goals,
   };
+  // Omitted when empty, so a variant with no note keeps the previous shape.
+  // The preview reads it and shows "Steps: …". Older snippets ignore it.
+  const note = variant && typeof variant.steps_note === 'string'
+    ? variant.steps_note.replace(/\s+/g, ' ').trim()
+    : '';
+  if (note) row.steps_note = note;
+  return row;
 }
 
 // running: host-scoped experiments that are already status=running.

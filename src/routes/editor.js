@@ -12,6 +12,7 @@ const {
   expiredEditMessage,
 } = require('../editor-context');
 const { validateChanges } = require('../changes');
+const { normaliseStepsNote } = require('../steps-note');
 const router = express.Router();
 
 // The editor reads one variant at a time. A cached GET would keep showing the
@@ -118,17 +119,22 @@ router.get('/variants/:variantId/preview-token', requireValidEditToken, async (r
   }
 });
 
-// PATCH /api/editor/variants/:variantId?token=...  { changes?: [...], goals?: [...] }
-// Deliberately narrow — only touches what the visual editor authors (changes
-// and goals), nothing else (name, traffic split stay untouched). Each field is
-// only written when it's present in the request, so saving one never resets
-// the other. On a shared experiment, goals are saved once and copied to every
-// variant. On a divergent experiment they stay on this variant.
+// PATCH /api/editor/variants/:variantId?token=...
+// { changes?: [...], goals?: [...], steps_note?: string }
+// Deliberately narrow — only touches what the visual editor authors (changes,
+// goals, and the steps note), nothing else (name, traffic split stay untouched).
+// Each field is only written when it's present in the request, so saving one
+// never resets the other. On a shared experiment, goals are saved once and
+// copied to every variant. On a divergent experiment they stay on this variant.
 router.patch('/variants/:variantId', requireValidEditToken, async (req, res) => {
   const client = await db.pool.connect();
   try {
     const { changes, goals } = req.body;
-    if (changes === undefined && goals === undefined) return res.status(400).json({ error: 'send changes and/or goals' });
+    const note = normaliseStepsNote(req.body ? req.body.steps_note : undefined);
+    if (!note.ok) return res.status(400).json({ error: note.error });
+    if (changes === undefined && goals === undefined && note.omitted) {
+      return res.status(400).json({ error: 'send changes, goals, or a steps note' });
+    }
     if (changes !== undefined) {
       const problem = validateChanges(changes);
       if (problem) return res.status(400).json({ error: problem });
@@ -156,10 +162,13 @@ router.patch('/variants/:variantId', requireValidEditToken, async (req, res) => 
     }
     const { rows } = await client.query(
       `UPDATE variants
-       SET changes = COALESCE($1::jsonb, changes)
-       WHERE id = $2 RETURNING *`,
+       SET changes = COALESCE($1::jsonb, changes),
+           steps_note = CASE WHEN $3 THEN $2 ELSE steps_note END
+       WHERE id = $4 RETURNING *`,
       [
         changes === undefined ? null : JSON.stringify(changes),
+        note.value,
+        !note.omitted,
         req.params.variantId,
       ]
     );

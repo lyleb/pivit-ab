@@ -16,13 +16,20 @@
  * optional countdown, colours, top or bottom, sticky, and an optional link.
  * Element HTML, CSS and JS are left as they are.
  *
- * Editing or removing an EXISTING change reloads the page and replays the
- * updated change list from a clean DOM, rather than trying to reverse an
+ * Editing or removing an EXISTING change used to reload the page and replay
+ * the updated change list from a clean DOM, rather than trying to reverse an
  * arbitrary DOM mutation in place (which isn't reliably possible — there's no
- * generic "undo" for an innerHTML overwrite or a node removal). The working
- * change list survives the reload via sessionStorage, keyed by experiment id
- * and variant id, so unsaved edits aren't lost and aren't reused for a
- * different test.
+ * generic "undo" for an innerHTML overwrite or a node removal). On a
+ * single-page app that reload goes back to the first step, so the editor
+ * offers "Apply without reloading", which runs the change list again on the
+ * current screen. Reloading is still there, and it says that a reload goes
+ * back to the first step. The working change list survives a reload via
+ * sessionStorage, keyed by experiment id and variant id, so unsaved edits
+ * aren't lost and aren't reused for a different test.
+ *
+ * Browse lets clicks through to the site. Select picks an element. The line
+ * under the switch says which one is on. pushState and replaceState keep
+ * ab_edit and token on the address so the editor survives a route change.
  */
 (function () {
   const scriptTag = document.currentScript || document.querySelector('script[src*="/snippet/editor.js"]');
@@ -35,7 +42,54 @@
     return values.length ? values[values.length - 1] : null;
   }
   const VARIANT_ID = lastQuery('ab_edit') || (scriptTag && scriptTag.getAttribute('data-variant-id'));
-  const TOKEN = lastQuery('token');
+  const TOKEN = lastQuery('token') || (scriptTag && scriptTag.getAttribute('data-token'));
+
+  // The visitor snippet wraps history before it awaits anything. This is the
+  // same wrap for a page where that did not run, and it puts ab_edit and token
+  // back if a route change has already dropped them.
+  function installEditHistory() {
+    if (!VARIANT_ID || !TOKEN || !window.history) return;
+    if (window.PivitRuntime && typeof window.PivitRuntime.bindEditHistory === 'function') {
+      window.PivitRuntime.bindEditHistory(window, VARIANT_ID, TOKEN);
+    } else if (!window.__pivitEditHistory) {
+      function withParams(nextUrl) {
+        if (nextUrl == null) return nextUrl;
+        let target;
+        try {
+          const raw = typeof nextUrl === 'object' && nextUrl && typeof nextUrl.href === 'string' ? nextUrl.href : String(nextUrl);
+          target = new URL(raw, window.location.href);
+        } catch (err) { return nextUrl; }
+        if (target.origin !== window.location.origin) return nextUrl;
+        target.searchParams.set('ab_edit', VARIANT_ID);
+        target.searchParams.set('token', TOKEN);
+        return target.pathname + target.search + target.hash;
+      }
+      ['pushState', 'replaceState'].forEach((name) => {
+        const original = window.history[name];
+        if (typeof original !== 'function' || original.__pivitEditHistory) return;
+        function wrapped(state, title, url) {
+          if (arguments.length < 3 || url == null) return original.call(window.history, state, title);
+          return original.call(window.history, state, title, withParams(url));
+        }
+        wrapped.__pivitEditHistory = true;
+        try { window.history[name] = wrapped; }
+        catch (err) { /* the browser's own history stays as it was */ }
+      });
+      try { window.__pivitEditHistory = { variantId: VARIANT_ID, token: TOKEN }; }
+      catch (err) { /* the wrappers are still in place */ }
+    }
+    try {
+      const current = new URL(window.location.href);
+      if (current.searchParams.get('ab_edit') === VARIANT_ID && current.searchParams.get('token') === TOKEN) return;
+      const next = window.PivitRuntime && typeof window.PivitRuntime.urlWithEditParams === 'function'
+        ? window.PivitRuntime.urlWithEditParams(window.location.href, window.location.href, VARIANT_ID, TOKEN)
+        : null;
+      if (next && typeof window.history.replaceState === 'function') {
+        window.history.replaceState(window.history.state, '', next);
+      }
+    } catch (err) { /* the address stays as the site left it */ }
+  }
+  installEditHistory();
 
   const Z = 2147483647; // max safe z-index — stays above whatever the host page uses
   const COLORS = { indigo: '#5635FB', indigoDark: '#4527d6', mint: '#02DEB5', ink: '#131723', danger: '#d64545', border: '#e6e7f0' };
@@ -52,6 +106,8 @@
   let editWarning = '';
   let goalsScope = 'shared';
   let pickingActive = false;
+  let stepsNote = '';
+  const REPLAY_WARNING = 'Apply without reloading runs the change list again on this screen, so you stay on this step. Reloading goes back to the first step.';
   let hoveredEl = null;
   let changesListOpen = false;
   let goalsListOpen = false;
@@ -233,7 +289,7 @@
     const res = await editorFetch(`${API_BASE}/api/editor/variants/${VARIANT_ID}?token=${encodeURIComponent(TOKEN)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ changes, goals }),
+      body: JSON.stringify({ changes, goals, steps_note: stepsNote.replace(/\s+/g, ' ').trim() }),
     });
     const body = await readBody(res);
     if (!res.ok) throw errorFromResponse(body, res.status);
@@ -258,6 +314,7 @@
         return {
           changes: parsed.changes,
           goals: Array.isArray(parsed.goals) ? parsed.goals : null,
+          stepsNote: typeof parsed.stepsNote === 'string' ? parsed.stepsNote : null,
           experimentId: parsed.experimentId || '',
           variantId: parsed.variantId || '',
         };
@@ -278,6 +335,7 @@
         variantId: VARIANT_ID,
         changes: allChanges,
         goals: allGoals,
+        stepsNote,
       }));
     } catch (e) { /* ignore quota/privacy-mode errors */ }
   }
@@ -317,6 +375,54 @@
     window.location.reload();
   }
 
+  // Run the working list on the DOM that is already on screen. Identical page
+  // JavaScript does not run a second time. A changed page script does. Style
+  // tags this editor added are replaced, so an edited page CSS block does not
+  // sit on top of the old one.
+  function replayOnPage() {
+    persistWorkingSet();
+    if (editorApplier && typeof editorApplier.disconnect === 'function') editorApplier.disconnect();
+    editorApplier = null;
+    const styles = document.querySelectorAll('style[data-pivit-css], style[data-pivit-page-css]');
+    for (let i = 0; i < styles.length; i++) {
+      if (styles[i] && typeof styles[i].remove === 'function') styles[i].remove();
+    }
+    const applier = ensureApplier();
+    if (applier) applier.applyAll(allChanges, 'replay-' + Date.now());
+    else allChanges.forEach(applyChange);
+    refreshToolbarState();
+  }
+
+  function spaEditing() {
+    let script = null;
+    try {
+      script = document.querySelector('script[src*="ab.js"]') || document.querySelector('script[data-spa]');
+    } catch (err) { script = null; }
+    if (window.PivitRuntime && typeof window.PivitRuntime.spaNavigationEnabled === 'function') {
+      return window.PivitRuntime.spaNavigationEnabled(script);
+    }
+    if (!script || typeof script.getAttribute !== 'function') return true;
+    const raw = script.getAttribute('data-spa');
+    if (raw == null) return true;
+    return String(raw).trim().toLowerCase() !== 'off';
+  }
+
+  // An existing change on a single-page app can stay on this step, or reload
+  // and go back to the first one. A page that has turned SPA handling off
+  // still reloads, which is the clean replay.
+  function finishExistingEdit() {
+    if (!spaEditing()) {
+      reloadAndReplay();
+      return;
+    }
+    showReplayChoice({
+      title: 'Update this change',
+      detail: REPLAY_WARNING,
+      onApply: () => replayOnPage(),
+      onReload: () => reloadAndReplay(),
+    });
+  }
+
   // Key-order-independent serialisation: the server's JSONB column hands objects
   // back with its own key order, so a plain JSON.stringify comparison could call
   // identical content "unsaved".
@@ -326,7 +432,11 @@
     return JSON.stringify(v);
   }
   function currentSnapshot() {
-    return canon({ changes: allChanges, goals: allGoals });
+    return canon({
+      changes: allChanges,
+      goals: allGoals,
+      steps_note: String(stepsNote || '').replace(/\s+/g, ' ').trim(),
+    });
   }
   function isDirty() {
     return currentSnapshot() !== savedSnapshot;
@@ -334,7 +444,7 @@
 
   // --- UI: a single floating root element, all children styled inline to stay
   // insulated from whatever CSS the host page already has. ---
-  let root, toolbar, statusEl, countEl, actionPopup, panelEl, changesListEl, goalsListEl, customCssBtn, bannerBtn, selectorWarnEl;
+  let root, toolbar, statusEl, modeStatusEl, browseBtn, selectBtn, stepsInput, countEl, actionPopup, panelEl, replayEl, changesListEl, goalsListEl, customCssBtn, bannerBtn, selectorWarnEl;
   let editorApplier = null;
   let scopePanelEl = null;
   let similarHits = [];
@@ -484,17 +594,80 @@
     });
     toolbar.appendChild(selectorWarnEl);
 
+    const modeRow = document.createElement('div');
+    styleReset(modeRow);
+    modeRow.id = 'pivit-mode-switch';
+    modeRow.setAttribute('role', 'group');
+    modeRow.setAttribute('aria-label', 'Mode');
+    Object.assign(modeRow.style, {
+      display: 'flex', marginBottom: '8px', border: `1px solid ${COLORS.border}`,
+      borderRadius: '8px', overflow: 'hidden',
+    });
+    browseBtn = makeButton('Browse', COLORS.indigo, () => setEditorMode(false));
+    selectBtn = makeButton('Select', '#f0f0f7', () => setEditorMode(true));
+    [browseBtn, selectBtn].forEach((btn) => {
+      btn.style.flex = '1';
+      btn.style.margin = '0';
+      btn.style.borderRadius = '0';
+      btn.style.width = 'auto';
+    });
+    browseBtn.id = 'pivit-browse-btn';
+    selectBtn.id = 'pivit-pick-btn';
+    modeRow.appendChild(browseBtn);
+    modeRow.appendChild(selectBtn);
+    toolbar.appendChild(modeRow);
+
+    modeStatusEl = document.createElement('div');
+    styleReset(modeStatusEl);
+    modeStatusEl.id = 'pivit-mode-status';
+    modeStatusEl.setAttribute('role', 'status');
+    Object.assign(modeStatusEl.style, {
+      color: COLORS.ink, fontSize: '12px', lineHeight: '1.4', marginBottom: '10px',
+    });
+    toolbar.appendChild(modeStatusEl);
+
+    const noteLabel = document.createElement('label');
+    styleReset(noteLabel);
+    noteLabel.htmlFor = 'pivit-steps-note-input';
+    noteLabel.textContent = 'Steps note';
+    Object.assign(noteLabel.style, {
+      display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '4px',
+    });
+    toolbar.appendChild(noteLabel);
+
+    stepsInput = document.createElement('input');
+    styleReset(stepsInput);
+    stepsInput.id = 'pivit-steps-note-input';
+    stepsInput.maxLength = 280;
+    stepsInput.placeholder = 'Click Continue twice';
+    stepsInput.value = stepsNote;
+    stepsInput.setAttribute('spellcheck', 'true');
+    Object.assign(stepsInput.style, {
+      display: 'block', width: '100%', padding: '8px 10px', marginBottom: '4px',
+      border: `1px solid ${COLORS.border}`, borderRadius: '8px', fontSize: '12px',
+      color: COLORS.ink, background: '#fff',
+    });
+    stepsInput.addEventListener('input', () => {
+      stepsNote = stepsInput.value;
+      persistWorkingSet();
+      refreshToolbarState();
+    });
+    toolbar.appendChild(stepsInput);
+
+    const noteHint = document.createElement('div');
+    styleReset(noteHint);
+    Object.assign(noteHint.style, {
+      fontSize: '11px', color: '#6b6f83', lineHeight: '1.4', marginBottom: '10px',
+    });
+    noteHint.textContent = 'Shown in this editor and in previews. Say how to reach this step.';
+    toolbar.appendChild(noteHint);
+
     statusEl = document.createElement('div');
     styleReset(statusEl);
     statusEl.style.color = '#6b6f83';
     statusEl.style.fontSize = '12px';
     statusEl.style.marginBottom = '10px';
     toolbar.appendChild(statusEl);
-
-    const pickBtn = makeButton('🎯 Select element', COLORS.indigo, () => togglePicking());
-    pickBtn.style.width = '100%';
-    pickBtn.id = 'pivit-pick-btn';
-    toolbar.appendChild(pickBtn);
 
     const wholePageBtn = makeButton('Whole page', '#f0f0f7', () => openWholePagePanel(null));
     wholePageBtn.style.width = '100%';
@@ -718,9 +891,19 @@
 
   function removeChangeAtIndex(idx) {
     const change = allChanges[idx];
-    if (!confirm(`Remove this change?\n\n${describeChange(change)}\n\nThe page will reload to show the result.`)) return;
-    allChanges.splice(idx, 1);
-    reloadAndReplay();
+    if (!change) return;
+    if (!spaEditing()) {
+      if (!confirm(`Remove this change?\n\n${describeChange(change)}\n\nThe page will reload to show the result.`)) return;
+      allChanges.splice(idx, 1);
+      finishExistingEdit();
+      return;
+    }
+    showReplayChoice({
+      title: 'Remove this change?',
+      detail: describeChange(change) + '\n\n' + REPLAY_WARNING,
+      onApply: () => { allChanges.splice(idx, 1); replayOnPage(); },
+      onReload: () => { allChanges.splice(idx, 1); reloadAndReplay(); },
+    });
   }
 
   function editChangeAtIndex(idx) {
@@ -742,7 +925,7 @@
         const value = v.v.trim();
         if (!value) return { error: "This can't be empty — use Remove on the list entry to delete the change." };
         allChanges[idx] = { ...allChanges[idx], value };
-        reloadAndReplay(); // see reloadAndReplay(): edits to an existing change replay on a clean page
+        finishExistingEdit();
       },
     });
   }
@@ -759,6 +942,7 @@
     countEl.textContent = isDirty() ? '● Unsaved changes' : '✓ All changes saved';
     if (customCssBtn) customCssBtn.textContent = variantStylesheetIndex() === -1 ? 'Custom CSS' : 'Edit custom CSS';
     if (bannerBtn) bannerBtn.textContent = bannerChangeIndex() === -1 ? 'Insert banner' : 'Edit banner';
+    paintModeSwitch();
     refreshSelectorWarning();
     renderChangesList();
     renderGoalsList();
@@ -807,30 +991,91 @@
     }
   }
 
-  // --- Element picking ---
+  // --- Browse / Select ---
+  // Browse: clicks go to the site. Select: the next click picks an element.
+  // After a pick, the editor returns to Browse so the next click is the site's.
 
-  function togglePicking() {
-    pickingActive = !pickingActive;
-    const btn = document.getElementById('pivit-pick-btn');
-    if (pickingActive) {
-      btn.textContent = '✕ Cancel picking';
-      btn.style.background = COLORS.danger;
-      document.addEventListener('mousemove', onHoverMove, true);
-      document.addEventListener('click', onPickClick, true);
-      document.body.style.cursor = 'crosshair';
-    } else {
-      stopPicking();
-    }
+  function paintModeSwitch() {
+    if (!browseBtn || !selectBtn || !modeStatusEl) return;
+    const browseOn = !pickingActive;
+    browseBtn.setAttribute('aria-pressed', browseOn ? 'true' : 'false');
+    selectBtn.setAttribute('aria-pressed', browseOn ? 'false' : 'true');
+    browseBtn.style.background = browseOn ? COLORS.indigo : '#f0f0f7';
+    browseBtn.style.color = browseOn ? '#fff' : COLORS.ink;
+    selectBtn.style.background = browseOn ? '#f0f0f7' : COLORS.indigo;
+    selectBtn.style.color = browseOn ? COLORS.ink : '#fff';
+    modeStatusEl.textContent = browseOn
+      ? 'Browse is on. Clicks go to the site.'
+      : 'Select is on. Click an element to pick it.';
   }
 
-  function stopPicking() {
-    pickingActive = false;
-    const btn = document.getElementById('pivit-pick-btn');
-    if (btn) { btn.textContent = '🎯 Select element'; btn.style.background = COLORS.indigo; }
-    document.removeEventListener('mousemove', onHoverMove, true);
-    document.removeEventListener('click', onPickClick, true);
-    document.body.style.cursor = '';
-    clearHighlight();
+  function setEditorMode(selecting) {
+    const next = !!selecting;
+    if (next === pickingActive) {
+      paintModeSwitch();
+      return;
+    }
+    pickingActive = next;
+    if (pickingActive) {
+      if (typeof document.addEventListener === 'function') {
+        document.addEventListener('mousemove', onHoverMove, true);
+        document.addEventListener('click', onPickClick, true);
+      }
+      if (document.body && document.body.style) document.body.style.cursor = 'crosshair';
+    } else {
+      if (typeof document.removeEventListener === 'function') {
+        document.removeEventListener('mousemove', onHoverMove, true);
+        document.removeEventListener('click', onPickClick, true);
+      }
+      if (document.body && document.body.style) document.body.style.cursor = '';
+      clearHighlight();
+    }
+    paintModeSwitch();
+  }
+
+  function showReplayChoice(opts) {
+    if (replayEl) { replayEl.remove(); replayEl = null; }
+    closeActionPopup();
+    replayEl = document.createElement('div');
+    replayEl.id = 'pivit-replay-choice';
+    styleReset(replayEl);
+    Object.assign(replayEl.style, {
+      position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+      zIndex: String(Z), background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: '12px',
+      boxShadow: '0 12px 40px rgba(19,23,35,0.25)', padding: '20px', width: '420px', maxWidth: '92vw',
+      color: COLORS.ink, fontSize: '13px',
+    });
+    document.body.appendChild(replayEl);
+
+    const title = document.createElement('div');
+    styleReset(title);
+    title.style.fontWeight = '700';
+    title.style.fontSize = '15px';
+    title.style.marginBottom = '8px';
+    title.textContent = opts.title;
+    replayEl.appendChild(title);
+
+    const detail = document.createElement('div');
+    styleReset(detail);
+    Object.assign(detail.style, { fontSize: '13px', lineHeight: '1.45', whiteSpace: 'pre-wrap', marginBottom: '14px' });
+    detail.textContent = opts.detail;
+    replayEl.appendChild(detail);
+
+    function close() {
+      if (replayEl) { replayEl.remove(); replayEl = null; }
+    }
+    const applyBtn = makeButton('Apply without reloading', COLORS.indigo, () => { close(); opts.onApply(); });
+    applyBtn.id = 'pivit-apply-without-reload';
+    applyBtn.style.width = '100%';
+    applyBtn.style.whiteSpace = 'normal';
+    const reloadBtn = makeButton('Reload the page', '#f0f0f7', () => { close(); opts.onReload(); });
+    reloadBtn.id = 'pivit-reload-page';
+    reloadBtn.style.width = '100%';
+    reloadBtn.style.marginTop = '8px';
+    reloadBtn.style.color = COLORS.ink;
+    reloadBtn.style.whiteSpace = 'normal';
+    replayEl.appendChild(applyBtn);
+    replayEl.appendChild(reloadBtn);
   }
 
   function clearHighlight() {
@@ -838,8 +1083,18 @@
     hoveredEl = null;
   }
 
+  function isEditorChrome(node) {
+    if (!node) return false;
+    if (root && root.contains(node)) return true;
+    if (actionPopup && actionPopup.contains(node)) return true;
+    if (replayEl && replayEl.contains(node)) return true;
+    if (panelEl && panelEl.contains(node)) return true;
+    if (scopePanelEl && scopePanelEl.contains(node)) return true;
+    return false;
+  }
+
   function onHoverMove(e) {
-    if (root.contains(e.target) || (actionPopup && actionPopup.contains(e.target))) return;
+    if (isEditorChrome(e.target)) return;
     clearHighlight();
     hoveredEl = e.target;
     hoveredEl.style.outline = `2px solid ${COLORS.indigo}`;
@@ -847,13 +1102,13 @@
   }
 
   function onPickClick(e) {
-    if (root.contains(e.target)) return; // clicks on our own toolbar pass through normally
+    if (isEditorChrome(e.target)) return; // clicks on the editor pass through normally
     e.preventDefault();
     e.stopPropagation();
     const target = e.target;
     const x = e.clientX;
     const y = e.clientY;
-    stopPicking();
+    setEditorMode(false);
     if (!window.PivitRuntime) {
       showActionPopup(target, x, y, getSelector(target), 'element');
       return;
@@ -1147,7 +1402,7 @@
     const without = allChanges.filter((item) => !item || item.type !== 'banner');
     without.splice(insertAt, 0, change);
     allChanges = without;
-    reloadAndReplay();
+    finishExistingEdit();
   }
 
   function openBannerPanel(pinnedIdx) {
@@ -1422,12 +1677,12 @@
         }
         if (!css) {
           allChanges.splice(idx, 1);
-          reloadAndReplay();
+          finishExistingEdit();
           return;
         }
         if (css === String(allChanges[idx].value || '').trim()) return { error: 'Nothing changed yet.' };
         allChanges[idx] = { ...allChanges[idx], type: 'stylesheet', selector: '', value: css };
-        reloadAndReplay();
+        finishExistingEdit();
       },
     });
   }
@@ -1740,7 +1995,7 @@
         const before = allChanges.slice(0, oldIdx[0]);
         const after = allChanges.slice(oldIdx[0]).filter((_, j) => !oldSet.has(oldIdx[0] + j));
         allChanges = before.concat(finalSet, after);
-        reloadAndReplay();
+        finishExistingEdit();
       },
     });
   }
@@ -1807,7 +2062,7 @@
         const at = insertAt - removedBefore;
         const block = [cssChange, jsChange].filter(Boolean);
         allChanges = kept.slice(0, at).concat(block, kept.slice(at));
-        reloadAndReplay();
+        finishExistingEdit();
       },
     });
   }
@@ -1955,7 +2210,12 @@
       }
       const serverChanges = Array.isArray(variant.changes) ? variant.changes : [];
       const serverGoals = Array.isArray(variant.goals) ? variant.goals : [];
-      savedSnapshot = canon({ changes: serverChanges, goals: serverGoals });
+      stepsNote = typeof variant.steps_note === 'string' ? variant.steps_note : '';
+      savedSnapshot = canon({
+        changes: serverChanges,
+        goals: serverGoals,
+        steps_note: stepsNote.replace(/\s+/g, ' ').trim(),
+      });
 
       // A working set left over from a reload-and-replay (an in-progress,
       // not-yet-saved edit) takes precedence over what's on the server, but
@@ -1963,6 +2223,7 @@
       const persisted = readPersistedWorkingSet();
       allChanges = persisted ? persisted.changes : serverChanges;
       allGoals = persisted && persisted.goals !== null ? persisted.goals : serverGoals;
+      if (persisted && typeof persisted.stepsNote === 'string') stepsNote = persisted.stepsNote;
       clearStaleEditorState();
       if (persisted) persistWorkingSet();
 

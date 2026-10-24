@@ -149,6 +149,8 @@
  * goals to it. data-spa="off" on the snippet tag leaves tests and URL goals
  * on full loads only. Send to GA4 still follows the address in that case.
  * An ab_edit or preview address is not re-checked and is not tracked.
+ * In the editor, pushState and replaceState keep ab_edit and token on the
+ * address, so a single-page app that rewrites the URL does not close it.
  *
  * Selectors and applying changes live on PivitRuntime (also exported for tests).
  * The visual editor uses the same helpers, so a selector saved from the editor
@@ -212,6 +214,10 @@
   api.spaNavigationEnabled = spaNavigationEnabled;
   api.spaRecheckAllowed = spaRecheckAllowed;
   api.modeFromHref = modeFromHref;
+  api.urlWithEditParams = urlWithEditParams;
+  api.bindEditHistory = bindEditHistory;
+  api.stepsNoteLabel = stepsNoteLabel;
+  api.mountStepsNote = mountStepsNote;
   api.createRouteSession = createRouteSession;
   api.startSpaRecheck = startSpaRecheck;
   api.createNavigationGate = createNavigationGate;
@@ -258,7 +264,7 @@
   let ga4Experiments = [];
   let ga4Reporting = false;
   // Bump when editor.js changes so a cached copy cannot keep the old variant.
-  const EDITOR_VERSION = '20261021a';
+  const EDITOR_VERSION = '20261024a';
   // Bump when device-preview.js changes so a cached shell cannot skip JavaScript.
   const DEVICE_PREVIEW_VERSION = '20261021a';
 
@@ -1052,6 +1058,13 @@
   async function init() {
     const mode = pageMode();
 
+    // Before any await. A single-page app often rewrites the address as soon
+    // as its own script runs, and that can drop ab_edit and token. Wrapping
+    // history here, while this script is still synchronous, puts them back.
+    if (mode.type === 'edit' && mode.variantId && mode.token) {
+      bindEditHistory(window, mode.variantId, mode.token);
+    }
+
     // Edit mode: ?ab_edit=<variant_id>&token=<token> hands off entirely to a
     // separate editor script, loaded only now (not for every real visitor) —
     // keeps this production snippet lean. No tracking/preview logic runs below
@@ -1085,6 +1098,7 @@
       editorScript.setAttribute('data-pivit-editor', '1');
       editorScript.setAttribute('data-api', API_BASE);
       editorScript.setAttribute('data-variant-id', mode.variantId);
+      if (mode.token) editorScript.setAttribute('data-token', mode.token);
       document.head.appendChild(editorScript);
       revealPage();
       return;
@@ -1154,6 +1168,7 @@
           ? previewVariant(data.experiments, data.preview)
           : null;
         if (match) {
+          api.mountStepsNote(document, match.variant && match.variant.steps_note);
           const selector = api.elementSelectorOf(match.experiment);
           const query = api.elementQuery(document, selector);
           if (query.state === 'present' || query.state === 'none') {
@@ -2294,6 +2309,89 @@
       waiting: appliedResult.waiting,
       views: appliedResult.views,
     };
+  }
+
+  // Keep the editor's ab_edit and token on whatever address a single-page
+  // app passes to pushState or replaceState. A missing URL argument is left
+  // alone. A different origin is left alone: pushState cannot go there, and
+  // the token must not be copied onto it. The hash and the site's own query
+  // parameters stay.
+  function urlWithEditParams(nextUrl, currentHref, variantId, token) {
+    if (!variantId || !token || nextUrl == null) return nextUrl;
+    let current;
+    try { current = new URL(String(currentHref || ''), 'https://pivitlab.invalid'); }
+    catch (err) { return nextUrl; }
+    let raw = nextUrl;
+    if (typeof nextUrl === 'object') {
+      raw = typeof nextUrl.href === 'string' ? nextUrl.href : String(nextUrl);
+    }
+    let target;
+    try { target = new URL(String(raw), current.href); }
+    catch (err) { return nextUrl; }
+    if (target.origin !== current.origin) return nextUrl;
+    target.searchParams.set('ab_edit', String(variantId));
+    target.searchParams.set('token', String(token));
+    return target.pathname + target.search + target.hash;
+  }
+
+  function bindEditHistory(win, variantId, token) {
+    if (!win || !variantId || !token || !win.history) return false;
+    if (win.__pivitEditHistory) return true;
+    function wrap(name) {
+      const original = win.history[name];
+      if (typeof original !== 'function' || original.__pivitEditHistory) return;
+      function wrapped(state, title, url) {
+        if (arguments.length < 3 || url == null) return original.call(win.history, state, title);
+        const next = urlWithEditParams(url, win.location && win.location.href, variantId, token);
+        return original.call(win.history, state, title, next);
+      }
+      wrapped.__pivitEditHistory = true;
+      try { win.history[name] = wrapped; }
+      catch (err) { /* the browser's own history stays as it was */ }
+    }
+    wrap('pushState');
+    wrap('replaceState');
+    try { win.__pivitEditHistory = { variantId: String(variantId), token: String(token) }; }
+    catch (err) { /* the wrappers are still in place for this document */ }
+    return true;
+  }
+
+  function stepsNoteLabel(note) {
+    const text = String(note == null ? '' : note).replace(/\s+/g, ' ').trim();
+    if (!text) return '';
+    return 'Steps: ' + text;
+  }
+
+  function mountStepsNote(doc, note) {
+    const label = stepsNoteLabel(note);
+    if (!doc || typeof doc.createElement !== 'function' || !label) return null;
+    let el = typeof doc.getElementById === 'function' ? doc.getElementById('pivit-steps-note') : null;
+    if (!el) {
+      el = doc.createElement('div');
+      if (el.setAttribute) {
+        el.setAttribute('id', 'pivit-steps-note');
+        el.setAttribute('role', 'note');
+      } else {
+        el.id = 'pivit-steps-note';
+      }
+      if (el.style) {
+        el.style.position = 'fixed';
+        el.style.top = '0';
+        el.style.left = '0';
+        el.style.right = '0';
+        el.style.zIndex = '2147483646';
+        el.style.background = '#f4f1ff';
+        el.style.color = '#131723';
+        el.style.padding = '10px 16px';
+        el.style.font = '14px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif';
+        el.style.boxShadow = '0 2px 8px rgba(19,23,35,0.12)';
+      }
+      const parent = doc.body || doc.documentElement;
+      if (!parent || typeof parent.appendChild !== 'function') return null;
+      parent.appendChild(el);
+    }
+    el.textContent = label;
+    return el;
   }
 
   function bindSpaRouteChanges(win, onChange) {

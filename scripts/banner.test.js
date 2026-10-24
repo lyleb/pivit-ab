@@ -304,6 +304,10 @@ async function flush() {
   existing.document.getElementById('pivit-banner-end').value = '2026-12-01T18:30';
   findButton(existing.document.getElementById('pivit-banner-panel'), 'Save change').click();
   await flush();
+  const choice = existing.document.getElementById('pivit-replay-choice');
+  assert.ok(choice);
+  findButton(choice, 'Reload the page').click();
+  await flush();
   assert.strictEqual(existing.reloads.length, 1);
   const stored = JSON.parse(existing.sandbox.sessionStorage.getItem(`pivit_editor_changes_${expId}_${variantId}`));
   assert.strictEqual(stored.changes.length, 1);
