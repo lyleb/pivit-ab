@@ -31,7 +31,7 @@ const { markDomainConflict } = require('../auth-flow');
 const { DOMAIN_IN_USE_WARNING, routeStatus } = require('../site-domain');
 const { matchPageUrl, resolvePageMatch } = require('../../public/url-match');
 const { normaliseElementSelector } = require('../element-selector');
-const { normaliseActivation } = require('../activation');
+const { normaliseActivation, jsConditionChangeError } = require('../activation');
 const { isDemo, normaliseTestType, typeChangeError, demoPlan, countOptions } = require('../demo-test');
 const { refreshDemoPlan } = require('../demo-sample');
 const { noteSnippetSeen, noteInstallCheck, noteQaPreview, installCheckPayload } = require('../site-verify');
@@ -538,6 +538,8 @@ router.post('/', async (req, res) => {
   if (!element.ok) return res.status(400).json({ error: element.error });
   const activation = normaliseActivation(req.body.activation_type, req.body.activation_value);
   if (!activation.ok) return res.status(400).json({ error: activation.error });
+  const activationDenied = jsConditionChangeError(req.account, null, null, activation);
+  if (activationDenied) return res.status(403).json({ error: activationDenied });
 
   let hosts = [];
   if (allowed_hosts !== undefined) {
@@ -944,9 +946,10 @@ router.delete('/:id', async (req, res) => {
 });
 
 // PATCH /api/experiments/:id/activation  { activation_type, activation_value }
-// Owner-only. page_load clears the selector. element requires a CSS selector.
-// Omitting activation_type does not change the row, so another save cannot
-// reset when the test starts.
+// Owner-only. page_load and manual clear the stored value. element requires
+// a CSS selector. js_condition stores the expression, and only someone who
+// can write page JavaScript can set or change it. Omitting activation_type
+// does not change the row, so another save cannot reset when the test starts.
 router.patch('/:id/activation', async (req, res) => {
   try {
     const experiment = await ownedExperiment(req.account.id, req.params.id);
@@ -956,6 +959,13 @@ router.patch('/:id/activation', async (req, res) => {
     }
     const activation = normaliseActivation(req.body.activation_type, req.body.activation_value);
     if (!activation.ok) return res.status(400).json({ error: activation.error });
+    const activationDenied = jsConditionChangeError(
+      req.account,
+      experiment.activation_type,
+      experiment.activation_value,
+      activation
+    );
+    if (activationDenied) return res.status(403).json({ error: activationDenied });
     const { rows } = await db.query(
       `UPDATE experiments SET activation_type = $1, activation_value = $2
        WHERE id = $3 AND account_id = $4

@@ -84,14 +84,16 @@ function publicElementSelector(value) {
 // page_load with an empty value is the default, including a row from before
 // the column existed. An element start with no selector is still sent as
 // element so the snippet does not count every visitor by mistake.
+// js_condition sends the expression. manual sends an empty value; the test
+// key is the experiment id, which is already on the payload.
 function publicActivation(exp) {
-  const type = exp && exp.activation_type === 'element' ? 'element' : 'page_load';
+  const rawType = exp && exp.activation_type;
   const raw = exp && exp.activation_value;
   const value = typeof raw === 'string' ? raw.trim() : '';
-  return {
-    activation_type: type,
-    activation_value: type === 'element' ? value : '',
-  };
+  if (rawType === 'element') return { activation_type: 'element', activation_value: value };
+  if (rawType === 'js_condition') return { activation_type: 'js_condition', activation_value: value };
+  if (rawType === 'manual') return { activation_type: 'manual', activation_value: '' };
+  return { activation_type: 'page_load', activation_value: '' };
 }
 
 function publicVariant(variant) {

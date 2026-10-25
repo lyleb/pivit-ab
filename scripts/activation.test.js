@@ -26,6 +26,34 @@ assert.ok(activation.normaliseActivation('element', 'div { color: red }').error.
 assert.strictEqual(activation.normaliseActivation('element', '<section>').ok, false);
 assert.strictEqual(activation.normaliseActivation('element', 'a'.repeat(501)).ok, false);
 assert.ok(activation.normaliseActivation('element', 'a'.repeat(501)).error.includes('too long'));
+assert.strictEqual(activation.normaliseActivation('js_condition', ' window.checkout && checkout.step === 3 ').value, 'window.checkout && checkout.step === 3');
+assert.strictEqual(activation.normaliseActivation('js_condition', 'document.getElementById(\'step-payment\')').value, 'document.getElementById(\'step-payment\')');
+assert.strictEqual(activation.normaliseActivation('js_condition', '').ok, false);
+assert.strictEqual(activation.normaliseActivation('js_condition', '   ').ok, false);
+assert.ok(activation.normaliseActivation('js_condition', '').error.includes('JavaScript condition'));
+assert.strictEqual(activation.normaliseActivation('js_condition', 'a'.repeat(501)).ok, false);
+assert.ok(activation.normaliseActivation('js_condition', 'a'.repeat(501)).error.includes('too long'));
+assert.strictEqual(activation.normaliseActivation('js_condition', 'checkout.step === 3\n&& false').ok, false);
+assert.strictEqual(activation.normaliseActivation('manual', 'ignored').type, 'manual');
+assert.strictEqual(activation.normaliseActivation('manual', 'ignored').value, null);
+assert.strictEqual(activation.canSetJsCondition({ role: 'owner' }), true);
+assert.strictEqual(activation.canSetJsCondition({ role: 'owner', readOnly: true }), false);
+assert.strictEqual(activation.canSetJsCondition({ role: 'client_viewer' }), false);
+assert.strictEqual(activation.canSetJsCondition(null), false);
+assert.strictEqual(activation.jsConditionChangeError({ role: 'owner' }, 'page_load', null, { type: 'js_condition', value: 'true' }), '');
+assert.ok(activation.jsConditionChangeError({ role: 'client_viewer' }, null, null, { type: 'js_condition', value: 'true' }).includes('page JavaScript'));
+assert.strictEqual(activation.jsConditionChangeError(
+  { role: 'client_viewer' },
+  'js_condition',
+  'true',
+  { type: 'js_condition', value: 'true' }
+), '');
+assert.ok(activation.jsConditionChangeError(
+  { role: 'client_viewer' },
+  'js_condition',
+  'true',
+  { type: 'page_load', value: null }
+).includes('page JavaScript'));
 
 assert.deepStrictEqual(runtime.activationOf({}), { type: 'page_load', selector: '' });
 assert.deepStrictEqual(runtime.activationOf({ activation_type: 'element', activation_value: ' #step-payment ' }), {
@@ -73,6 +101,10 @@ const note = urlMatch.previewActivationNote('element', '#step-payment');
 assert.ok(note.includes('#step-payment'));
 assert.ok(note.includes('straight away'));
 assert.strictEqual(urlMatch.previewActivationNote('page_load', '#step-payment'), '');
+assert.ok(urlMatch.previewActivationNote('js_condition', 'true').includes('straight away'));
+assert.ok(urlMatch.previewActivationNote('js_condition', 'true').includes('JavaScript condition'));
+assert.ok(urlMatch.previewActivationNote('manual', '').includes('pivit.activate'));
+assert.ok(urlMatch.previewActivationNote('manual', '').includes('straight away'));
 
 function memoryStore(initial) {
   const data = Object.assign({}, initial);
@@ -609,6 +641,13 @@ async function main() {
   assert.ok(admin.includes('Start the test when…'));
   assert.ok(admin.includes('the page loads'));
   assert.ok(admin.includes('this element appears'));
+  assert.ok(admin.includes('a JavaScript condition is true'));
+  assert.ok(admin.includes('the page calls pivit.activate'));
+  assert.ok(admin.includes('id="settings-activation-js"'));
+  assert.ok(admin.includes('id="settings-activation-key"'));
+  assert.ok(admin.includes('id="wizard-activation-js"'));
+  assert.ok(admin.includes("pivit.activate"));
+  assert.ok(admin.includes('window.checkout && checkout.step === 3'));
   assert.ok(admin.includes('#step-payment'));
   assert.ok(admin.includes('Visitors who never see it are left out.'));
   assert.ok(!editor.includes('activation_type'));
@@ -635,6 +674,248 @@ async function main() {
   assert.ok(previewBlock.includes('elementSelectorOf'));
   assert.ok(previewBlock.includes('waitForElement(document, selector)'));
   assert.ok(!previewBlock.includes('forever'));
+
+  runtime.resetManualActivations();
+  const stepDoc = {
+    payment: null,
+    getElementById(id) { return id === 'step-payment' ? stepDoc.payment : null; },
+    querySelector() { return null; },
+    documentElement: { nodeType: 1 },
+  };
+  const jsExperiment = experiment({
+    id: 'exp-step-3',
+    activation_type: 'js_condition',
+    activation_value: "document.getElementById('step-payment')",
+  });
+  assert.strictEqual(runtime.activationQuery(stepDoc, jsExperiment).state, 'missing');
+  stepDoc.payment = { nodeType: 1 };
+  assert.strictEqual(runtime.activationQuery(stepDoc, jsExperiment).state, 'present');
+  stepDoc.payment = null;
+
+  const clocks = [];
+  function fakeInterval(fn, ms) {
+    clocks.push({ kind: 'interval', fn, ms });
+    return clocks.length;
+  }
+  function fakeTimer(fn, ms) {
+    clocks.push({ kind: 'timer', fn, ms });
+    return clocks.length;
+  }
+  const jsHarness = harness();
+  const jsCalls = [];
+  const jsLogs = [];
+  const jsPending = runtime.exposeWhenReady(jsExperiment, {
+    document: stepDoc,
+    window: {},
+    MutationObserver: jsHarness.MutationObserver,
+    setInterval: fakeInterval,
+    setTimer: fakeTimer,
+    clearInterval() {},
+    clearTimer() {},
+    log(message) { jsLogs.push(message); },
+    onExpose() { jsCalls.push('expose'); },
+  });
+  assert.strictEqual(clocks.some((clock) => clock.kind === 'interval' && clock.ms === runtime.JS_CONDITION_POLL_MS), true);
+  assert.strictEqual(clocks.some((clock) => clock.kind === 'timer' && clock.ms === runtime.JS_CONDITION_LIMIT_MS), true);
+  assert.deepStrictEqual(jsCalls, []);
+  stepDoc.payment = { nodeType: 1 };
+  jsHarness.notify();
+  const jsResult = await jsPending;
+  assert.strictEqual(jsResult.exposed, true);
+  assert.strictEqual(jsResult.reason, 'condition');
+  assert.deepStrictEqual(jsCalls, ['expose']);
+  assert.deepStrictEqual(jsLogs, []);
+
+  const throwExperiment = experiment({
+    id: 'exp-throw',
+    activation_type: 'js_condition',
+    activation_value: '(function () { throw new Error("boom"); })()',
+  });
+  const throwClocks = [];
+  let pageIntact = true;
+  const throwResult = runtime.exposeWhenReady(throwExperiment, {
+    document: stepDoc,
+    window: {},
+    MutationObserver: harness().MutationObserver,
+    setInterval(fn, ms) { throwClocks.push({ fn, ms }); return 1; },
+    setTimer(fn, ms) { throwClocks.push({ fn, ms, timer: true }); return 2; },
+    clearInterval() {},
+    clearTimer() {},
+    log(message) { jsLogs.push(message); },
+    onExpose() { pageIntact = false; },
+  });
+  const polls = throwClocks.filter((clock) => !clock.timer);
+  assert.strictEqual(polls.length, 1);
+  polls[0].fn();
+  polls[0].fn();
+  const thrown = await throwResult;
+  assert.strictEqual(thrown.exposed, false);
+  assert.strictEqual(thrown.reason, 'errors');
+  assert.strictEqual(pageIntact, true);
+  assert.strictEqual(jsLogs.length, 1);
+  assert.ok(jsLogs[0].includes('repeated errors'));
+  polls[0].fn();
+  assert.strictEqual(jsLogs.length, 1);
+
+  const syntax = await runtime.exposeWhenReady(experiment({
+    activation_type: 'js_condition',
+    activation_value: '((((',
+  }), {
+    document: stepDoc,
+    setInterval() { throw new Error('a broken condition must not keep checking'); },
+    setTimer() { throw new Error('a broken condition must not keep checking'); },
+    onExpose() { throw new Error('a broken condition must not start the test'); },
+  });
+  assert.strictEqual(syntax.exposed, false);
+  assert.strictEqual(syntax.reason, 'invalid');
+
+  const timedClocks = [];
+  const timed = runtime.exposeWhenReady(experiment({
+    id: 'exp-wait',
+    activation_type: 'js_condition',
+    activation_value: 'false',
+  }), {
+    document: stepDoc,
+    window: {},
+    MutationObserver: null,
+    setInterval(fn, ms) { timedClocks.push({ fn, ms }); return 7; },
+    clearInterval() {},
+    setTimer(fn, ms) { timedClocks.push({ fn, ms, timer: true }); return 8; },
+    clearTimer() {},
+    onExpose() { throw new Error('a timed-out condition must not start the test'); },
+  });
+  const timeout = timedClocks.find((clock) => clock.timer);
+  assert.strictEqual(timeout.ms, 10 * 60 * 1000);
+  timeout.fn();
+  const timedResult = await timed;
+  assert.strictEqual(timedResult.exposed, false);
+  assert.strictEqual(timedResult.reason, 'timeout');
+
+  runtime.resetManualActivations();
+  const manualExperiment = experiment({
+    id: 'Exp-Manual',
+    activation_type: 'manual',
+    activation_value: null,
+  });
+  const manualDoc = { querySelector() { return null; }, documentElement: { nodeType: 1 } };
+  assert.strictEqual(runtime.activationQuery(manualDoc, manualExperiment).state, 'missing');
+  const queuedActivate = { pivit: [['activate', 'Exp-Manual'], ['track', 'payment_complete']] };
+  const tracked = [];
+  const activateTracker = runtime.installPivitTracker(queuedActivate, (name) => tracked.push(name));
+  assert.deepStrictEqual(tracked, ['payment_complete']);
+  assert.strictEqual(runtime.eventNameFromQueueItem(['activate', 'Exp-Manual']), '');
+  assert.strictEqual(runtime.activationKeyFromQueueItem(['activate', ' Exp-Manual ']), 'Exp-Manual');
+  assert.strictEqual(runtime.activationQuery(manualDoc, manualExperiment).state, 'present');
+  assert.strictEqual(typeof activateTracker.activate, 'function');
+
+  const manualCalls = [];
+  const manualPending = runtime.exposeWhenReady(experiment({
+    id: 'exp-later',
+    activation_type: 'manual',
+  }), {
+    document: manualDoc,
+    MutationObserver: harness().MutationObserver,
+    onExpose() { manualCalls.push('expose'); },
+  });
+  assert.deepStrictEqual(manualCalls, []);
+  activateTracker.activate('exp-later');
+  const manualResult = await manualPending;
+  assert.strictEqual(manualResult.exposed, true);
+  assert.strictEqual(manualResult.reason, 'activated');
+  assert.deepStrictEqual(manualCalls, ['expose']);
+
+  const manualStorage = memoryStore();
+  const manualViews = [];
+  const waitingManual = runtime.applyMatchingExperiments({
+    experiments: [experiment({ id: 'exp-hold', activation_type: 'manual' })],
+    href: PAY,
+    document: manualDoc,
+    storage: manualStorage,
+    visitorId: 'visitor-live',
+    qaOn: false,
+    applied: Object.create(null),
+    apply() { throw new Error('applied before activate'); },
+    send() { throw new Error('viewed before activate'); },
+    wire() {},
+    report() {},
+  });
+  assert.strictEqual(waitingManual.waiting.length, 1);
+  runtime.rememberManualActivation('exp-hold');
+  runtime.applyMatchingExperiments({
+    experiments: [experiment({ id: 'exp-hold', activation_type: 'manual', test_type: 'demo' })],
+    href: PAY,
+    document: manualDoc,
+    storage: memoryStore(),
+    visitorId: 'visitor-live',
+    qaOn: false,
+    applied: Object.create(null),
+    apply() { throw new Error('a demo test must not bucket a real visitor'); },
+    send() { throw new Error('a demo test must not count a real visitor'); },
+    wire() {},
+    report() {},
+  });
+  const qaManual = runtime.applyMatchingExperiments({
+    experiments: [experiment({ id: 'exp-hold', activation_type: 'manual' })],
+    href: PAY,
+    document: manualDoc,
+    storage: manualStorage,
+    visitorId: 'v_pt_checkout',
+    qaOn: true,
+    applied: Object.create(null),
+    apply() { return { ok: true }; },
+    send(experimentId, variantId, visitorId, eventType) {
+      manualViews.push(runtime.eventBody({
+        experiment_id: experimentId,
+        variant_id: variantId,
+        visitor_id: visitorId,
+        event_type: eventType,
+      }, true));
+    },
+    wire() {},
+    report() {},
+  });
+  assert.strictEqual(qaManual.views.length, 1);
+  assert.strictEqual(manualViews[0].is_test, true);
+
+  const previewJs = runtime.previewInfo(
+    { name: 'Checkout', activation_type: 'js_condition', activation_value: "document.getElementById('step-payment')" },
+    { name: 'Offer' },
+    { found: true }
+  );
+  assert.ok(previewJs.includes('without waiting'));
+  assert.ok(previewJs.includes('JavaScript condition'));
+  const previewManual = runtime.previewInfo(
+    { name: 'Checkout', id: 'exp-hold', activation_type: 'manual' },
+    { name: 'Offer' },
+    { found: true }
+  );
+  assert.ok(previewManual.includes('pivit.activate'));
+  assert.ok(previewManual.includes('without waiting'));
+  assert.strictEqual(runtime.previewWaits(jsExperiment).activation, true);
+  assert.strictEqual(runtime.previewWaits(manualExperiment).waitForElementRule, false);
+
+  const ui = require('../public/admin-ui');
+  const snippetText = ui.manualActivationSnippet('exp-hold');
+  assert.ok(snippetText.includes("window.pivit.push(['activate', 'exp-hold']);"));
+  assert.ok(snippetText.includes("pivit.activate('exp-hold');"));
+  assert.ok(snippetText.includes('window.pivit = window.pivit || [];'));
+  assert.ok(ui.activationStartText('manual', '').includes('pivit.activate'));
+  assert.ok(ui.activationHint('js_condition').includes('10 minutes'));
+  assert.ok(ui.activationHint('js_condition').includes('page JavaScript'));
+
+  const help = fs.readFileSync(path.join(__dirname, '../public/help.html'), 'utf8');
+  const helpDoc = fs.readFileSync(path.join(__dirname, '../docs/help.md'), 'utf8');
+  assert.ok(help.includes('id="js-condition"'));
+  assert.ok(help.includes('id="manual-activation"'));
+  assert.ok(help.includes("document.getElementById('step-payment')"));
+  assert.ok(help.includes("pivit.activate('YOUR_TEST_KEY')"));
+  assert.ok(help.includes("pivit.push(['activate', 'YOUR_TEST_KEY'])"));
+  assert.ok(help.includes('does not break the page'));
+  assert.ok(!help.includes('Pivitlab'));
+  assert.ok(helpDoc.includes("document.getElementById('step-payment')"));
+  assert.ok(helpDoc.includes("pivit.activate('YOUR_TEST_KEY')"));
+  const migrateFile = fs.readFileSync(path.join(__dirname, '../src/db/migrate.js'), 'utf8');
+  assert.ok(!migrateFile.includes("version: '022'"));
 
   console.log('activation tests passed');
 }

@@ -1189,6 +1189,36 @@
     return `${n} sites have Send to GA4 switched on.`;
   }
 
+  const ACTIVATION_HINTS = {
+    page_load: 'The test starts when the address matches. This is the usual setting, and it is how tests work today.',
+    element: 'pivitlab watches for this element for the whole visit. The visitor is counted only after it appears. Visitors who never see it are left out.',
+    js_condition: 'pivitlab checks this expression when the page changes, and every half a second, for up to 10 minutes. A condition that throws does not break the page. After repeated errors, checking stops and one message is written to the console. Only someone who can write page JavaScript can set or change this. pivitlab checks that when you save.',
+    manual: 'The visitor is counted only after the page calls pivit.activate with this test\'s key. The call can be queued before the snippet loads. Preview still shows the variant straight away. Test traffic rules are unchanged.',
+  };
+
+  function activationHint(type) {
+    return ACTIVATION_HINTS[type] || ACTIVATION_HINTS.page_load;
+  }
+
+  function activationStartText(type, value) {
+    if (type === 'element') return 'When this element appears: ' + String(value || '');
+    if (type === 'js_condition') return 'When this JavaScript condition is true: ' + String(value || '');
+    if (type === 'manual') return 'When the page calls pivit.activate';
+    return 'When the page loads';
+  }
+
+  // The two calls do the same thing. The queue is safe before the snippet loads.
+  function manualActivationSnippet(testKey) {
+    const raw = String(testKey || '').trim();
+    const key = (raw || 'YOUR_TEST_KEY').replace(/\\/g, '\\\\').replace(/'/g, '\\\'');
+    return [
+      'window.pivit = window.pivit || [];',
+      "window.pivit.push(['activate', '" + key + "']);",
+      '',
+      "pivit.activate('" + key + "');",
+    ].join('\n');
+  }
+
   function ga4AgencySitesText(count) {
     const n = Math.max(0, Math.round(Number(count) || 0));
     if (n === 1) return '1 site switched on';
@@ -1299,6 +1329,9 @@
     GA4_HELP,
     GA4_UNPAID_NOTE,
     GA4_ADMIN_HELP,
+    activationHint,
+    activationStartText,
+    manualActivationSnippet,
     ga4UptakeText,
     ga4AgencySitesText,
   };

@@ -356,6 +356,12 @@
   // visitor is counted only once the element appears, and that preview
   // does not wait for it.
   function previewActivationNote(type, selector) {
+    if (type === 'js_condition') {
+      return 'Live visitors are counted only once the JavaScript condition is true. Preview shows the variant straight away, and it does not wait for that condition.';
+    }
+    if (type === 'manual') {
+      return 'Live visitors are counted only once the page calls pivit.activate. Preview shows the variant straight away, and it does not wait for that call.';
+    }
     if (type !== 'element') return '';
     const sel = String(selector == null ? '' : selector).trim();
     if (!sel) return '';
