@@ -145,6 +145,47 @@ Preview shows the variant straight away, so you can look at it without waiting f
 
 If you set both the element rule and this element appears, both have to be on the page. pivitlab keeps watching for the whole visit, rather than giving up after four seconds.
 
+## JavaScript condition
+
+**A JavaScript condition is true** waits until an expression you write is true. For example, `window.checkout && checkout.step === 3`.
+
+pivitlab checks it when the page changes, and every half a second, for up to 10 minutes. The visitor is counted, the variant is shown, and the view is sent only after the expression is true. A visitor who never reaches it is not counted.
+
+A condition that throws, or that cannot be read, does not break the page. After repeated errors, checking stops and one message is written to the browser console. The rest of the page still runs.
+
+Only someone who can write page JavaScript can set or change a condition. A Viewer cannot. pivitlab checks this on the server when the test is saved.
+
+Preview shows the variant straight away, so you can look at it without waiting for the condition. That visit is not counted. A visit with `?pivit_qa=1` is still marked as test traffic, and only once the condition is true.
+
+The Fernhill Draw checkout at `https://site3-checkout.netlify.app/play` stays on `/play`. Step 3 is payment. That page does not put a checkout object on `window`. The condition that is true only on that step is:
+
+```
+document.getElementById('step-payment')
+```
+
+The section with that id is added only on the payment step. It is removed when the visitor moves on.
+
+## When the page calls pivit.activate
+
+**The page calls pivit.activate** waits until your site starts the test. Each test has a key. pivitlab shows it under **Start the test when…** in the create wizard and in Settings.
+
+Put this where the visitor should join. It is safe to run before the snippet has loaded:
+
+```
+window.pivit = window.pivit || [];
+window.pivit.push(['activate', 'YOUR_TEST_KEY']);
+```
+
+After the snippet has loaded, this does the same thing:
+
+```
+pivit.activate('YOUR_TEST_KEY');
+```
+
+Replace `YOUR_TEST_KEY` with the key shown for that test. A visitor who is never activated is not counted. Preview shows the variant straight away and does not wait for the call. That visit is not counted. A visit with `?pivit_qa=1` is still test traffic, and only on the view sent after the call. A demo test still ignores real visitors.
+
+On the Fernhill checkout, call `pivit.activate` with that test's key when the visitor reaches payment (step 3). The same `document.getElementById('step-payment')` condition above starts a test without a call.
+
 ## When this element appears
 
 A goal can be **When this element appears**. You give it a CSS selector, such as `#step-confirmation`.

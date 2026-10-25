@@ -53,6 +53,7 @@
   .card label:first-child, .stack label:first-child { margin-top: 0; }
   textarea { height: 90px; font-family: "SF Mono", Menlo, monospace; font-size: 0.85em; }
   textarea.hosts { height: 68px; }
+  pre.activation-code { margin: 8px 0 10px; }
   button.remove-row { background: transparent; color: var(--danger); padding: 4px 8px; font-size: 1em; }
   button.remove-row:hover { background: rgba(240,113,120,0.12); }
   tbody tr:hover td { background: rgba(255,255,255,0.02); }
@@ -751,12 +752,28 @@
           <select id="wizard-activation">
             <option value="page_load">the page loads</option>
             <option value="element">this element appears</option>
+            <option value="js_condition">a JavaScript condition is true</option>
+            <option value="manual">the page calls pivit.activate</option>
           </select>
           <p class="hint" id="wizard-activation-hint">The test starts when the address matches. This is the usual setting, and it is how tests work today.</p>
           <div id="wizard-activation-wrap" hidden>
             <label for="wizard-activation-value">Element that starts the test</label>
             <input id="wizard-activation-value" placeholder="#step-payment" spellcheck="false" autocomplete="off">
             <p class="hint">A CSS selector. pivitlab watches for it for the whole visit, then counts the visitor and shows the variant. Visitors who never see it are left out. For example, <span class="mono">#step-payment</span> on a checkout.</p>
+          </div>
+          <div id="wizard-activation-js-wrap" hidden>
+            <label for="wizard-activation-js">JavaScript condition</label>
+            <textarea id="wizard-activation-js" class="hosts" spellcheck="false" autocomplete="off" placeholder="window.checkout && checkout.step === 3"></textarea>
+            <p class="hint">One expression. pivitlab checks it when the page changes, and every half a second, for up to 10 minutes. A condition that throws does not break the page. After repeated errors, checking stops and one message is written to the console. Only someone who can write page JavaScript can set or change this.</p>
+          </div>
+          <div id="wizard-activation-manual" hidden>
+            <p class="hint" id="wizard-activation-key-note">The test key is shown here after you continue, once the test exists.</p>
+            <p id="wizard-activation-key-line" hidden><span class="hint">Test key</span> <span class="mono" id="wizard-activation-key"></span></p>
+            <label for="wizard-activation-code">Code to paste</label>
+            <pre id="wizard-activation-code" class="activation-code"></pre>
+            <p class="hint">Put the first lines where the visitor should join, including before the snippet loads. After the snippet has loaded, <span class="mono">pivit.activate</span> does the same thing. Use this test's key.</p>
+            <button type="button" class="btn-ghost" id="wizard-activation-copy">Copy code</button>
+            <span id="wizard-activation-copied" class="hint"></span>
           </div>
           <label for="wizard-hosts">Site domain(s)</label>
           <textarea id="wizard-hosts" class="hosts" placeholder="example.com" spellcheck="false"></textarea>
@@ -2781,35 +2798,96 @@ function showPreviewActivationNote(el, rule) {
   el.hidden = !message;
 }
 
+function knownActivationType(type) {
+  if (type === 'element' || type === 'js_condition' || type === 'manual') return type;
+  return 'page_load';
+}
+
+function activationMetaHtml(exp) {
+  if (!exp) return '';
+  if (exp.activation_type === 'element' && exp.activation_value) {
+    return `<span class="mono" title="The test starts when this element appears">Starts when ${UI.escapeHtml(exp.activation_value)} appears</span>`;
+  }
+  if (exp.activation_type === 'js_condition') {
+    return '<span class="mono" title="The test starts when a JavaScript condition is true">Starts when a JavaScript condition is true</span>';
+  }
+  if (exp.activation_type === 'manual') {
+    return `<span class="mono" title="The test starts when the page calls pivit.activate">Starts when pivit.activate('${UI.escapeHtml(exp.id || '')}')</span>`;
+  }
+  return '';
+}
+
+function activationTestKey(prefix) {
+  if (prefix === 'wizard') return wizard.expId || '';
+  return currentDetail && currentDetail.id ? currentDetail.id : '';
+}
+
 function syncActivationInputs(prefix) {
   const typeEl = document.getElementById(prefix + '-activation');
-  const wrap = document.getElementById(prefix + '-activation-wrap');
   const hint = document.getElementById(prefix + '-activation-hint');
   if (!typeEl) return;
-  const element = typeEl.value === 'element';
-  if (wrap) wrap.hidden = !element;
-  if (hint) {
-    hint.textContent = element
-      ? 'pivitlab watches for this element for the whole visit. The visitor is counted only after it appears. Visitors who never see it are left out.'
-      : 'The test starts when the address matches. This is the usual setting, and it is how tests work today.';
-  }
+  const type = knownActivationType(typeEl.value);
+  const elementWrap = document.getElementById(prefix + '-activation-wrap');
+  const jsWrap = document.getElementById(prefix + '-activation-js-wrap');
+  const manualWrap = document.getElementById(prefix + '-activation-manual');
+  if (elementWrap) elementWrap.hidden = type !== 'element';
+  if (jsWrap) jsWrap.hidden = type !== 'js_condition';
+  if (manualWrap) manualWrap.hidden = type !== 'manual';
+  if (hint && UI.activationHint) hint.textContent = UI.activationHint(type);
+  if (type === 'manual') fillManualActivation(prefix);
+}
+
+function fillManualActivation(prefix) {
+  const key = activationTestKey(prefix);
+  const keyEl = document.getElementById(prefix + '-activation-key');
+  const keyLine = document.getElementById(prefix + '-activation-key-line');
+  const note = document.getElementById(prefix + '-activation-key-note');
+  const code = document.getElementById(prefix + '-activation-code');
+  if (keyEl) keyEl.textContent = key;
+  if (keyLine) keyLine.hidden = !key;
+  if (note) note.hidden = !!key;
+  if (code && UI.manualActivationSnippet) code.textContent = UI.manualActivationSnippet(key);
 }
 
 function readActivation(prefix) {
   const typeEl = document.getElementById(prefix + '-activation');
-  const valueEl = document.getElementById(prefix + '-activation-value');
-  const type = typeEl && typeEl.value === 'element' ? 'element' : 'page_load';
-  const value = valueEl ? valueEl.value.trim() : '';
-  return { activation_type: type, activation_value: type === 'element' ? value : '' };
+  const type = knownActivationType(typeEl && typeEl.value);
+  if (type === 'element') {
+    const valueEl = document.getElementById(prefix + '-activation-value');
+    return { activation_type: 'element', activation_value: valueEl ? valueEl.value.trim() : '' };
+  }
+  if (type === 'js_condition') {
+    const jsEl = document.getElementById(prefix + '-activation-js');
+    return { activation_type: 'js_condition', activation_value: jsEl ? jsEl.value.trim() : '' };
+  }
+  if (type === 'manual') return { activation_type: 'manual', activation_value: '' };
+  return { activation_type: 'page_load', activation_value: '' };
+}
+
+function activationPayload(activation) {
+  const type = knownActivationType(activation && activation.activation_type);
+  const value = type === 'element' || type === 'js_condition' ? (activation.activation_value || '') : '';
+  return { activation_type: type, activation_value: value };
 }
 
 function activationClientError(activation) {
-  if (!activation || activation.activation_type !== 'element') return '';
-  const value = String(activation.activation_value || '');
-  if (!value) return 'Enter the CSS selector for the element that starts the test.';
-  if (value.length > 500) return 'That selector is too long.';
-  if (/[{}<>]/.test(value) || /[\u0000-\u001f]/.test(value)) {
-    return 'Enter a CSS selector, for example #step-payment.';
+  if (!activation) return '';
+  if (activation.activation_type === 'element') {
+    const value = String(activation.activation_value || '');
+    if (!value) return 'Enter the CSS selector for the element that starts the test.';
+    if (value.length > 500) return 'That selector is too long.';
+    if (/[{}<>]/.test(value) || /[\u0000-\u001f]/.test(value)) {
+      return 'Enter a CSS selector, for example #step-payment.';
+    }
+    return '';
+  }
+  if (activation.activation_type === 'js_condition') {
+    const value = String(activation.activation_value || '');
+    if (!value) return 'Enter the JavaScript condition that starts the test.';
+    if (value.length > 500) return 'That condition is too long.';
+    if (/[\u0000-\u001f]/.test(value)) {
+      return 'Enter one JavaScript expression, for example window.checkout && checkout.step === 3.';
+    }
   }
   return '';
 }
@@ -2886,6 +2964,9 @@ async function reloadDetail() {
 
 function renderDetail() {
   const exp = currentDetail;
+  const activationType = exp.activation_type === 'element' || exp.activation_type === 'js_condition' || exp.activation_type === 'manual'
+    ? exp.activation_type
+    : 'page_load';
   if (UI.isDemoTest(exp)) includeTestTraffic = false;
   const variants = exp.variants || [];
   const action = UI.statusAction(exp.status);
@@ -2917,7 +2998,7 @@ function renderDetail() {
           ${UI.isDemoTest(exp) ? UI.demoBadgeHtml() : ''}
           <span class="mono">${UI.escapeHtml(exp.url_match || '—')}</span>
           ${exp.element_selector ? `<span class="mono" title="Only runs when this element is on the page">${UI.escapeHtml(exp.element_selector)}</span>` : ''}
-          ${exp.activation_type === 'element' && exp.activation_value ? `<span class="mono" title="The test starts when this element appears">Starts when ${UI.escapeHtml(exp.activation_value)} appears</span>` : ''}
+          ${activationMetaHtml(exp)}
           ${matchBadge(exp)}
           ${noDomainBadge(exp)}
           <span>Viewer · ${UI.escapeHtml(client)}</span>
@@ -3120,14 +3201,29 @@ function renderDetail() {
         <p class="hint">Optional. The URL rule still applies. For example, <span class="mono">button[name="add"]</span> or <span class="mono">.product-form__submit</span>. This looks for about four seconds. It is separate from when the test starts.</p>
         <label for="settings-activation">Start the test when…</label>
         <select id="settings-activation">
-          <option value="page_load"${exp.activation_type === 'element' ? '' : ' selected'}>the page loads</option>
-          <option value="element"${exp.activation_type === 'element' ? ' selected' : ''}>this element appears</option>
+          <option value="page_load"${activationType === 'page_load' ? ' selected' : ''}>the page loads</option>
+          <option value="element"${activationType === 'element' ? ' selected' : ''}>this element appears</option>
+          <option value="js_condition"${activationType === 'js_condition' ? ' selected' : ''}>a JavaScript condition is true</option>
+          <option value="manual"${activationType === 'manual' ? ' selected' : ''}>the page calls pivit.activate</option>
         </select>
         <p class="hint" id="settings-activation-hint"></p>
-        <div id="settings-activation-wrap"${exp.activation_type === 'element' ? '' : ' hidden'}>
+        <div id="settings-activation-wrap"${activationType === 'element' ? '' : ' hidden'}>
           <label for="settings-activation-value">Element that starts the test</label>
-          <input id="settings-activation-value" spellcheck="false" autocomplete="off" placeholder="#step-payment" value="${UI.escapeHtml(exp.activation_value || '')}">
+          <input id="settings-activation-value" spellcheck="false" autocomplete="off" placeholder="#step-payment" value="${activationType === 'element' ? UI.escapeHtml(exp.activation_value || '') : ''}">
           <p class="hint">A CSS selector. pivitlab watches for it for the whole visit, then counts the visitor and shows the variant. Visitors who never see it are left out. For example, <span class="mono">#step-payment</span> on a checkout.</p>
+        </div>
+        <div id="settings-activation-js-wrap"${activationType === 'js_condition' ? '' : ' hidden'}>
+          <label for="settings-activation-js">JavaScript condition</label>
+          <textarea id="settings-activation-js" class="hosts" spellcheck="false" autocomplete="off" placeholder="window.checkout && checkout.step === 3">${activationType === 'js_condition' ? UI.escapeHtml(exp.activation_value || '') : ''}</textarea>
+          <p class="hint">One expression. pivitlab checks it when the page changes, and every half a second, for up to 10 minutes. A condition that throws does not break the page. After repeated errors, checking stops and one message is written to the console. Only someone who can write page JavaScript can set or change this.</p>
+        </div>
+        <div id="settings-activation-manual"${activationType === 'manual' ? '' : ' hidden'}>
+          <p><span class="hint">Test key</span> <span class="mono" id="settings-activation-key">${UI.escapeHtml(exp.id || '')}</span></p>
+          <label for="settings-activation-code">Code to paste</label>
+          <pre id="settings-activation-code" class="activation-code"></pre>
+          <p class="hint">Put the first lines where the visitor should join, including before the snippet loads. After the snippet has loaded, <span class="mono">pivit.activate</span> does the same thing. Use this test's key.</p>
+          <button type="button" class="btn-ghost" id="settings-activation-copy">Copy code</button>
+          <span id="settings-activation-copied" class="hint"></span>
         </div>
         <label for="settings-hosts">Site domain(s)</label>
         <textarea id="settings-hosts" class="hosts" spellcheck="false" placeholder="example.com">${UI.escapeHtml((exp.allowed_hosts || []).join('\n'))}</textarea>
@@ -3157,6 +3253,11 @@ function renderDetail() {
   document.getElementById('settings-status').value = exp.status;
   const activationSelect = document.getElementById('settings-activation');
   if (activationSelect) activationSelect.addEventListener('change', () => syncActivationInputs('settings'));
+  syncActivationInputs('settings');
+  const activationCopy = document.getElementById('settings-activation-copy');
+  if (activationCopy) activationCopy.addEventListener('click', () => {
+    copyText(UI.manualActivationSnippet(exp.id), 'settings-activation-copied');
+  });
   syncActivationInputs('settings');
   refreshSettingsMatchHint();
   loadSeenHosts(exp.id);
@@ -5098,9 +5199,11 @@ async function renderWizard() {
   const elementField = document.getElementById('wizard-element');
   if (elementField) elementField.value = wizard.elementSelector || '';
   const activationType = document.getElementById('wizard-activation');
-  if (activationType) activationType.value = wizard.activationType === 'element' ? 'element' : 'page_load';
+  if (activationType) activationType.value = knownActivationType(wizard.activationType);
   const activationValue = document.getElementById('wizard-activation-value');
-  if (activationValue) activationValue.value = wizard.activationValue || '';
+  if (activationValue) activationValue.value = wizard.activationType === 'element' ? (wizard.activationValue || '') : '';
+  const activationJs = document.getElementById('wizard-activation-js');
+  if (activationJs && wizard.activationType === 'js_condition') activationJs.value = wizard.activationValue || '';
   syncActivationInputs('wizard');
   syncWizardMatch(false);
   if (!wizard.hostsEdited) wizard.hosts = suggestedSiteDomains();
@@ -5243,8 +5346,7 @@ async function persistWizardBasics() {
         url_match: wizard.url,
         url_match_type: wizard.match || (window.PivitUrl ? PivitUrl.defaultPageMatch(wizard.url) : 'contains'),
         element_selector: wizard.elementSelector || '',
-        activation_type: wizard.activationType || 'page_load',
-        activation_value: wizard.activationType === 'element' ? (wizard.activationValue || '') : '',
+        ...activationPayload({ activation_type: wizard.activationType, activation_value: wizard.activationValue }),
         client_id: wizard.clientId || null,
         allowed_hosts: wizard.hosts,
         test_type: wizard.testType === 'demo' ? 'demo' : 'live',
@@ -5278,10 +5380,10 @@ async function persistWizardBasics() {
   wizard.elementSelector = elementResult.data.element_selector || '';
   const activationResult = await callApi(`/api/experiments/${wizard.expId}/activation`, {
     method: 'PATCH', headers: authHeaders(),
-    body: JSON.stringify({
-      activation_type: wizard.activationType || 'page_load',
-      activation_value: wizard.activationType === 'element' ? (wizard.activationValue || '') : '',
-    }),
+    body: JSON.stringify(activationPayload({
+      activation_type: wizard.activationType,
+      activation_value: wizard.activationValue,
+    })),
   });
   if (!activationResult.ok) { wizardMsg(activationResult.message); return false; }
   wizard.activationType = activationResult.data.activation_type || 'page_load';
@@ -5385,7 +5487,7 @@ function renderWizardSummary() {
     <dt>Match</dt><dd>${UI.escapeHtml(window.PivitUrl ? PivitUrl.pageMatchLabel(wizard.match || 'contains') : (wizard.match || 'Contains'))}</dd>
     <dt>Where it runs</dt><dd>${UI.escapeHtml(window.PivitUrl ? PivitUrl.pageMatchHint(wizard.match || 'contains', wizard.url) : '')}</dd>
     <dt>Element</dt><dd class="mono">${wizard.elementSelector ? UI.escapeHtml(wizard.elementSelector) : 'Any page that matches the URL rule'}</dd>
-    <dt>Starts</dt><dd>${wizard.activationType === 'element' ? 'When this element appears: ' + UI.escapeHtml(wizard.activationValue || '') : 'When the page loads'}</dd>
+    <dt>Starts</dt><dd>${UI.escapeHtml(UI.activationStartText(wizard.activationType, wizard.activationValue))}${wizard.activationType === 'manual' && wizard.expId ? ' · test key ' + UI.escapeHtml(wizard.expId) : ''}</dd>
     <dt>Site domain(s)</dt><dd class="mono">${UI.escapeHtml(wizard.hosts || '—')}</dd>
     <dt>Viewer</dt><dd>${UI.escapeHtml(client)}</dd>
     <dt>Variants</dt><dd>${UI.escapeHtml(variants)}</dd>
@@ -5674,7 +5776,7 @@ document.getElementById('wizard-page-url').addEventListener('input', (e) => {
   saveWizard();
   refreshWizardPreviewWarning();
 });
-['wizard-name', 'wizard-url', 'wizard-element', 'wizard-activation-value', 'wizard-client', 'wizard-type'].forEach((id) => {
+['wizard-name', 'wizard-url', 'wizard-element', 'wizard-activation-value', 'wizard-activation-js', 'wizard-client', 'wizard-type'].forEach((id) => {
   const field = document.getElementById(id);
   if (!field) return;
   field.addEventListener('input', readWizardBasics);
@@ -5685,6 +5787,12 @@ if (wizardActivation) {
   wizardActivation.addEventListener('change', () => {
     syncActivationInputs('wizard');
     readWizardBasics();
+  });
+}
+const wizardActivationCopy = document.getElementById('wizard-activation-copy');
+if (wizardActivationCopy) {
+  wizardActivationCopy.addEventListener('click', () => {
+    copyText(UI.manualActivationSnippet(wizard.expId), 'wizard-activation-copied');
   });
 }
 document.getElementById('wizard-goals-list').addEventListener('input', rememberWizardGoals);

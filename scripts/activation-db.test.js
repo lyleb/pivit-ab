@@ -56,6 +56,7 @@ async function main() {
   assert.ok(!schema.includes('activation_type'), 'activation columns stay out of schema.sql');
   assert.ok(migrateSrc.includes("{ version: '019', name: 'activation', run: applyActivation }"));
   assert.ok(migrateSrc.indexOf("version: '018'") < migrateSrc.indexOf("version: '019'"));
+  assert.ok(!migrateSrc.includes("version: '022'"), 'js_condition and manual reuse the activation columns');
 
   const admin = await pg.connectAdmin();
   if (!admin) {
@@ -173,6 +174,102 @@ async function main() {
     assert.strictEqual(detail.status, 200);
     assert.strictEqual(detail.json.activation_type, 'page_load');
     assert.strictEqual(detail.json.activation_value, null);
+
+    const condition = await request(ownerServer, 'POST', '/api/experiments', {
+      name: 'Step 3 condition',
+      url_match: 'https://site3-checkout.netlify.app/play',
+      url_match_type: 'contains',
+      activation_type: 'js_condition',
+      activation_value: "  document.getElementById('step-payment')  ",
+      allowed_hosts: ['site3-checkout.netlify.app'],
+    });
+    assert.strictEqual(condition.status, 201);
+    assert.strictEqual(condition.json.activation_type, 'js_condition');
+    assert.strictEqual(condition.json.activation_value, "document.getElementById('step-payment')");
+
+    const manual = await request(ownerServer, 'POST', '/api/experiments', {
+      name: 'Step 3 manual',
+      url_match: 'https://site3-checkout.netlify.app/play',
+      url_match_type: 'contains',
+      activation_type: 'manual',
+      activation_value: 'ignored',
+      allowed_hosts: ['site3-checkout.netlify.app'],
+    });
+    assert.strictEqual(manual.status, 201);
+    assert.strictEqual(manual.json.activation_type, 'manual');
+    assert.strictEqual(manual.json.activation_value, null);
+
+    await db.query(`UPDATE experiments SET status = 'running' WHERE id = $1 OR id = $2`, [
+      condition.json.id,
+      manual.json.id,
+    ]);
+    const live = await request(
+      publicServer,
+      'GET',
+      '/api/experiments?url=' + encodeURIComponent('https://site3-checkout.netlify.app/play')
+    );
+    const liveCondition = live.json.experiments.find((row) => row.id === condition.json.id);
+    const liveManual = live.json.experiments.find((row) => row.id === manual.json.id);
+    assert.strictEqual(liveCondition.activation_type, 'js_condition');
+    assert.strictEqual(liveCondition.activation_value, "document.getElementById('step-payment')");
+    assert.strictEqual(liveManual.activation_type, 'manual');
+    assert.strictEqual(liveManual.activation_value, '');
+
+    const blankCondition = await request(ownerServer, 'PATCH', `/api/experiments/${condition.json.id}/activation`, {
+      activation_type: 'js_condition',
+      activation_value: '   ',
+    });
+    assert.strictEqual(blankCondition.status, 400);
+    const longCondition = await request(ownerServer, 'PATCH', `/api/experiments/${condition.json.id}/activation`, {
+      activation_type: 'js_condition',
+      activation_value: 'a'.repeat(501),
+    });
+    assert.strictEqual(longCondition.status, 400);
+    const brokenLine = await request(ownerServer, 'PATCH', `/api/experiments/${condition.json.id}/activation`, {
+      activation_type: 'js_condition',
+      activation_value: 'checkout.step === 3\n&& false',
+    });
+    assert.strictEqual(brokenLine.status, 400);
+    const stillCondition = await db.query(
+      `SELECT activation_type, activation_value FROM experiments WHERE id = $1`,
+      [condition.json.id]
+    );
+    assert.strictEqual(stillCondition.rows[0].activation_type, 'js_condition');
+    assert.strictEqual(stillCondition.rows[0].activation_value, "document.getElementById('step-payment')");
+
+    const clientServer = await listen(appFor({ role: 'client' }));
+    const viewerDenied = await request(clientServer, 'PATCH', `/api/experiments/${condition.json.id}/activation`, {
+      activation_type: 'js_condition',
+      activation_value: 'true',
+    });
+    assert.strictEqual(viewerDenied.status, 401);
+    clientServer.close();
+
+    const legacy = await db.query(`SELECT id FROM accounts WHERE legacy IS TRUE LIMIT 1`);
+    const memberUser = await db.query(
+      `INSERT INTO users (email, verified_at) VALUES ('member-activation@example.com', now()) RETURNING id`
+    );
+    await db.query(
+      `INSERT INTO memberships (account_id, user_id, role) VALUES ($1, $2, 'member')`,
+      [legacy.rows[0].id, memberUser.rows[0].id]
+    );
+    const memberServer = await listen(appFor({
+      role: 'owner',
+      userId: memberUser.rows[0].id,
+      accountId: legacy.rows[0].id,
+    }));
+    const memberSet = await request(memberServer, 'PATCH', `/api/experiments/${manual.json.id}/activation`, {
+      activation_type: 'js_condition',
+      activation_value: "document.getElementById('step-payment')",
+    });
+    assert.strictEqual(memberSet.status, 200);
+    assert.strictEqual(memberSet.json.activation_type, 'js_condition');
+    const memberSame = await request(memberServer, 'PATCH', `/api/experiments/${manual.json.id}/activation`, {
+      activation_type: 'js_condition',
+      activation_value: "document.getElementById('step-payment')",
+    });
+    assert.strictEqual(memberSame.status, 200);
+    memberServer.close();
 
     console.log('activation db tests passed');
   } finally {

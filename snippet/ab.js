@@ -38,21 +38,27 @@
  * and names the selector in the preview note. This is separate from when
  * the test starts (below). A test that starts on page load keeps this wait.
  *
- * Start the test when: activation_type is page_load or element.
- * page_load is the default and is today's behaviour, including the four
- * second element_selector wait when that field is set. element waits for
- * activation_value, a CSS selector, for as long as the visitor stays on
- * this page. It does not use the four second limit. The visitor is assigned,
- * the variant is applied, and the view and GA4 experience_impression are
- * sent only after that element is in the document. A visitor who never sees
- * it is not assigned and is not counted. If element_selector is also set,
- * both have to be on the page, and the watch still lasts for the visit
- * rather than four seconds. An invalid selector does not run the test.
- * Leaving the address the test matched cancels the watch. Preview shows
- * the variant straight away and does not wait for the activation element.
- * The editor (ab_edit) does not wait and does not count the visit.
+ * Start the test when: activation_type is page_load, element, js_condition
+ * or manual. page_load is the default and is today's behaviour, including
+ * the four second element_selector wait when that field is set. element
+ * waits for activation_value, a CSS selector, for as long as the visitor
+ * stays on this page. It does not use the four second limit. js_condition
+ * waits until activation_value, an expression, is true. It is checked when
+ * the DOM changes and every 500 milliseconds, for up to 10 minutes. A throw
+ * is caught. After three errors in a row, checking stops and one message is
+ * written to the console. The page is not broken. manual waits until the
+ * page calls pivit.activate with the experiment id, including a call queued
+ * before this file loads as pivit.push(['activate', id]). The visitor is
+ * assigned, the variant is applied, and the view and GA4
+ * experience_impression are sent only after that start. A visitor who never
+ * reaches it is not assigned and is not counted. If element_selector is also
+ * set, both have to be satisfied, and the watch uses the activation's own
+ * limit rather than four seconds. An invalid selector or an unreadable
+ * condition does not run the test. Leaving the address the test matched
+ * cancels the watch. Preview shows the variant straight away and does not
+ * wait. The editor (ab_edit) does not wait and does not count the visit.
  * pivit_qa is still stored as usual, and the view that is sent once the
- * element appears is still marked as test traffic.
+ * test starts is still marked as test traffic.
  *
  * Preview mode: the dashboard opens ?ab_preview=<variant_id>&ab_preview_token=<token>.
  * The token is signed and expires. It can show a draft, paused or disabled
@@ -145,8 +151,11 @@
  * window.pivit = window.pivit || []; pivit.push(['track', 'payment_complete']).
  * The queued form with properties is
  * pivit.push(['track', 'checkout_step', { step_name: 'confirmation' }]).
- * An array already stored on window.pivit is replayed. An existing object
- * is kept, and track is added on it. One conversion per visitor per goal.
+ * The same queue starts a manual test:
+ * pivit.push(['activate', '<test key>']). After this file loads, that is
+ * pivit.activate('<test key>'). An array already stored on window.pivit is
+ * replayed. An existing object is kept, and track and activate are added
+ * on it. One conversion per visitor per goal.
  * Preview and the editor do not send. A pivit_qa visit still sends the
  * conversion as test traffic.
  *
@@ -184,6 +193,21 @@
  */
 (function (root) {
   const ELEMENT_WAIT_MS = 4000;
+  // A JavaScript condition is checked on DOM changes and on this poll.
+  // Ten minutes is the longest a visit keeps being asked. Three throws in
+  // a row stop the check. One console warning is written, and the page
+  // keeps running.
+  const JS_CONDITION_POLL_MS = 500;
+  const JS_CONDITION_LIMIT_MS = 10 * 60 * 1000;
+  const JS_CONDITION_ERROR_LIMIT = 3;
+  const JS_CONDITION_MAX = 500;
+  // These sit above the early return. Node requires this file and never
+  // reaches the browser boot, so a const declared later would still be
+  // uninitialised when a test calls in.
+  const compiledConditions = Object.create(null);
+  const jsConditionLogged = Object.create(null);
+  const pendingManual = Object.create(null);
+  const manualListeners = [];
   // About a tenth of a second. A router that writes the address twice in
   // one turn, or a push followed at once by a replace, becomes one request.
   const SPA_DEBOUNCE_MS = 100;
@@ -231,7 +255,16 @@
   api.ELEMENT_WAIT_MS = ELEMENT_WAIT_MS;
   api.elementSelectorOf = elementSelectorOf;
   api.activationOf = activationOf;
+  api.activationDelays = activationDelays;
   api.activationQuery = activationQuery;
+  api.compileJsCondition = compileJsCondition;
+  api.rememberManualActivation = rememberManualActivation;
+  api.manualActivationSeen = manualActivationSeen;
+  api.resetManualActivations = resetManualActivations;
+  api.activationKeyFromQueueItem = activationKeyFromQueueItem;
+  api.JS_CONDITION_POLL_MS = JS_CONDITION_POLL_MS;
+  api.JS_CONDITION_LIMIT_MS = JS_CONDITION_LIMIT_MS;
+  api.JS_CONDITION_ERROR_LIMIT = JS_CONDITION_ERROR_LIMIT;
   api.elementQuery = elementQuery;
   api.elementIsPresent = elementIsPresent;
   api.waitForElement = waitForElement;
@@ -776,15 +809,96 @@
 
   // page_load is the default, including a payload from before this field
   // existed. element with an empty selector does not run: it must not fall
-  // through to counting every visitor.
+  // through to counting every visitor. js_condition and manual do not fall
+  // through either. The manual key is the experiment id.
   function activationOf(experiment) {
     const raw = experiment && experiment.activation_type;
-    const type = raw === 'element' ? 'element' : 'page_load';
     const value = experiment && typeof experiment.activation_value === 'string'
       ? experiment.activation_value.trim()
       : '';
-    if (type === 'element') return { type: 'element', selector: value };
+    if (raw === 'element') return { type: 'element', selector: value };
+    if (raw === 'js_condition') return { type: 'js_condition', expression: value };
+    if (raw === 'manual') {
+      const id = experiment && experiment.id != null ? String(experiment.id).trim() : '';
+      return { type: 'manual', key: id };
+    }
     return { type: 'page_load', selector: '' };
+  }
+
+  function activationDelays(experiment) {
+    const type = activationOf(experiment).type;
+    return type === 'element' || type === 'js_condition' || type === 'manual';
+  }
+
+  function logJsConditionOnce(key, message, err) {
+    const id = String(key || message || 'js');
+    if (jsConditionLogged[id]) return;
+    jsConditionLogged[id] = true;
+    try {
+      if (typeof console !== 'undefined' && console.warn) console.warn(message, err || '');
+    } catch (logErr) { /* a console failure must not break the page */ }
+  }
+  function compileJsCondition(source) {
+    const text = typeof source === 'string' ? source.trim() : '';
+    if (!text || text.length > JS_CONDITION_MAX || /[\u0000-\u001f]/.test(text)) {
+      return { ok: false, reason: 'invalid' };
+    }
+    if (Object.prototype.hasOwnProperty.call(compiledConditions, text)) return compiledConditions[text];
+    let fn;
+    try {
+      // Sloppy on purpose, so a bare name such as checkout resolves on the
+      // page. The same new Function shape as page JavaScript. It is not run
+      // until the check below, and a throw there is caught.
+      fn = new Function('window', 'document', 'return (' + text + ');');
+    } catch (err) {
+      const failed = { ok: false, reason: 'syntax', error: err };
+      compiledConditions[text] = failed;
+      logJsConditionOnce(text, '[ab] JavaScript condition stopped. It could not be read, so this test will not run.', err);
+      return failed;
+    }
+    const compiled = { ok: true, fn: fn };
+    compiledConditions[text] = compiled;
+    return compiled;
+  }
+  function readJsCondition(fn, win, doc) {
+    try {
+      return { ok: true, value: !!fn(win || {}, doc) };
+    } catch (err) {
+      return { ok: false, error: err };
+    }
+  }
+
+  function manualKey(value) {
+    if (typeof value !== 'string') return '';
+    const id = value.trim().toLowerCase();
+    if (!id || id.length > 80) return '';
+    return id;
+  }
+  function rememberManualActivation(key) {
+    const id = manualKey(key);
+    if (!id) return '';
+    pendingManual[id] = true;
+    const pending = manualListeners.slice();
+    for (let i = 0; i < pending.length; i++) {
+      try { pending[i](id); }
+      catch (err) { /* a listener must not break the page */ }
+    }
+    return id;
+  }
+  function manualActivationSeen(key) {
+    const id = manualKey(key);
+    return !!(id && pendingManual[id]);
+  }
+  function resetManualActivations() {
+    Object.keys(pendingManual).forEach(function (id) { delete pendingManual[id]; });
+    manualListeners.length = 0;
+  }
+  function onManualActivation(fn) {
+    manualListeners.push(fn);
+    return function () {
+      const index = manualListeners.indexOf(fn);
+      if (index !== -1) manualListeners.splice(index, 1);
+    };
   }
 
   // present when the test may start. missing when a watch should continue.
@@ -792,6 +906,9 @@
   // element_selector, which is what tests already do.
   function activationQuery(doc, experiment) {
     const activation = activationOf(experiment);
+    if (activation.type === 'js_condition' || activation.type === 'manual') {
+      return delayedActivationQuery(doc, experiment, activation);
+    }
     if (activation.type === 'element') {
       if (!activation.selector) return { state: 'invalid', selector: '' };
       const act = elementQuery(doc, activation.selector);
@@ -800,6 +917,28 @@
     const extra = elementQuery(doc, elementSelectorOf(experiment));
     if (activation.type === 'element' && extra.state === 'none') {
       return { state: 'present', selector: activation.selector };
+    }
+    return extra;
+  }
+
+  // present once the start has happened and element_selector, when set, is
+  // on the page. A throw is missing, not invalid, so a later check can still
+  // succeed. An unreadable expression is invalid and does not run the test.
+  function delayedActivationQuery(doc, experiment, activation) {
+    if (activation.type === 'manual') {
+      if (!activation.key || !manualActivationSeen(activation.key)) {
+        return { state: 'missing', selector: activation.key || '' };
+      }
+    } else {
+      const compiled = compileJsCondition(activation.expression);
+      if (!compiled.ok) return { state: 'invalid', selector: '' };
+      const win = typeof window !== 'undefined' ? window : globalThis;
+      const read = readJsCondition(compiled.fn, win, doc);
+      if (!read.ok || !read.value) return { state: 'missing', selector: '' };
+    }
+    const extra = elementQuery(doc, elementSelectorOf(experiment));
+    if (extra.state === 'none') {
+      return { state: 'present', selector: activation.type === 'manual' ? activation.key : '' };
     }
     return extra;
   }
@@ -948,9 +1087,197 @@
     });
   }
 
+  function clearHandle(clear, id) {
+    if (id == null || typeof clear !== 'function') return;
+    try { clear(id); } catch (err) { /* already cleared */ }
+  }
+
+  // A timer must not keep a test process alive, and must not throw if the
+  // browser has no unref.
+  function armTimer(set, fn, ms) {
+    let id = null;
+    try { id = set(fn, ms); } catch (err) { return null; }
+    if (id && typeof id.unref === 'function') {
+      try { id.unref(); } catch (err) { /* browsers have no unref */ }
+    }
+    return id;
+  }
+
+  // Checks the expression on DOM changes and every 500 milliseconds, for up
+  // to 10 minutes. A throw is caught. Three in a row stop the check and log
+  // once. The promise always settles. It does not reject.
+  function waitForJsCondition(doc, expression, elementSelector, options) {
+    const opts = options || {};
+    const compiled = compileJsCondition(expression);
+    if (!compiled.ok) return Promise.resolve({ found: false, reason: 'invalid' });
+    const extra = typeof elementSelector === 'string' ? elementSelector.trim() : '';
+    const win = opts.window || (typeof window !== 'undefined' ? window : globalThis);
+    const setIntervalFn = opts.setInterval || function (fn, ms) { return setInterval(fn, ms); };
+    const clearIntervalFn = opts.clearInterval || function (id) { clearInterval(id); };
+    const setTimer = opts.setTimer || function (fn, ms) { return setTimeout(fn, ms); };
+    const clearTimer = opts.clearTimer || function (id) { clearTimeout(id); };
+    const Observer = opts.MutationObserver || (typeof MutationObserver !== 'undefined' ? MutationObserver : null);
+    const log = opts.log || function (message, err) { logJsConditionOnce(expression, message, err); };
+
+    function ready() {
+      const read = readJsCondition(compiled.fn, win, doc);
+      if (!read.ok) return { found: false, reason: 'error', error: read.error };
+      if (!read.value) return { found: false, reason: 'missing' };
+      const query = elementQuery(doc, extra);
+      if (query.state === 'invalid') return { found: false, reason: 'invalid', stop: true };
+      if (query.state === 'missing') return { found: false, reason: 'missing' };
+      return { found: true, reason: 'condition' };
+    }
+
+    const first = ready();
+    if (first.found || first.stop) return Promise.resolve(first);
+    if (first.reason === 'error') {
+      // Counted again inside the watch, so the first failure is not lost
+      // when the caller also checked before arming the watch.
+    }
+
+    return new Promise(function (resolve) {
+      let settled = false;
+      let observer = null;
+      let interval = null;
+      let timer = null;
+      let errors = 0;
+      let logged = false;
+      function finish(result) {
+        if (settled) return;
+        settled = true;
+        if (observer) {
+          try { observer.disconnect(); } catch (err) { /* already gone */ }
+        }
+        clearHandle(clearIntervalFn, interval);
+        clearHandle(clearTimer, timer);
+        resolve(result);
+      }
+      function fail(err) {
+        if (logged) {
+          finish({ found: false, reason: 'errors' });
+          return;
+        }
+        logged = true;
+        try {
+          log('[ab] JavaScript condition stopped after repeated errors. This test will not run.', err);
+        } catch (logErr) { /* the page still runs */ }
+        finish({ found: false, reason: 'errors' });
+      }
+      function look() {
+        if (settled) return;
+        try {
+          if (typeof opts.isStale === 'function' && opts.isStale()) {
+            finish({ found: false, reason: 'stale' });
+            return;
+          }
+          const query = ready();
+          if (query.found) finish(query);
+          else if (query.stop || query.reason === 'invalid') finish(query);
+          else if (query.reason === 'error') {
+            errors += 1;
+            if (errors >= JS_CONDITION_ERROR_LIMIT) fail(query.error);
+          } else {
+            errors = 0;
+          }
+        } catch (err) {
+          errors += 1;
+          if (errors >= JS_CONDITION_ERROR_LIMIT) fail(err);
+        }
+      }
+      if (opts.hold) {
+        opts.hold.disconnect = function () {
+          finish({ found: false, reason: 'stale' });
+        };
+      }
+      if (Observer && doc) {
+        try {
+          observer = new Observer(function () { look(); });
+          const target = doc.documentElement || doc.body || doc;
+          if (target) observer.observe(target, { childList: true, subtree: true, attributes: true });
+        } catch (err) {
+          observer = null;
+        }
+      }
+      interval = armTimer(setIntervalFn, look, JS_CONDITION_POLL_MS);
+      timer = armTimer(setTimer, function () {
+        finish({ found: false, reason: 'timeout' });
+      }, JS_CONDITION_LIMIT_MS);
+      if (first.reason === 'error') {
+        errors = 1;
+      }
+    });
+  }
+
+  // Resolves when pivit.activate has been called for this test's key, and
+  // element_selector is on the page when that rule is set. There is no
+  // ten-minute limit. Leaving the address disconnects the watch.
+  function waitForManual(doc, key, elementSelector, options) {
+    const opts = options || {};
+    const id = typeof key === 'string' ? key.trim() : '';
+    const extra = typeof elementSelector === 'string' ? elementSelector.trim() : '';
+    if (!id) return Promise.resolve({ found: false, reason: 'invalid', selector: '' });
+    const Observer = opts.MutationObserver || (typeof MutationObserver !== 'undefined' ? MutationObserver : null);
+
+    function ready() {
+      if (typeof opts.isStale === 'function' && opts.isStale()) {
+        return { found: false, reason: 'stale', selector: id, stop: true };
+      }
+      if (!manualActivationSeen(id)) return { found: false, reason: 'missing', selector: id };
+      const query = elementQuery(doc, extra);
+      if (query.state === 'invalid') return { found: false, reason: 'invalid', selector: query.selector, stop: true };
+      if (query.state === 'missing') return { found: false, reason: 'missing', selector: id };
+      return { found: true, reason: 'activated', selector: id };
+    }
+
+    const first = ready();
+    if (first.found || first.stop) return Promise.resolve(first);
+
+    return new Promise(function (resolve) {
+      let settled = false;
+      let observer = null;
+      let unlisten = null;
+      function finish(result) {
+        if (settled) return;
+        settled = true;
+        if (observer) {
+          try { observer.disconnect(); } catch (err) { /* already gone */ }
+        }
+        if (typeof unlisten === 'function') {
+          try { unlisten(); } catch (err) { /* already gone */ }
+        }
+        resolve(result);
+      }
+      function look() {
+        if (settled) return;
+        try {
+          const query = ready();
+          if (query.found || query.stop) finish(query);
+        } catch (err) { /* a later call can still start the test */ }
+      }
+      if (opts.hold) {
+        opts.hold.disconnect = function () {
+          finish({ found: false, reason: 'stale', selector: id });
+        };
+      }
+      try { unlisten = onManualActivation(look); }
+      catch (err) { unlisten = null; }
+      if (Observer && doc) {
+        try {
+          observer = new Observer(function () { look(); });
+          const target = doc.documentElement || doc.body || doc;
+          if (target) observer.observe(target, { childList: true, subtree: true });
+        } catch (err) {
+          observer = null;
+        }
+      }
+    });
+  }
+
   // onExpose is the bucket: assignment, DOM changes, and the view. It is
-  // not called when the element never appears. page_load uses the four
+  // not called when the start never happens. page_load uses the four
   // second element_selector wait. An element start waits for the visit.
+  // A JavaScript condition waits up to 10 minutes. Manual waits for the call.
   function exposeWhenReady(experiment, deps) {
     const d = deps || {};
     const activation = activationOf(experiment);
@@ -962,6 +1289,24 @@
         }
         if (typeof d.onExpose === 'function') d.onExpose(experiment);
         return { exposed: true, reason: gate.reason, selector: activation.selector };
+      });
+    }
+    if (activation.type === 'js_condition') {
+      return waitForJsCondition(d.document, activation.expression, elementSelectorOf(experiment), d).then(function (gate) {
+        if (!gate.found) return { exposed: false, reason: gate.reason };
+        if (typeof d.isStale === 'function' && d.isStale()) return { exposed: false, reason: 'stale' };
+        if (typeof d.onExpose === 'function') d.onExpose(experiment);
+        return { exposed: true, reason: gate.reason };
+      });
+    }
+    if (activation.type === 'manual') {
+      return waitForManual(d.document, activation.key, elementSelectorOf(experiment), d).then(function (gate) {
+        if (!gate.found) return { exposed: false, reason: gate.reason, selector: gate.selector || activation.key };
+        if (typeof d.isStale === 'function' && d.isStale()) {
+          return { exposed: false, reason: 'stale', selector: activation.key };
+        }
+        if (typeof d.onExpose === 'function') d.onExpose(experiment);
+        return { exposed: true, reason: gate.reason, selector: activation.key };
       });
     }
     const selector = elementSelectorOf(experiment);
@@ -1020,10 +1365,9 @@
   // Preview does not wait for an element start. The older element rule
   // still waits about four seconds, the same as before.
   function previewWaits(experiment) {
-    const activation = activationOf(experiment);
     const selector = elementSelectorOf(experiment);
     return {
-      activation: activation.type === 'element',
+      activation: activationDelays(experiment),
       selector: selector,
       waitForElementRule: !!selector,
     };
@@ -1052,6 +1396,16 @@
       if (selector) message += 'It runs only when "' + selector + '" is on the page. ';
       return message + 'Live visitors are counted only once "' + activation.selector
         + '" appears. This preview shows the variant now, without waiting. No events are being logged.';
+    }
+    if (activation.type === 'js_condition') {
+      let message = '[ab] preview mode — showing variant "' + variantName + '" for experiment "' + experimentName + '". ';
+      if (selector) message += 'It runs only when "' + selector + '" is on the page. ';
+      return message + 'Live visitors are counted only once the JavaScript condition is true. This preview shows the variant now, without waiting. No events are being logged.';
+    }
+    if (activation.type === 'manual') {
+      let message = '[ab] preview mode — showing variant "' + variantName + '" for experiment "' + experimentName + '". ';
+      if (selector) message += 'It runs only when "' + selector + '" is on the page. ';
+      return message + 'Live visitors are counted only once the page calls pivit.activate. This preview shows the variant now, without waiting. No events are being logged.';
     }
     if (selector) {
       return '[ab] preview mode — showing variant "' + variantName + '" for experiment "' + experimentName
@@ -1114,7 +1468,7 @@
       for (let i = 0; i < list.length; i++) {
         const experiment = list[i];
         const activation = api.activationOf(experiment);
-        const query = activation.type === 'element'
+        const query = api.activationDelays(experiment)
           ? api.activationQuery(document, experiment)
           : api.elementQuery(document, api.elementSelectorOf(experiment));
         if (query.state === 'invalid') continue;
@@ -1139,7 +1493,7 @@
     }
     const pageKey = pageViewKey(href || (window.location && window.location.href) || '');
     waiting.forEach(function (experiment) {
-      const pending = api.activationOf(experiment).type === 'element'
+      const pending = api.activationDelays(experiment)
         ? api.exposeWhenReady(experiment, { document: document })
         : api.waitForElement(document, api.elementSelectorOf(experiment)).then(function (gate) {
           return { exposed: !!(gate && gate.found) };
@@ -1312,13 +1666,13 @@
         const pageKey = pageViewKey(href || window.location.href);
         const keep = Object.create(null);
         (waiting || []).forEach((experiment) => {
-          if (experiment && api.activationOf(experiment).type === 'element' && experiment.id != null) {
+          if (experiment && api.activationDelays(experiment) && experiment.id != null) {
             keep[experiment.id] = 1;
           }
         });
         activationSession.retain(keep);
         (waiting || []).forEach((experiment) => {
-          if (api.activationOf(experiment).type === 'element') {
+          if (api.activationDelays(experiment)) {
             activationSession.arm(experiment, {
               document: document,
               href: href || window.location.href,
@@ -1516,6 +1870,7 @@
     if (typeof item === 'string') return normaliseCustomEventName(item);
     if (!item || typeof item !== 'object') return '';
     if (isQueueList(item)) {
+      if (item[0] === 'activate') return '';
       if (item[0] === 'track') return typeof item[1] === 'string' ? normaliseCustomEventName(item[1]) : '';
       if (typeof item[0] === 'string') return normaliseCustomEventName(item[0]);
       return '';
@@ -1529,6 +1884,10 @@
     if (Array.isArray(value)) return null;
     if (Object.prototype.toString.call(value) === '[object Arguments]') return null;
     return value;
+  }
+  function activationKeyFromQueueItem(item) {
+    if (!isQueueList(item) || item[0] !== 'activate') return '';
+    return typeof item[1] === 'string' ? item[1].trim() : '';
   }
   function propsFromQueueItem(item) {
     if (!item || typeof item !== 'object') return null;
@@ -1642,10 +2001,31 @@
     function track(name, props) {
       if (typeof onTrack === 'function') onTrack(name, props);
     }
+    function activate(key) {
+      try { rememberManualActivation(key); }
+      catch (err) { /* a queued call must not break the page */ }
+    }
     function replay() {
       for (let i = 0; i < queued.length; i++) {
+        const key = activationKeyFromQueueItem(queued[i]);
+        if (key) {
+          activate(key);
+          continue;
+        }
         const name = eventNameFromQueueItem(queued[i]);
         if (name) track(name, propsFromQueueItem(queued[i]));
+      }
+    }
+    function addActivate(target) {
+      const prior = target.activate;
+      if (typeof prior === 'function') {
+        target.activate = function (key) {
+          const result = prior.apply(target, arguments);
+          activate(key);
+          return result;
+        };
+      } else {
+        target.activate = function (key) { activate(key); };
       }
     }
     if (previous && typeof previous === 'object' && !Array.isArray(previous)) {
@@ -1659,11 +2039,12 @@
       } else {
         previous.track = function (name, props) { track(name, props); };
       }
+      addActivate(previous);
       previous.__pivitTracker = true;
       replay();
       return previous;
     }
-    const tracker = { track: track, __pivitTracker: true };
+    const tracker = { track: track, activate: activate, __pivitTracker: true };
     try {
       win.pivit = tracker;
     } catch (err) {
@@ -2601,9 +2982,8 @@
       if (applied[experiment.id]) return { reason: 'already' };
       if (!mayBucketExperiment(experiment, visitorId, qa)) return { reason: 'demo' };
       if (!experiment.variants || experiment.variants.length === 0) return { reason: 'no-variants' };
-      const activation = activationOf(experiment);
       const selector = elementSelectorOf(experiment);
-      const query = activation.type === 'element'
+      const query = activationDelays(experiment)
         ? activationQuery(doc, experiment)
         : elementQuery(doc, selector);
       if (query.state === 'invalid') return { reason: 'invalid' };
