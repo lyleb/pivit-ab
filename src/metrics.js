@@ -12,11 +12,19 @@
 //    counts once. Per-goal figures count that visitor once for each goal.
 //  - Raw convert events are available separately as conversion_events. They
 //    are not the rate.
-//  - summariseConversions / summariseByGoal / assembleTimeseries are the
-//    in-memory statement of these rules (and what the tests lock). The SQL
-//    below implements the same rules in Postgres.
+//  - summariseConversions / summariseByGoal / assembleTimeseries /
+//    summariseFunnel are the in-memory statement of these rules (and what
+//    the tests lock). The SQL below implements the same rules in Postgres.
+//  - A funnel step counts a visitor only when they reached that step and
+//    every earlier counted step first, in time order (the same time or
+//    later still counts). Each visitor counts once, and only if they viewed
+//    the variant. When the test does not start on page load, a step with no
+//    conversions on any variant, while a later step has some, was passed
+//    before the visitor was assigned. That step is unmeasured: it is left
+//    out of the order, and it is not a 100% drop-off.
 
 const db = require('./db');
+const { parseGoalStep } = require('./goals');
 
 const GOAL_TYPES = ['click', 'url', 'element', 'form', 'custom', 'revenue'];
 
@@ -44,13 +52,16 @@ function defsFromGoalList(goals) {
     const key = goalKey(g);
     if (!key) return;
     const existing = byKey.get(key);
+    const step = parseGoalStep(g.step).step;
     if (existing) {
       existing.primary = existing.primary || !!g.primary;
+      if (existing.step == null && step != null) existing.step = step;
     } else {
       const type = g.type || 'click';
       const detail = type === 'url' ? (g.url_match || '') : (type === 'custom' ? (g.event || '') : (g.selector || ''));
       const def = { key, type, label: goalLabel(g, key), detail, primary: !!g.primary };
       if (type === 'custom' && Array.isArray(g.when) && g.when.length) def.when = g.when;
+      if (step != null) def.step = step;
       byKey.set(key, def);
     }
   });
@@ -497,6 +508,230 @@ async function getTimeseries(experimentId, options) {
   return assembleTimeseries({ daily, firstViews, firstConverts });
 }
 
+const DELAYED_ACTIVATION = { element: true, js_condition: true, manual: true };
+
+const FUNNEL_RULE = 'A visitor counts at a step only if they reached that step and every earlier counted step first, in order. The same time or later still counts. Each visitor counts once. When the test does not start on page load, a step with no variant data is left out of the order, because visitors are not assigned until the test starts.';
+
+function activationDelaysAssignment(type) {
+  return !!DELAYED_ACTIVATION[type || ''];
+}
+
+function asGoalDefs(goals) {
+  const list = goals || [];
+  if (list.length && list.every((goal) => goal && typeof goal.key === 'string' && goal.id == null)) return list;
+  return defsFromGoalList(list);
+}
+
+// Goals marked as steps, in step order. A repeated step number keeps the
+// earlier goal. Stored numbers are not renumbered here.
+function funnelSteps(goals) {
+  const ranked = [];
+  asGoalDefs(goals).forEach((goal, index) => {
+    const step = parseGoalStep(goal.step).step;
+    if (step == null) return;
+    ranked.push({ goal, step, index });
+  });
+  ranked.sort((a, b) => a.step - b.step || a.index - b.index);
+  const seen = new Set();
+  const steps = [];
+  ranked.forEach((item) => {
+    if (seen.has(item.step)) return;
+    seen.add(item.step);
+    const goal = item.goal;
+    const step = {
+      key: goal.key,
+      type: goal.type,
+      label: goal.label,
+      detail: goal.detail != null ? goal.detail : '',
+      primary: !!goal.primary,
+      step: item.step,
+    };
+    if (goal.type === 'custom' && Array.isArray(goal.when) && goal.when.length) step.when = goal.when;
+    steps.push(step);
+  });
+  return steps;
+}
+
+function eventTime(value) {
+  if (value == null) return null;
+  const ms = value instanceof Date ? value.getTime() : (typeof value === 'number' ? value : Date.parse(value));
+  return Number.isFinite(ms) ? ms : null;
+}
+
+// timesByStep[i] is sorted ascending. Returns how far a non-decreasing
+// sequence can get. An earlier out-of-order hit does not block a later one.
+function orderedReach(timesByStep) {
+  let prev = -Infinity;
+  let reached = 0;
+  for (let i = 0; i < timesByStep.length; i += 1) {
+    const times = timesByStep[i];
+    let next = null;
+    for (let t = 0; t < times.length; t += 1) {
+      if (times[t] >= prev) {
+        next = times[t];
+        break;
+      }
+    }
+    if (next == null) break;
+    prev = next;
+    reached += 1;
+  }
+  return reached;
+}
+
+function summariseFunnel(events, goals, options) {
+  const steps = funnelSteps(goals);
+  const activationType = (options && options.activationType) || 'page_load';
+  const delays = activationDelaysAssignment(activationType);
+  const variants = new Map();
+
+  function ensure(variantId, variantName) {
+    if (!variantId) return null;
+    if (!variants.has(variantId)) {
+      variants.set(variantId, {
+        variant_id: variantId,
+        variant_name: variantName || '',
+        viewers: new Set(),
+        hits: new Map(),
+      });
+    }
+    const bucket = variants.get(variantId);
+    if (variantName) bucket.variant_name = variantName;
+    return bucket;
+  }
+
+  const stepIndex = new Map(steps.map((step, index) => [step.key, index]));
+  for (const event of events || []) {
+    if (!event || !event.variant_id) continue;
+    const bucket = ensure(event.variant_id, event.variant_name);
+    if (!event.visitor_id) continue;
+    if (event.event_type === 'view') bucket.viewers.add(event.visitor_id);
+    if (event.event_type !== 'convert' || !event.goal_id) continue;
+    const index = stepIndex.get(event.goal_id);
+    if (index == null) continue;
+    const time = eventTime(event.created_at);
+    if (time == null) continue;
+    if (!bucket.hits.has(event.visitor_id)) {
+      bucket.hits.set(event.visitor_id, steps.map(() => []));
+    }
+    bucket.hits.get(event.visitor_id)[index].push(time);
+  }
+
+  const rawByStep = steps.map(() => 0);
+  for (const bucket of variants.values()) {
+    for (const visitorId of bucket.viewers) {
+      const times = bucket.hits.get(visitorId);
+      if (!times) continue;
+      times.forEach((list, index) => {
+        if (list.length) rawByStep[index] += 1;
+      });
+    }
+  }
+  const unmeasured = steps.map((_, index) => {
+    if (!delays || rawByStep[index] > 0) return false;
+    return rawByStep.slice(index + 1).some((count) => count > 0);
+  });
+  const measured = [];
+  unmeasured.forEach((skip, index) => {
+    if (!skip) measured.push(index);
+  });
+  const baselineStep = measured.length ? steps[measured[0]].step : null;
+
+  const variantRows = [...variants.values()].map((bucket) => {
+    const counts = steps.map(() => 0);
+    for (const visitorId of bucket.viewers) {
+      const times = bucket.hits.get(visitorId);
+      if (!times) continue;
+      const orderedTimes = measured.map((index) => times[index].slice().sort((a, b) => a - b));
+      const reached = orderedReach(orderedTimes);
+      for (let i = 0; i < reached; i += 1) counts[measured[i]] += 1;
+    }
+    const firstCount = measured.length ? counts[measured[0]] : 0;
+    return {
+      variant_id: bucket.variant_id,
+      variant_name: bucket.variant_name,
+      steps: steps.map((step, index) => {
+        if (unmeasured[index]) {
+          return {
+            step: step.step,
+            key: step.key,
+            label: step.label,
+            visitors: null,
+            unmeasured: true,
+            rate_of_step_1: null,
+            drop_off: null,
+            drop_off_count: null,
+          };
+        }
+        const visitors = counts[index];
+        const earlier = measured.filter((item) => item < index);
+        const previousIndex = earlier.length ? earlier[earlier.length - 1] : null;
+        const previous = previousIndex == null ? null : counts[previousIndex];
+        return {
+          step: step.step,
+          key: step.key,
+          label: step.label,
+          visitors,
+          unmeasured: false,
+          rate_of_step_1: conversionRate(firstCount, visitors),
+          drop_off: previousIndex == null ? null : conversionRate(previous, previous - visitors),
+          drop_off_count: previousIndex == null ? null : previous - visitors,
+        };
+      }),
+    };
+  });
+  variantRows.sort((a, b) => String(a.variant_name).localeCompare(String(b.variant_name)) || String(a.variant_id).localeCompare(String(b.variant_id)));
+
+  return {
+    ordered: true,
+    activation_type: activationType,
+    activation_delays: delays,
+    baseline_step: baselineStep,
+    rule: FUNNEL_RULE,
+    steps: steps.map((step) => ({
+      step: step.step,
+      key: step.key,
+      type: step.type,
+      label: step.label,
+      detail: step.detail,
+      ...(step.when ? { when: step.when } : {}),
+    })),
+    variants: variantRows,
+  };
+}
+
+async function getFunnel(experimentId, options) {
+  const goals = await getGoalDefs(experimentId);
+  const { rows: expRows } = await db.query(
+    `SELECT activation_type FROM experiments WHERE id = $1`,
+    [experimentId]
+  );
+  const activationType = (expRows[0] && expRows[0].activation_type) || 'page_load';
+  const steps = funnelSteps(goals);
+  if (!steps.length) return summariseFunnel([], goals, { activationType });
+
+  const includeTest = includeTestFrom(options);
+  const mode = trafficMode(options);
+  const visible = visibleEventSql('e', 2, mode);
+  const keys = steps.map((step) => step.key);
+  const { rows } = await db.query(
+    `SELECT v.id AS variant_id, v.name AS variant_name,
+            e.visitor_id, e.event_type, e.goal_id, e.created_at
+     FROM variants v
+     LEFT JOIN events e
+       ON e.variant_id = v.id
+      AND e.experiment_id = v.experiment_id
+      AND ${visible}
+      AND (
+        e.event_type = 'view'
+        OR (e.event_type = 'convert' AND e.goal_id = ANY($3::text[]))
+      )
+     WHERE v.experiment_id = $1`,
+    [experimentId, includeTest, keys]
+  );
+  return summariseFunnel(rows, goals, { activationType });
+}
+
 module.exports = {
   GOAL_TYPES,
   goalKey,
@@ -505,6 +740,10 @@ module.exports = {
   conversionRate,
   summariseConversions,
   summariseByGoal,
+  summariseFunnel,
+  funnelSteps,
+  activationDelaysAssignment,
+  FUNNEL_RULE,
   assembleTimeseries,
   annotateUniqueConversions,
   getGoalDefs,
@@ -512,6 +751,7 @@ module.exports = {
   getVariantResults,
   getPrimaryVariantData,
   getGoalBreakdown,
+  getFunnel,
   getTimeseries,
   PRIMARY_CONVERT,
   visitorTypeClause,

@@ -578,7 +578,7 @@ router.post('/', async (req, res) => {
     const { rows: expRows } = await client.query(
       `INSERT INTO experiments (name, url_match, url_match_type, element_selector, client_id, allowed_hosts, goals, goals_scope, goals_migrated, account_id, site_id, needs_site, test_type, plan, activation_type, activation_value)
        VALUES ($1, $2, $3, $4, $5, $6::text[], '[]'::jsonb, 'shared', true, $7, $8, $9, $10, $11::jsonb, $12, $13) RETURNING *`,
-      [name, url_match, pageMatch.type, element.selector, client_id || null, hosts, accountId, placed.siteId, placed.needsSite, testType.type, planJson, activation.type, activation.value]
+      [name, url_match, pageMatch.type, activation.type === 'element' ? null : element.selector, client_id || null, hosts, accountId, placed.siteId, placed.needsSite, testType.type, planJson, activation.type, activation.value]
     );
     const experiment = expRows[0];
 
@@ -947,9 +947,11 @@ router.delete('/:id', async (req, res) => {
 
 // PATCH /api/experiments/:id/activation  { activation_type, activation_value }
 // Owner-only. page_load and manual clear the stored value. element requires
-// a CSS selector. js_condition stores the expression, and only someone who
-// can write page JavaScript can set or change it. Omitting activation_type
-// does not change the row, so another save cannot reset when the test starts.
+// a CSS selector and clears element_selector, so a leftover four-second rule
+// cannot block that start. js_condition stores the expression, and only
+// someone who can write page JavaScript can set or change it. Omitting
+// activation_type does not change the row, so another save cannot reset
+// when the test starts.
 router.patch('/:id/activation', async (req, res) => {
   try {
     const experiment = await ownedExperiment(req.account.id, req.params.id);
@@ -967,10 +969,13 @@ router.patch('/:id/activation', async (req, res) => {
     );
     if (activationDenied) return res.status(403).json({ error: activationDenied });
     const { rows } = await db.query(
-      `UPDATE experiments SET activation_type = $1, activation_value = $2
+      `UPDATE experiments
+       SET activation_type = $1,
+           activation_value = $2,
+           element_selector = CASE WHEN $5::boolean THEN NULL ELSE element_selector END
        WHERE id = $3 AND account_id = $4
-       RETURNING id, activation_type, activation_value`,
-      [activation.type, activation.value, req.params.id, req.account.id]
+       RETURNING id, activation_type, activation_value, element_selector`,
+      [activation.type, activation.value, req.params.id, req.account.id, activation.type === 'element']
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
     res.json(rows[0]);

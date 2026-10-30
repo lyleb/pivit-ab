@@ -3,7 +3,7 @@ const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { computeBayesianStats } = require('../bayesian');
 const { publicServerError } = require('../public-error');
-const { getVariantResults, getGoalBreakdown, getTimeseries, getPrimaryVariantData } = require('../metrics');
+const { getVariantResults, getGoalBreakdown, getTimeseries, getPrimaryVariantData, getFunnel } = require('../metrics');
 const { outcomeGate } = require('../experiment-plan');
 const { splitCheckFromVariants } = require('../split-check');
 const { hideOutcomeRow } = require('../reading');
@@ -153,9 +153,10 @@ router.get('/results/:experimentId', async (req, res) => {
     if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
 
     const options = isDemo(experiment) ? { testOnly: true } : undefined;
-    const [{ results, primaryKey }, breakdown, gate] = await Promise.all([
+    const [{ results, primaryKey }, breakdown, funnel, gate] = await Promise.all([
       getVariantResults(req.params.experimentId, undefined, options),
       getGoalBreakdown(req.params.experimentId, options),
+      getFunnel(req.params.experimentId, options),
       outcomeGate(req.params.experimentId, false, req.account.id),
     ]);
     const visible = gate.visible;
@@ -175,6 +176,7 @@ router.get('/results/:experimentId', async (req, res) => {
       primary_goal: visible ? primaryKey : null,
       results: visible ? results : results.map(hideOutcomeRow),
       goals: visible ? breakdown.goals : [],
+      funnel: visible ? funnel : null,
       reading: gate.reading,
       blinded: !visible,
       verdict,

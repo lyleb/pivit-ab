@@ -4,7 +4,7 @@ const { requireAuth } = require('../middleware/auth');
 const { computeBayesianStats } = require('../bayesian');
 const { detectSRM } = require('../srm');
 const { splitCheckFromVariants } = require('../split-check');
-const { getVariantResults, getGoalBreakdown, getTimeseries, getPrimaryVariantData, annotateUniqueConversions, visibleEventSql } = require('../metrics');
+const { getVariantResults, getGoalBreakdown, getTimeseries, getPrimaryVariantData, getFunnel, annotateUniqueConversions, visibleEventSql } = require('../metrics');
 const { flagIsOn, summariseTestTraffic } = require('../test-traffic');
 const { outcomeGate } = require('../experiment-plan');
 const { hideOutcomeRow } = require('../reading');
@@ -71,9 +71,10 @@ router.get('/:experimentId/test-traffic', async (req, res) => {
   try {
     if (!(await assertOwned(req, res, experimentId))) return;
     const options = { testOnly: true };
-    const [{ results, primaryKey }, breakdown] = await Promise.all([
+    const [{ results, primaryKey }, breakdown, funnel] = await Promise.all([
       getVariantResults(experimentId, undefined, options),
       getGoalBreakdown(experimentId, options),
+      getFunnel(experimentId, options),
     ]);
     res.json({
       experiment_id: experimentId,
@@ -85,6 +86,7 @@ router.get('/:experimentId/test-traffic', async (req, res) => {
       primary_goal: primaryKey,
       results,
       goals: breakdown.goals,
+      funnel,
     });
   } catch (err) {
     console.error(err);
@@ -104,10 +106,11 @@ router.get('/:experimentId', async (req, res) => {
     if (!experiment) return;
     const read = prepared(experiment, req);
     const includeTest = read.includeTest;
-    const [{ results, primaryKey }, breakdown, testTraffic] = await Promise.all([
+    const [{ results, primaryKey }, breakdown, testTraffic, funnel] = await Promise.all([
       getVariantResults(experimentId, req.query.visitor_type, read.options),
       getGoalBreakdown(experimentId, read.options),
       summariseTestTraffic(experimentId),
+      getFunnel(experimentId, read.options),
     ]);
 
     const gate = await outcomeGate(experimentId, includeTest, req.account.id);
@@ -120,6 +123,7 @@ router.get('/:experimentId', async (req, res) => {
       primary_goal: visible ? primaryKey : null,
       results: visible ? results : results.map(hideOutcomeRow),
       goals: visible ? breakdown.goals : [],
+      funnel: visible ? funnel : null,
       reading: gate.reading,
       blinded: !visible,
       srmDetected: !!(gate.loaded && gate.loaded.srm && gate.loaded.srm.srm_detected),

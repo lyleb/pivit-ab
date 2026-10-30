@@ -29,6 +29,40 @@ const CUSTOM_WHEN_MAX = 3;
 const CUSTOM_KEY_MAX = 64;
 const CUSTOM_VALUE_MAX = 100;
 const CUSTOM_KEY_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
+// Optional funnel order on the goal JSON. No new column: a goal with no
+// step is unchanged. Steps are 1 to 5, unique, and 1..n with no gaps.
+const MAX_FUNNEL_STEPS = 5;
+
+function parseGoalStep(value) {
+  if (value == null || value === '' || value === false) return { step: null };
+  let n;
+  if (typeof value === 'number') n = value;
+  else if (typeof value === 'string' && /^[1-5]$/.test(value.trim())) n = Number(value.trim());
+  else return { error: 'a funnel step must be a whole number from 1 to 5' };
+  if (!Number.isInteger(n) || n < 1 || n > MAX_FUNNEL_STEPS) {
+    return { error: 'a funnel step must be a whole number from 1 to 5' };
+  }
+  return { step: n };
+}
+
+// null when no goal is a step. Otherwise an error string.
+function funnelStepError(goals) {
+  if (!Array.isArray(goals)) return null;
+  const steps = [];
+  for (const goal of goals) {
+    if (!goal || typeof goal !== 'object') continue;
+    const parsed = parseGoalStep(goal.step);
+    if (parsed.error) return parsed.error;
+    if (parsed.step != null) steps.push(parsed.step);
+  }
+  if (steps.length > MAX_FUNNEL_STEPS) return 'a test can have at most 5 funnel steps';
+  steps.sort((a, b) => a - b);
+  for (let i = 0; i < steps.length; i += 1) {
+    if (steps[i] === steps[i - 1]) return 'two goals use the same funnel step';
+    if (steps[i] !== i + 1) return 'funnel steps start at 1 and run in order, with no gaps';
+  }
+  return null;
+}
 
 function normaliseCustomEventName(value) {
   if (typeof value !== 'string') return '';
@@ -125,6 +159,8 @@ function normaliseLegacyGoal(goal) {
   const name = (goal.name && String(goal.name).trim()) || (goal.id ? String(goal.id) : id);
   const base = { id: id, name: name, type: type };
   if (goal.primary) base.primary = true;
+  const parsedStep = parseGoalStep(goal.step);
+  if (!parsedStep.error && parsedStep.step != null) base.step = parsedStep.step;
   if (type === 'url') {
     base.url_match = goal.url_match || '';
     base.match = goal.match || 'contains';
@@ -180,6 +216,9 @@ function planGoalMigration(variants) {
       const existing = byId.get(goal.id);
       if (existing) {
         if (goal.primary) existing.primary = true;
+        // Step is not part of the goal's identity. The first list that
+        // names one wins; a later list can fill it in if the first did not.
+        if (existing.step == null && goal.step != null) existing.step = goal.step;
         return;
       }
       const copy = Object.assign({}, goal);
@@ -261,7 +300,21 @@ function prepareGoalsForSave(incoming, existingGoals) {
     } else {
       Object.assign(goal, raw, { id: id, name: name, type: type });
     }
+    const parsedStep = parseGoalStep(raw.step);
+    if (parsedStep.error) {
+      const err = new Error(parsedStep.error);
+      err.status = 400;
+      throw err;
+    }
+    if (parsedStep.step != null) goal.step = parsedStep.step;
+    else delete goal.step;
     out.push(goal);
+  }
+  const stepError = funnelStepError(out);
+  if (stepError) {
+    const err = new Error(stepError);
+    err.status = 400;
+    throw err;
   }
   return out;
 }
@@ -302,7 +355,7 @@ function validateGoals(goals) {
       return 'a goal name must be 120 characters or fewer';
     }
   }
-  return null;
+  return funnelStepError(goals);
 }
 
 // Writes goals. A shared experiment (and an explicit unify) stores one list
@@ -408,6 +461,9 @@ async function backfillExperimentGoals(query = db.query.bind(db)) {
 
 module.exports = {
   MAX_VARIANTS,
+  MAX_FUNNEL_STEPS,
+  parseGoalStep,
+  funnelStepError,
   GENERATED_ID,
   CUSTOM_EVENT_MAX,
   CUSTOM_WHEN_MAX,

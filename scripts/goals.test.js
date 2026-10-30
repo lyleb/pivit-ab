@@ -286,6 +286,48 @@ const whenShared = goals.planGoalMigration([
 assert.strictEqual(whenShared.scope, 'shared');
 assert.deepStrictEqual(whenShared.goals[0].when, [{ key: 'step_name', value: 'confirmation' }]);
 
+assert.strictEqual(goals.goalIdentity({ type: 'click', id: 'pay', selector: '#pay-now', step: 1 }), goals.goalIdentity({ type: 'click', id: 'pay', selector: '#pay-now', step: 4 }));
+const steppedFirst = goals.planGoalMigration([
+  { goals: [{ type: 'click', id: 'pay', selector: '#pay-now', step: 2 }] },
+  { goals: [{ type: 'click', id: 'pay', selector: '#pay-now', step: 1 }] },
+]);
+assert.strictEqual(steppedFirst.goals[0].step, 2);
+const steppedFilled = goals.planGoalMigration([
+  { goals: [{ type: 'click', id: 'pay', selector: '#pay-now' }] },
+  { goals: [{ type: 'click', id: 'pay', selector: '#pay-now', step: 1 }] },
+]);
+assert.strictEqual(steppedFilled.goals[0].step, 1);
+const basket = { type: 'custom', event: 'checkout_step', name: 'Basket', when: [{ key: 'step_name', value: 'basket' }], step: 1 };
+const details = { type: 'custom', event: 'checkout_step', name: 'Details', when: [{ key: 'step_name', value: 'details' }], step: '2' };
+const payment = { type: 'element', selector: '#step-payment', name: 'Payment', step: 3 };
+const confirmation = { type: 'custom', event: 'checkout_step', name: 'Confirmation', when: [{ key: 'step_name', value: 'confirmation' }], step: 4 };
+assert.strictEqual(goals.validateGoals([basket, details, payment, confirmation]), null);
+const savedSteps = goals.prepareGoalsForSave([basket, details, payment, confirmation], []);
+assert.deepStrictEqual(savedSteps.map((goal) => goal.step), [1, 2, 3, 4]);
+const clearedStep = goals.prepareGoalsForSave([{
+  id: savedSteps[0].id,
+  type: 'custom',
+  event: 'checkout_step',
+  name: 'Basket',
+  when: [{ key: 'step_name', value: 'basket' }],
+}], savedSteps);
+assert.strictEqual(clearedStep[0].step, undefined);
+assert.strictEqual(clearedStep[0].id, savedSteps[0].id);
+assert.strictEqual(goals.validateGoals([
+  { type: 'click', selector: '#a', step: 1 },
+  { type: 'click', selector: '#b', step: 1 },
+]), 'two goals use the same funnel step');
+assert.strictEqual(goals.validateGoals([
+  { type: 'click', selector: '#a', step: 1 },
+  { type: 'click', selector: '#b', step: 3 },
+]), 'funnel steps start at 1 and run in order, with no gaps');
+assert.strictEqual(goals.validateGoals([{ type: 'click', selector: '#a', step: 0 }]), 'a funnel step must be a whole number from 1 to 5');
+assert.strictEqual(goals.validateGoals([{ type: 'click', selector: '#a', step: 6 }]), 'a funnel step must be a whole number from 1 to 5');
+assert.throws(() => goals.prepareGoalsForSave([{ type: 'click', selector: '#a', step: '1.5' }], []), /whole number/);
+assert.strictEqual(goals.funnelStepError([
+  { step: 1 }, { step: 2 }, { step: 3 }, { step: 4 }, { step: 5 }, { step: 5 },
+]), 'a test can have at most 5 funnel steps');
+
 const elementShared = goals.planGoalMigration([
   { goals: [{ type: 'element', selector: CONFIRM, id: 'done' }] },
   { goals: [{ type: 'element', selector: CONFIRM, id: 'done' }] },
@@ -478,6 +520,10 @@ const adminHtml = fs.readFileSync(path.join(__dirname, '../public/index.html'), 
 assert.ok(adminHtml.includes('Test this URL'));
 assert.ok(adminHtml.includes('id="health-panel"'));
 assert.ok(adminHtml.includes('canAddVariant'));
+assert.ok(adminHtml.includes('Funnel step'));
+assert.ok(adminHtml.includes('g-step-on'));
+assert.ok(adminHtml.includes('id="goal-funnel"'));
+assert.ok(clientHtml.includes('id="goal-funnel"'));
 
   console.log('goals tests passed');
 }

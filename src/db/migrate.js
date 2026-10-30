@@ -27,6 +27,7 @@ const { applyGa4 } = require('./ga4');
 const { applyActivation } = require('./activation');
 const { applyStepsNote } = require('./steps-note');
 const { applyDatalayerEvents } = require('./datalayer-events');
+const { applyElementActivationSelector } = require('./element-activation-selector');
 
 const LOCK_KEY = 814021;
 
@@ -87,6 +88,9 @@ const VERSIONS = [
   // Count dataLayer events. Off by default, so existing sites do not watch
   // dataLayer. Stays out of schema.sql.
   { version: '021', name: 'datalayer-events', run: applyDatalayerEvents },
+  // Clear a leftover element_selector once the test starts when an element
+  // appears. page_load tests keep the four-second rule. Stays out of schema.sql.
+  { version: '022', name: 'element-activation-selector', run: applyElementActivationSelector },
 ];
 
 async function ensureMigrationsTable(queryable) {

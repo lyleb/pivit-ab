@@ -243,6 +243,11 @@ for (const phrase of [
   'Only when…',
   "pivit.track('checkout_step', { step_name: 'confirmation' })",
   'step_name',
+  'Funnel steps',
+  'up to five goals',
+  'No variant data',
+  '#step-details',
+  '#continue-to-details',
 ]) {
   assert.ok(helpPage.includes(phrase), `help.html missing ${phrase}`);
   assert.ok(helpDoc.includes(phrase), `help.md missing ${phrase}`);
