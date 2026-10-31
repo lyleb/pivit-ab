@@ -78,6 +78,12 @@
   .tabs button.active { color: #fff; border-bottom-color: var(--indigo); }
   .checklist { margin: 8px 0 0; padding-left: 18px; }
   .checklist li { margin: 4px 0; }
+  .setup-link { color: inherit; font-weight: 700; }
+  .setup-list li.is-waiting { color: var(--text-muted); }
+  .setup-list li.is-waiting .setup-num { opacity: 0.45; }
+  .setup-list li.is-waiting .setup-actions { display: none; }
+  .setup-list li.is-waiting .setup-link { pointer-events: none; text-decoration: none; }
+  .setup-wait { margin: 6px 0 0; }
   .activity-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.88em; }
   .activity-row:last-child { border-bottom: none; }
   .placeholder {
@@ -542,8 +548,8 @@
       <div class="card" id="first-run" hidden>
         <div class="first-run-head">
           <div>
-            <h2>Set up your first test</h2>
-            <p class="hint" id="first-run-intro">Five steps. Each one ticks itself from what pivitlab has actually seen. You can hide this list and carry on with the experiments underneath. It also disappears once every step has ticked.</p>
+            <h2>Start here</h2>
+            <p class="hint" id="first-run-intro">Add a site and install the snippet, check it's been seen, create your first test, preview it, then start it. Each step ticks from what pivitlab has actually seen. It hides once a test has been started, or when you hide it. <a href="/help.html#your-first-test">Your first test</a> walks through a headline change and a button click.</p>
           </div>
           <button type="button" class="btn-ghost" id="first-run-dismiss">Hide checklist</button>
         </div>
@@ -555,62 +561,77 @@
           <p class="hint">This agency has more than one site. Choose which site the snippet and the first test are for. pivitlab remembers the choice.</p>
         </div>
         <ol class="setup-list">
-          <li id="step-site">
+          <li id="step-site" data-owner-step>
             <span class="setup-num">1</span>
             <div style="flex:1;min-width:0;">
-              <strong>Add your site</strong>
+              <a class="setup-link" href="#sites-card">Add a site and install the snippet</a>
               <span class="setup-state">To do</span>
-              <p class="hint">This is the website the test will run on. pivitlab only serves a test for the domains you add here. If you signed up with a website, this step is already ticked.</p>
-              <p class="hint" id="step-site-host" style="margin:4px 0 0;">Add the site you want to test.</p>
-              <form id="add-site-form" hidden style="margin-top:10px;">
-                <label for="add-site-website">Website</label>
-                <input id="add-site-website" placeholder="example.co.uk" spellcheck="false" autocapitalize="off">
-                <button type="submit" id="add-site-btn">Add site</button>
-                <p id="add-site-error" class="error-msg"></p>
-                <p id="add-site-warning" class="banner" role="status" hidden></p>
-              </form>
+              <p class="hint setup-wait" hidden></p>
+              <div class="setup-actions">
+                <p class="hint">This is the website the test will run on. Paste the snippet before the closing body tag. It includes your site key. If you signed up with a website, the site is already ticked.</p>
+                <p class="hint" id="step-site-host" style="margin:4px 0 0;">Add the site you want to test.</p>
+                <form id="add-site-form" hidden style="margin-top:10px;">
+                  <label for="add-site-website">Website</label>
+                  <input id="add-site-website" placeholder="example.co.uk" spellcheck="false" autocapitalize="off">
+                  <button type="submit" id="add-site-btn">Add site</button>
+                  <p id="add-site-error" class="error-msg"></p>
+                  <p id="add-site-warning" class="banner" role="status" hidden></p>
+                </form>
+                <pre id="first-run-snippet"></pre>
+                <button type="button" class="btn-ghost" id="first-run-copy">Copy snippet</button>
+                <span id="first-run-copied" class="hint"></span>
+              </div>
             </div>
           </li>
           <li id="step-snippet">
             <span class="setup-num">2</span>
             <div style="flex:1;min-width:0;">
-              <strong>Install the snippet</strong>
+              <a class="setup-link" href="#sites-card">Check it's been seen</a>
               <span class="setup-state">To do</span>
-              <p class="hint">Paste this one line before the closing body tag on every page you might test. It includes your site key, so pivitlab can tell the visit is yours. In Google Tag Manager, add a Custom HTML tag with the same line and fire it on all pages. Then open the site in a browser. The status below updates on its own, usually within a few seconds. You can build a test before it ticks. You cannot start a test until it does.</p>
-              <pre id="first-run-snippet"></pre>
-              <button type="button" class="btn-ghost" id="first-run-copy">Copy snippet</button>
-              <span id="first-run-copied" class="hint"></span>
-              <p class="hint" id="step-check-text" style="margin:8px 0 0;">Waiting for a page on your site to load the snippet.</p>
+              <p class="hint setup-wait" hidden></p>
+              <div class="setup-actions">
+                <p class="hint">Open the site in a browser. This ticks when a page on that domain loads the snippet. You can create a test before it ticks. You cannot start a test until it does.</p>
+                <p class="hint" id="step-check-text" style="margin:8px 0 0;">Waiting for a page on your site to load the snippet.</p>
+              </div>
             </div>
           </li>
-          <li id="step-test">
+          <li id="step-test" data-owner-step>
             <span class="setup-num">3</span>
             <div style="flex:1;min-width:0;">
-              <strong>Create your first test</strong>
+              <a class="setup-link" href="#create">Create your first test</a>
               <span class="setup-state">To do</span>
-              <p class="hint">A test compares the page you have now with one change. Give it a name and the page address, then save. It stays a draft, so visitors still see the normal page. This step ticks when a test exists, even if the snippet has not been seen yet.</p>
-              <p class="hint" id="step-test-done" hidden>You have a test saved. It stays a draft until you start it.</p>
-              <button type="button" id="first-run-create" disabled>Create your first test</button>
+              <p class="hint setup-wait" hidden></p>
+              <div class="setup-actions">
+                <p class="hint">A test compares the page you have now with one change. It stays a draft, so visitors still see the normal page. This step ticks when a test exists, even if the snippet has not been seen yet.</p>
+                <p class="hint" id="step-test-done" hidden>You have a test saved. It stays a draft until you start it.</p>
+                <button type="button" id="first-run-create" disabled>Create your first test</button>
+              </div>
             </div>
           </li>
           <li id="step-preview">
             <span class="setup-num">4</span>
             <div style="flex:1;min-width:0;">
-              <strong>Preview with ?pivit_qa=1</strong>
+              <a class="setup-link" href="#preview">Preview it</a>
               <span class="setup-state">To do</span>
-              <p class="hint">Open the page you are testing and add ?pivit_qa=1 to the address. pivitlab remembers that browser and treats the visit as a test, so those views stay out of the results. If the test is still a draft, the page itself does not change yet. The visit still counts, and this step ticks when that call arrives. When you want this browser to count as a normal visitor again, open the same page with ?pivit_qa=0.</p>
-              <p class="mono" id="first-run-preview-url">https://example.co.uk/?pivit_qa=1</p>
-              <button type="button" class="btn-ghost" id="first-run-preview-copy">Copy preview address</button>
-              <span id="first-run-preview-copied" class="hint"></span>
+              <p class="hint setup-wait" hidden></p>
+              <div class="setup-actions">
+                <p class="hint">Open Preview to see the saved variant. This step ticks when a visit with ?pivit_qa=1 arrives. Those views stay out of the results. Open the same page with ?pivit_qa=0 when this browser should count as a normal visitor again.</p>
+                <p class="mono" id="first-run-preview-url">https://example.co.uk/?pivit_qa=1</p>
+                <button type="button" class="btn-ghost" id="first-run-preview-copy">Copy preview address</button>
+                <span id="first-run-preview-copied" class="hint"></span>
+              </div>
             </div>
           </li>
-          <li id="step-start">
+          <li id="step-start" data-owner-step>
             <span class="setup-num">5</span>
             <div style="flex:1;min-width:0;">
-              <strong>Start the test</strong>
+              <a class="setup-link" href="#status">Start it</a>
               <span class="setup-state">To do</span>
-              <p class="hint">When the snippet status has ticked and the preview looks right, open the test and choose Start. Visitors then see either the original page or your change. Until you start it, the test stays a draft. pivitlab will refuse to start while the snippet has not been seen. This step ticks as soon as a test has been started.</p>
-              <button type="button" class="btn-ghost" id="first-run-open" hidden>Open your draft</button>
+              <p class="hint setup-wait" hidden></p>
+              <div class="setup-actions">
+                <p class="hint">When the snippet has been seen and the preview looks right, open the test and choose Start. Until then it stays a draft. pivitlab will refuse to start while the snippet has not been seen.</p>
+                <button type="button" class="btn-ghost" id="first-run-open" hidden>Open your draft</button>
+              </div>
             </div>
           </li>
         </ol>
@@ -716,7 +737,7 @@
       <div class="page-head">
         <div>
           <h1>Create experiment</h1>
-          <p class="hint" style="margin:4px 0 0;">Guided setup — finish with the install snippet, then start when ready.</p>
+          <p class="hint" style="margin:4px 0 0;">Guided setup — finish with the install snippet, then start when ready. <a href="/help.html#your-first-test">Your first test</a> is the same path, with a worked example.</p>
         </div>
       </div>
       <div class="steps" id="wizard-steps"></div>
@@ -1909,12 +1930,34 @@ function checklistStepDone(checklist, id) {
   return !!(found && found.done);
 }
 
-function markSetupStep(elementId, done) {
-  const item = document.getElementById(elementId);
-  if (!item) return;
-  item.classList.toggle('done', done);
-  const state = item.querySelector('.setup-state');
-  if (state) state.textContent = done ? 'Done' : 'To do';
+function applyGettingStarted(checklist) {
+  const states = UI.gettingStartedState(checklist, agencyCanChange());
+  const ids = {
+    site: 'step-site',
+    snippet: 'step-snippet',
+    test: 'step-test',
+    preview: 'step-preview',
+    started: 'step-start',
+  };
+  states.forEach((step) => {
+    const item = document.getElementById(ids[step.id]);
+    if (!item) return;
+    item.hidden = step.hidden === true;
+    item.classList.toggle('done', step.done === true);
+    item.classList.toggle('is-waiting', !!step.waiting && step.done !== true);
+    const state = item.querySelector('.setup-state');
+    if (state) state.textContent = step.done ? 'Done' : (step.waiting ? 'Waiting' : 'To do');
+    const wait = item.querySelector('.setup-wait');
+    if (wait) {
+      wait.hidden = !step.waiting || step.done === true;
+      wait.textContent = step.waiting || '';
+    }
+    const link = item.querySelector('.setup-link');
+    if (link) {
+      if (step.waiting && step.done !== true) link.removeAttribute('href');
+      else if (step.href) link.setAttribute('href', step.href);
+    }
+  });
 }
 
 function domainLabel(site) {
@@ -1976,7 +2019,7 @@ function paintSitePickers() {
     );
     select.value = id === 'wizard-site' ? wizardPick : (chosenSiteId || '');
     if (id === 'wizard-site') select.disabled = !!wizard.expId;
-    if (wrap) wrap.hidden = !show;
+    if (wrap) wrap.hidden = !show || (id === 'setup-site' && !agencyCanChange());
   });
   const needed = document.getElementById('snippet-site-needed');
   if (needed) needed.hidden = !(show && !chosenSiteId);
@@ -2132,11 +2175,7 @@ function paintFirstRun(setup) {
   const siteDone = checklistStepDone(checklist, 'site');
   const snippetDone = checklistStepDone(checklist, 'snippet');
   const testDone = checklistStepDone(checklist, 'test');
-  markSetupStep('step-site', siteDone);
-  markSetupStep('step-snippet', snippetDone);
-  markSetupStep('step-test', testDone);
-  markSetupStep('step-preview', checklistStepDone(checklist, 'preview'));
-  markSetupStep('step-start', checklistStepDone(checklist, 'started'));
+  applyGettingStarted(checklist);
   const domain = domainLabel(site);
   if (site) {
     form.hidden = true;
@@ -3988,7 +4027,7 @@ document.getElementById('page-detail').addEventListener('click', async (e) => {
       if (msg) msg.textContent = saved.message;
       return;
     }
-    if (msg) msg.textContent = 'Plan saved.';
+    if (msg) msg.textContent = 'Sample-size plan saved.';
     await reloadDetail();
     return;
   }
@@ -4444,7 +4483,7 @@ function mountPlanner(prefix, expId, payload) {
   const stored = payload && payload.plan;
   const seed = stored || (payload && payload.preview) || {};
   host.innerHTML = UI.plannerShell(prefix) + (prefix === 'settings'
-    ? '<div class="inline-actions" style="margin-top:12px;"><button type="button" data-action="save-plan">Save plan</button></div><p id="settings-plan-msg" class="hint"></p>'
+    ? '<div class="inline-actions" style="margin-top:12px;"><button type="button" data-action="save-plan">Save sample-size plan</button></div><p id="settings-plan-msg" class="hint"></p>'
     : '');
   const root = plannerRoot(prefix);
   if (root) {
@@ -6170,6 +6209,7 @@ function addGoalRow(prefill, listId) {
       <label>Name</label>
       <input class="g-name" placeholder="Thank-you page">
     </div>
+    <p class="g-selector-check hint full-width" hidden></p>
     <p class="hint g-element-help full-width" hidden></p>
     <div class="g-when full-width" hidden>
       <label>Only when…</label>
@@ -6247,8 +6287,32 @@ function addGoalRow(prefill, listId) {
     valueLabelEl.textContent = how;
     valueEl.placeholder = matchEl.value === 'regex' ? '/thank-you/?$' : '/thank-you';
   }
-  typeEl.addEventListener('change', renderValueField);
+  typeEl.addEventListener('change', () => {
+    renderValueField();
+    scheduleSelectorCheck();
+  });
   matchEl.addEventListener('change', renderValueField);
+  let selectorTimer = null;
+  function scheduleSelectorCheck() {
+    if (selectorTimer) clearTimeout(selectorTimer);
+    const out = row.querySelector('.g-selector-check');
+    if (!out) return;
+    if (typeEl.value !== 'click') {
+      out.hidden = true;
+      out.textContent = '';
+      return;
+    }
+    const selector = valueEl.value.trim();
+    if (!selector) {
+      out.hidden = true;
+      out.textContent = '';
+      return;
+    }
+    const generation = String(Number(row.dataset.checkGen || 0) + 1);
+    row.dataset.checkGen = generation;
+    selectorTimer = setTimeout(() => { runSelectorCheck(row, list.id, generation); }, 400);
+  }
+  valueEl.addEventListener('input', scheduleSelectorCheck);
   if (prefill) {
     typeEl.value = prefill.type || 'click';
     row.querySelector('.g-name').value = prefill.name || prefill.id || '';
@@ -6267,6 +6331,67 @@ function addGoalRow(prefill, listId) {
     }
   }
   renderValueField();
+  scheduleSelectorCheck();
+}
+
+function goalCheckPageUrl(listId) {
+  if (listId === 'wizard-goals-list') {
+    const input = document.getElementById('wizard-page-url');
+    return input ? input.value.trim() : '';
+  }
+  const input = document.getElementById('detail-page-url');
+  if (input && input.value.trim()) return input.value.trim();
+  return currentDetail ? storedPageUrl(currentDetail) : '';
+}
+
+function goalCheckExperimentId(listId) {
+  if (listId === 'wizard-goals-list') return wizard.expId || '';
+  return currentDetail && currentDetail.id ? currentDetail.id : '';
+}
+
+function paintSelectorCheck(row, payload) {
+  const out = row.querySelector('.g-selector-check');
+  if (!out) return;
+  const tone = payload && payload.tone;
+  out.hidden = false;
+  out.textContent = (payload && payload.message) || '';
+  out.className = 'g-selector-check full-width ' + (tone === 'warn' ? 'warn-text' : (tone === 'ok' ? 'ok-msg' : 'hint'));
+}
+
+async function runSelectorCheck(row, listId, generation) {
+  const typeEl = row.querySelector('.g-type');
+  const valueEl = row.querySelector('.g-value');
+  if (!typeEl || !valueEl || typeEl.value !== 'click') return;
+  if (generation && row.dataset.checkGen !== generation) return;
+  const selector = valueEl.value.trim();
+  if (!selector) return;
+  const pageUrl = goalCheckPageUrl(listId);
+  if (!pageUrl) {
+    paintSelectorCheck(row, {
+      tone: 'hint',
+      message: 'Add the page address on the preview step to check this selector against the page.',
+    });
+    return;
+  }
+  paintSelectorCheck(row, { tone: 'hint', message: 'Checking this selector on the page…' });
+  const body = { page_url: pageUrl, selector };
+  const experimentId = goalCheckExperimentId(listId);
+  if (experimentId) body.experiment_id = experimentId;
+  const result = await callApi('/api/selector-check', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!row.isConnected || (generation && row.dataset.checkGen !== generation)) return;
+  if (row.querySelector('.g-value').value.trim() !== selector) return;
+  if (!result.ok) {
+    paintSelectorCheck(row, {
+      tone: 'hint',
+      message: "We couldn't check that selector. You can still save the goal.",
+    });
+    return;
+  }
+  paintSelectorCheck(row, result.data || {});
 }
 
 function collectGoals(listId) {
@@ -6856,6 +6981,15 @@ document.getElementById('audit-next').addEventListener('click', () => {
 document.getElementById('logout-all').addEventListener('click', async () => {
   await fetch('/api/auth/logout-all', { method: 'POST' });
   window.location.href = '/login.html';
+});
+
+document.getElementById('first-run').addEventListener('click', (event) => {
+  const link = event.target.closest('a.setup-link');
+  if (!link) return;
+  if ((link.getAttribute('href') || '') !== '#sites-card') return;
+  event.preventDefault();
+  const card = document.getElementById('sites-card');
+  if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 
 document.getElementById('first-run-copy').addEventListener('click', () => {
