@@ -54,7 +54,30 @@ assert.strictEqual(noTraffic.ok, true);
 assert.strictEqual(noTraffic.plan.baseline_rate, 0.03);
 assert.strictEqual(noTraffic.plan.relative_effect, 0.2);
 assert.strictEqual(noTraffic.plan.estimated_weeks, null);
-assert.ok(noTraffic.plan.sentence.includes('Add weekly traffic'));
+assert.ok(noTraffic.plan.sentence.includes('Not enough traffic to estimate'));
+assert.ok(!noTraffic.plan.sentence.includes('at your current traffic'));
+
+const lowTraffic = plan.buildPlan({
+  baseline_rate: 0.03,
+  relative_effect: 0.1,
+  effect_choice: 'medium',
+  weekly_traffic: 100,
+  min_runtime_days: 14,
+  variant_count: 2,
+});
+assert.strictEqual(lowTraffic.ok, true);
+assert.ok(lowTraffic.plan.estimated_weeks > plan.MAX_DURATION_WEEKS);
+assert.ok(lowTraffic.plan.sentence.includes('Not enough traffic to estimate'));
+assert.ok(lowTraffic.plan.sentence.includes(lowTraffic.plan.visitors_per_variant.toLocaleString('en-GB')));
+assert.ok(!lowTraffic.plan.sentence.includes(String(lowTraffic.plan.estimated_weeks)));
+assert.ok(two.plan.estimated_weeks <= plan.MAX_DURATION_WEEKS);
+assert.ok(two.plan.sentence.includes('at your current traffic'));
+assert.ok(!two.plan.sentence.includes('Not enough traffic to estimate'));
+assert.ok(plan.DEFAULT_BASELINE_LABEL.includes('Assumed baseline conversion rate'));
+assert.ok(plan.DEFAULT_BASELINE_LABEL.includes('3%'));
+assert.ok(plan.DEFAULT_BASELINE_LABEL.includes('10%'));
+assert.ok(plan.DEFAULT_BASELINE_LABEL.includes('You can change it'));
+assert.ok(plan.DEFAULT_BASELINE_LABEL.indexOf('baseline') < plan.DEFAULT_BASELINE_LABEL.indexOf('10%'));
 assert.ok(noTraffic.plan.runtime_warning.includes('One week'));
 
 const auto = plan.autoPlanInput({

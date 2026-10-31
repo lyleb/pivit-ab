@@ -726,9 +726,10 @@
           <select id="wizard-site">
             <option value="">Choose a site</option>
           </select>
-          <p class="hint">This agency has more than one site. Choose the site for this test, its snippet and its goals. pivitlab remembers the choice.</p>
+          <p class="hint">This agency has more than one site. Choose one for this test. pivitlab does not pick a site for you. The snippet and the goals stay with the site you choose, and pivitlab remembers that choice afterwards.</p>
         </div>
         <p id="wizard-domain-warning" class="banner" role="status" hidden></p>
+        <p id="wizard-site-mismatch" class="banner" role="status" hidden></p>
         <div id="wizard-step-1" class="wizard-step">
           <label for="wizard-name">Experiment name</label>
           <input id="wizard-name" placeholder="Homepage CTA copy">
@@ -830,7 +831,7 @@
         <div id="wizard-step-5" class="wizard-step" hidden>
           <div id="wizard-planner"></div>
           <dl class="summary" id="wizard-summary"></dl>
-          <p id="wizard-saved" class="ok-msg" hidden><strong>Plan saved.</strong> Next: review the experiment, then start it.</p>
+          <p id="wizard-saved" class="ok-msg" hidden><strong>Draft saved.</strong> Next: review the experiment, then start it.</p>
         </div>
 
         <p id="wizard-msg" class="hint"></p>
@@ -857,6 +858,7 @@
         <select id="manage-exp-id"><option value="">— select an experiment —</option></select>
         <label for="manage-page-url">Page URL to preview on</label>
         <input id="manage-page-url" placeholder="https://example.com/about" spellcheck="false">
+        <p id="manage-site-mismatch" class="banner" role="status" hidden></p>
         <div id="manage-url-warning" class="preview-url-warning" role="status" aria-live="polite" hidden>
           <p id="manage-url-warning-text"></p>
           <button type="button" class="btn-ghost" id="manage-url-use-match">Use a matching page</button>
@@ -1267,7 +1269,11 @@ const wizard = {
   planSuggestion: null,
   planSaved: false,
   busy: false,
+  siteChosen: false,
+  advancedAt: 0,
 };
+
+let wizardContinueAt = 0;
 
 function authHeaders() {
   return { 'Content-Type': 'application/json' };
@@ -1964,7 +1970,11 @@ function paintSitePickers() {
       return `<option value="${UI.escapeHtml(site.id)}">${UI.escapeHtml(label)}</option>`;
     }));
     select.innerHTML = options.join('');
-    select.value = chosenSiteId || '';
+    const wizardPick = UI.wizardSiteValue(
+      accountSites,
+      (wizard.siteChosen || wizard.expId) ? chosenSiteId : ''
+    );
+    select.value = id === 'wizard-site' ? wizardPick : (chosenSiteId || '');
     if (id === 'wizard-site') select.disabled = !!wizard.expId;
     if (wrap) wrap.hidden = !show;
   });
@@ -2068,15 +2078,24 @@ async function rememberChosenSite(siteId) {
   }
   if (wizard.step === 3) loadPopularGoals('wizard-popular-goals', 'wizard');
   paintGoalSiteLine();
+  refreshWizardDomainWarning();
   return result;
+}
+
+function wizardExplicitSiteId() {
+  return UI.wizardSiteValue(
+    accountSites,
+    (wizard.siteChosen || wizard.expId) ? chosenSiteId : ''
+  );
 }
 
 function paintGoalSiteLine() {
   const goalsSite = document.getElementById('wizard-goals-site');
   const snippetSite = document.getElementById('wizard-snippet-site');
-  const label = domainLabel(chosenSiteRecord());
+  const wizardSite = wizardExplicitSiteId();
+  const label = domainLabel(accountSites.find((site) => site.id === wizardSite) || null);
   if (goalsSite) {
-    if (accountSites.length > 1 && !chosenSiteId) {
+    if (accountSites.length > 1 && !wizardSite) {
       goalsSite.hidden = false;
       goalsSite.textContent = 'Choose a site before adding goals. Suggestions stay with that site.';
     } else if (label) {
@@ -2087,7 +2106,7 @@ function paintGoalSiteLine() {
     }
   }
   if (snippetSite) {
-    if (accountSites.length > 1 && !chosenSiteId) {
+    if (accountSites.length > 1 && !wizardSite) {
       snippetSite.hidden = false;
       snippetSite.textContent = 'Choose a site to get the snippet.';
     } else if (label) {
@@ -3038,7 +3057,7 @@ function renderDetail() {
   let planSavedNote = '';
   try {
     if (sessionStorage.getItem('pivit-plan-saved') === exp.id) {
-      planSavedNote = '<div class="banner" id="plan-saved-banner"><span><strong>Plan saved.</strong> Next: review the experiment, then start it.</span></div>';
+      planSavedNote = '<div class="banner" id="plan-saved-banner"><span><strong>Draft saved.</strong> Next: review the experiment, then start it.</span></div>';
       sessionStorage.removeItem('pivit-plan-saved');
     }
   } catch (err) { /* private mode */ }
@@ -3114,6 +3133,7 @@ function renderDetail() {
       <div class="card">
         <label for="detail-page-url">Page URL for preview and edits</label>
         <input id="detail-page-url" value="${UI.escapeHtml(pageUrl)}" placeholder="https://example.com/about" spellcheck="false">
+        <p id="detail-site-mismatch" class="banner" role="status" hidden></p>
         <div id="detail-field-url-warning" class="preview-url-warning" role="status" aria-live="polite" hidden>
           <p id="detail-field-url-warning-text"></p>
           <button type="button" class="btn-ghost" data-action="use-matching-page">Use a matching page</button>
@@ -3250,6 +3270,7 @@ function renderDetail() {
         <div id="settings-planner"></div>
         <label for="settings-url">Page URL</label>
         <input id="settings-url" class="mono" readonly value="${UI.escapeHtml(exp.url_match || '')}">
+        <p id="settings-site-mismatch" class="banner" role="status" hidden></p>
         <label for="settings-match">Match</label>
         <select id="settings-match">
           ${['contains', 'exact', 'starts_with', 'regex'].map((type) => `<option value="${type}"${(exp.url_match_type || 'contains') === type ? ' selected' : ''}>${UI.escapeHtml(window.PivitUrl.pageMatchLabel(type))}</option>`).join('')}
@@ -3319,6 +3340,12 @@ function renderDetail() {
   });
   syncActivationInputs('settings');
   refreshSettingsMatchHint();
+  paintDomainMismatch(
+    document.getElementById('settings-site-mismatch'),
+    exp.url_match,
+    siteDomainsFor(exp.site_id),
+    { locked: true }
+  );
   loadSeenHosts(exp.id);
   renderVariantRows();
   renderGoalBlocks();
@@ -3358,6 +3385,12 @@ function refreshDetailPreviewWarning() {
   const fieldNote = document.getElementById('detail-field-element-note');
   showPreviewElementNote(headerNote, rule.elementSelector);
   showPreviewElementNote(fieldNote, rule.elementSelector);
+  paintDomainMismatch(
+    document.getElementById('detail-site-mismatch'),
+    [pageUrl, currentDetail.url_match],
+    siteDomainsFor(currentDetail.site_id),
+    { locked: true }
+  );
   if (headerNote) headerNote.hidden = !headerNote.textContent || onVariants;
   if (fieldNote) fieldNote.hidden = !fieldNote.textContent || !onVariants;
   const headerStart = document.getElementById('detail-activation-note');
@@ -4065,7 +4098,37 @@ function refreshSettingsMatchHint() {
   const hint = document.getElementById('settings-match-hint');
   const select = document.getElementById('settings-match');
   if (!hint || !select || !currentDetail || !window.PivitUrl) return;
-  hint.textContent = PivitUrl.pageMatchHint(select.value, currentDetail.url_match);
+  const appliedDefault = select.value === 'exact' && PivitUrl.defaultPageMatch(currentDetail.url_match) === 'exact';
+  hint.textContent = PivitUrl.pageMatchHint(select.value, currentDetail.url_match, { appliedDefault });
+}
+
+function siteDomainsFor(siteId) {
+  const site = accountSites.find((item) => item.id === siteId);
+  return site && Array.isArray(site.domains) ? site.domains : [];
+}
+
+function paintDomainMismatch(el, urls, domains, options) {
+  if (!el || !UI.domainMismatchMessage) return;
+  const list = Array.isArray(urls) ? urls : [urls];
+  let message = '';
+  for (let i = 0; i < list.length; i += 1) {
+    message = UI.domainMismatchMessage(list[i], domains, options);
+    if (message) break;
+  }
+  el.hidden = !message;
+  el.textContent = message || '';
+}
+
+function refreshWizardDomainWarning() {
+  const siteId = UI.wizardSiteValue(
+    accountSites,
+    (wizard.siteChosen || wizard.expId) ? chosenSiteId : ''
+  );
+  paintDomainMismatch(
+    document.getElementById('wizard-site-mismatch'),
+    [wizard.url, wizard.pageUrl],
+    siteDomainsFor(siteId)
+  );
 }
 
 async function loadSeenHosts(experimentId) {
@@ -4237,9 +4300,9 @@ function markWizardPlanUnsaved() {
   const note = document.getElementById('wizard-saved');
   if (note) note.hidden = true;
   const next = document.getElementById('wizard-next');
-  if (next && wizard.step === 5) next.textContent = 'Save plan';
+  if (next && wizard.step === 5) next.textContent = 'Save as draft';
   const draftBtn = document.getElementById('wizard-save-draft');
-  if (draftBtn && wizard.step === 5) draftBtn.hidden = false;
+  if (draftBtn && wizard.step === 5) draftBtn.hidden = true;
 }
 
 function plannerRoot(prefix) {
@@ -5162,7 +5225,8 @@ function loadWizard() {
     const raw = sessionStorage.getItem('pivit_wizard');
     if (!raw) return;
     const saved = JSON.parse(raw);
-    Object.assign(wizard, saved, { busy: false });
+    Object.assign(wizard, saved, { busy: false, advancedAt: 0 });
+    if (wizard.expId) wizard.siteChosen = true;
   } catch (e) {}
 }
 
@@ -5192,6 +5256,8 @@ function resetWizard() {
   wizard.planSuggestion = null;
   wizard.planSaved = false;
   wizard.busy = false;
+  wizard.siteChosen = false;
+  wizard.advancedAt = 0;
   try { sessionStorage.removeItem('pivit_wizard'); } catch (e) {}
   const list = document.getElementById('wizard-goals-list');
   if (list) list.innerHTML = '';
@@ -5238,7 +5304,13 @@ function syncWizardMatch(fromUser) {
   const matchEl = document.getElementById('wizard-match');
   if (matchEl) matchEl.value = wizard.match || 'contains';
   const hint = document.getElementById('wizard-match-hint');
-  if (hint) hint.textContent = PivitUrl.pageMatchHint(wizard.match || 'contains', wizard.url);
+  if (hint) {
+    const appliedDefault = !wizard.matchTouched
+      && (wizard.match || 'contains') === 'exact'
+      && PivitUrl.defaultPageMatch(wizard.url) === 'exact';
+    hint.textContent = PivitUrl.pageMatchHint(wizard.match || 'contains', wizard.url, { appliedDefault });
+  }
+  refreshWizardDomainWarning();
 }
 
 function hostFromPageUrl(value) {
@@ -5254,7 +5326,10 @@ function hostFromPageUrl(value) {
 }
 
 function suggestedSiteDomains() {
-  if (accountSites.length > 1) return domainsForChosenSite();
+  if (accountSites.length > 1) {
+    if (!wizard.siteChosen && !wizard.expId) return '';
+    return domainsForChosenSite();
+  }
   const fromUrl = hostFromPageUrl(wizard.url);
   if (fromUrl) return fromUrl;
   if (wizard.clientId) {
@@ -5322,9 +5397,9 @@ async function renderWizard() {
   const next = document.getElementById('wizard-next');
   back.hidden = wizard.step === 1;
   skip.hidden = wizard.step !== 3;
-  draftBtn.hidden = wizard.step !== 5 || wizard.planSaved;
+  draftBtn.hidden = true;
   next.hidden = false;
-  next.textContent = wizard.step === 5 ? (wizard.planSaved ? 'Review' : 'Save plan') : 'Continue';
+  next.textContent = wizard.step === 5 ? (wizard.planSaved ? 'Review' : 'Save as draft') : 'Continue';
   const saved = document.getElementById('wizard-saved');
   if (saved) saved.hidden = !(wizard.step === 5 && wizard.planSaved);
 
@@ -5427,7 +5502,11 @@ async function persistWizardBasics() {
   if (!wizard.matchTouched) syncWizardMatch(false);
   readWizardBasics();
   if (!wizard.name || !wizard.url) { wizardMsg('Add a name and a URL match.'); return false; }
-  if (siteChoiceRequired || (accountSites.length > 1 && !chosenSiteId)) {
+  const siteForWizard = UI.wizardSiteValue(
+    accountSites,
+    (wizard.siteChosen || wizard.expId) ? chosenSiteId : ''
+  );
+  if (accountSites.length > 1 && !siteForWizard) {
     wizardMsg('Choose a site.');
     return false;
   }
@@ -5446,12 +5525,13 @@ async function persistWizardBasics() {
         client_id: wizard.clientId || null,
         allowed_hosts: wizard.hosts,
         test_type: wizard.testType === 'demo' ? 'demo' : 'live',
-        site_id: chosenSiteId || null,
+        site_id: siteForWizard || chosenSiteId || null,
       }),
     });
     if (!result.ok) { wizardMsg(apiErrorText(result)); return false; }
     showFormWarning(document.getElementById('wizard-domain-warning'), result.data.domain_warning || '');
     wizard.expId = result.data.id;
+    wizard.siteChosen = true;
     if (result.data.test_type) wizard.testType = result.data.test_type;
     rememberSavedHosts(result.data);
     const control = result.data.control_variant;
@@ -5653,43 +5733,66 @@ function openWizardReview() {
   go(`#experiment/${id}/overview`);
 }
 
-async function wizardAdvance() {
-  if (wizard.busy) return;
+function showOnlyWizardStep(step) {
+  for (let n = 1; n <= 5; n += 1) {
+    const el = document.getElementById('wizard-step-' + n);
+    if (el) el.hidden = n !== step;
+  }
+}
+
+async function wizardAdvance(event) {
+  if (event) {
+    event.preventDefault();
+    if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+    else event.stopPropagation();
+  }
+  const decision = UI.wizardContinueDecision({
+    step: wizard.step,
+    busy: wizard.busy,
+    advancedAt: wizardContinueAt,
+  }, Date.now());
+  if (!decision.ok) return;
+  const fromStep = wizard.step;
   wizard.busy = true;
+  const nextBtn = document.getElementById('wizard-next');
+  if (nextBtn) nextBtn.disabled = true;
   wizardMsg('');
   try {
-    if (wizard.step === 1) {
+    if (fromStep === 1) {
       const ok = await persistWizardBasics();
       if (!ok) return;
-      wizard.step = 2;
-    } else if (wizard.step === 2) {
+    } else if (fromStep === 2) {
       wizard.pageUrl = document.getElementById('wizard-page-url').value.trim();
       const ok = await persistAllVariants();
       if (!ok) return;
-      wizard.step = 3;
-    } else if (wizard.step === 3) {
+    } else if (fromStep === 3) {
       const ok = await persistWizardGoals();
       if (!ok) return;
-      wizard.step = 4;
-    } else if (wizard.step === 4) {
+    } else if (fromStep === 4) {
       document.querySelectorAll('[data-wizard-check]').forEach((box) => {
         wizard.checks[box.dataset.wizardCheck] = box.checked;
       });
-      wizard.step = 5;
-    } else if (wizard.step === 5) {
+    } else if (fromStep === 5) {
       if (wizard.planSaved) {
+        wizardContinueAt = Date.now();
         openWizardReview();
         return;
       }
       const savedPlan = await saveWizardPlan();
       if (!savedPlan) return;
+      wizardContinueAt = Date.now();
       return;
     }
+    if (wizard.step !== fromStep || fromStep >= 5) return;
+    wizard.step = fromStep + 1;
+    wizardContinueAt = Date.now();
     wizard.maxStep = Math.max(wizard.maxStep, wizard.step);
     saveWizard();
+    showOnlyWizardStep(wizard.step);
     await renderWizard();
   } finally {
     wizard.busy = false;
+    if (nextBtn && nextBtn.isConnected) nextBtn.disabled = false;
   }
 }
 
@@ -5749,32 +5852,37 @@ document.getElementById('wizard-steps').addEventListener('click', async (e) => {
   if (!btn || btn.disabled || wizard.busy) return;
   const step = Number(btn.dataset.wizardStep);
   if (step === wizard.step) return;
-  if (step > wizard.step) {
-    wizard.busy = true;
-    let ok = true;
-    try {
+  wizard.busy = true;
+  const nextBtn = document.getElementById('wizard-next');
+  if (nextBtn) nextBtn.disabled = true;
+  let ok = true;
+  try {
+    if (step > wizard.step) {
       if (wizard.step === 1) ok = await persistWizardBasics();
       else if (wizard.step === 2) {
         wizard.pageUrl = document.getElementById('wizard-page-url').value.trim();
         ok = await persistAllVariants();
       } else if (wizard.step === 3) ok = await persistWizardGoals();
-    } finally {
-      wizard.busy = false;
+      if (!ok) return;
+    } else {
+      if (wizard.step === 3) rememberWizardGoals();
+      if (wizard.step === 2) {
+        wizard.variants.forEach((_, i) => syncWizardVariantFromDom(i));
+        wizard.pageUrl = document.getElementById('wizard-page-url').value.trim();
+      }
     }
-    if (!ok) return;
-  } else {
-    if (wizard.step === 3) rememberWizardGoals();
-    if (wizard.step === 2) {
-      wizard.variants.forEach((_, i) => syncWizardVariantFromDom(i));
-      wizard.pageUrl = document.getElementById('wizard-page-url').value.trim();
-    }
+    if (step !== 5) wizard.planSaved = false;
+    wizard.step = step;
+    wizardContinueAt = Date.now();
+    wizard.maxStep = Math.max(wizard.maxStep, step);
+    saveWizard();
+    wizardMsg('');
+    showOnlyWizardStep(step);
+    await renderWizard();
+  } finally {
+    wizard.busy = false;
+    if (nextBtn && nextBtn.isConnected) nextBtn.disabled = false;
   }
-  if (step !== 5) wizard.planSaved = false;
-  wizard.step = step;
-  wizard.maxStep = Math.max(wizard.maxStep, step);
-  saveWizard();
-  wizardMsg('');
-  await renderWizard();
 });
 document.getElementById('wizard-add-variant').addEventListener('click', () => {
   wizard.variants.forEach((_, i) => syncWizardVariantFromDom(i));
@@ -5873,6 +5981,7 @@ document.getElementById('wizard-page-url').addEventListener('input', (e) => {
   wizard.pageUrl = e.target.value.trim();
   saveWizard();
   refreshWizardPreviewWarning();
+  refreshWizardDomainWarning();
 });
 ['wizard-name', 'wizard-url', 'wizard-element', 'wizard-activation-value', 'wizard-activation-js', 'wizard-client', 'wizard-type'].forEach((id) => {
   const field = document.getElementById(id);
@@ -6189,7 +6298,7 @@ async function loadPopularGoals(containerId, mode) {
   const params = new URLSearchParams();
   params.set('limit', '5');
   const siteId = mode === 'wizard'
-    ? chosenSiteId
+    ? wizardExplicitSiteId()
     : (currentDetail && currentDetail.site_id ? currentDetail.site_id : '');
   if (siteId) params.set('site_id', siteId);
   const result = await callApi('/api/goals/popular?' + params.toString(), { headers: authHeaders() });
@@ -6351,6 +6460,12 @@ function refreshManagePreviewWarning(exp) {
   );
   showPreviewElementNote(document.getElementById('manage-element-note'), rule.elementSelector);
   showPreviewActivationNote(document.getElementById('manage-activation-note'), rule);
+  paintDomainMismatch(
+    document.getElementById('manage-site-mismatch'),
+    [input.value.trim(), ruleSource.url_match],
+    siteDomainsFor(ruleSource.site_id),
+    { locked: true }
+  );
 }
 
 function applyManagePreviewDefault(exp) {
@@ -6748,10 +6863,16 @@ document.getElementById('first-run-copy').addEventListener('click', () => {
 });
 
 document.getElementById('first-run-create').addEventListener('click', () => {
-  if (!agencyCanChange() || !chosenSiteId) return;
+  if (!agencyCanChange()) return;
+  if (accountSites.length > 1 && !chosenSiteId) return;
   if (!wizard.expId) {
     wizard.hostsEdited = false;
-    wizard.hosts = domainsForChosenSite();
+    if (accountSites.length > 1) {
+      wizard.siteChosen = false;
+      wizard.hosts = '';
+    } else {
+      wizard.hosts = domainsForChosenSite();
+    }
     const hosts = document.getElementById('wizard-hosts');
     if (hosts) hosts.value = wizard.hosts;
   }
@@ -6801,6 +6922,35 @@ document.getElementById('add-site-form').addEventListener('submit', async (event
   const select = document.getElementById(id);
   if (!select) return;
   select.addEventListener('change', async () => {
+    if (id === 'wizard-site') {
+      if (!select.value) {
+        wizard.siteChosen = false;
+        if (!wizard.expId && !wizard.hostsEdited) {
+          wizard.hosts = '';
+          const field = document.getElementById('wizard-hosts');
+          if (field) field.value = '';
+        }
+        saveWizard();
+        refreshWizardDomainWarning();
+        paintGoalSiteLine();
+        return;
+      }
+      wizard.siteChosen = true;
+      const result = await rememberChosenSite(select.value);
+      if (result && result.ok === false) {
+        wizard.siteChosen = false;
+        select.value = '';
+      } else if (!wizard.expId) {
+        wizard.hostsEdited = false;
+        wizard.hosts = domainsForChosenSite();
+        const field = document.getElementById('wizard-hosts');
+        if (field) field.value = wizard.hosts;
+      }
+      saveWizard();
+      refreshWizardDomainWarning();
+      paintGoalSiteLine();
+      return;
+    }
     if (!select.value) {
       select.value = chosenSiteId || '';
       return;

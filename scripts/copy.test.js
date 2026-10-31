@@ -52,6 +52,8 @@ assert.ok(!/railway/i.test(clientHtml));
 const adminHtml = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
 assert.ok(!adminHtml.includes('ADMIN_API_KEY'));
 assert.ok(!/railway/i.test(adminHtml));
+assert.ok(adminHtml.includes('Draft saved.'));
+assert.ok(adminHtml.includes('Save as draft'));
 assert.ok(adminHtml.includes('Plan saved.'));
 assert.ok(adminHtml.includes('Next: review the experiment, then start it.'));
 assert.ok(adminHtml.includes('You signed in with the owner password. Day to day, sign in by email at info@heclr.com. This password is only the fallback.'));

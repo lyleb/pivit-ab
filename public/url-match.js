@@ -309,9 +309,16 @@
     }[type] || 'Contains';
   }
 
-  function pageMatchHint(type, pattern) {
+  function pageMatchHint(type, pattern, options) {
     const root = isSiteRoot(pattern);
     const stored = type || 'contains';
+    const appliedDefault = !!(options && options.appliedDefault);
+    if (stored === 'exact' && appliedDefault) {
+      const meaning = root
+        ? 'This address is the site homepage, so the test runs on that page only.'
+        : 'The test runs only when the page is this address.';
+      return 'Exact match is on by default. ' + meaning + ' A query string, a hash and a trailing slash still match. Change Match if you want a wider rule.';
+    }
     if (stored === 'exact') {
       return root
         ? 'Exact. This is the site homepage, so the test runs on that page only. A query string, a hash and a trailing slash still match.'
