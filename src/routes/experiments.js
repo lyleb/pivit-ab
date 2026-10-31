@@ -17,7 +17,7 @@ const { planProgress, describeReading, listSignal } = require('../reading');
 const { visibleEventSql } = require('../metrics');
 const { utcDay, windowStartDay } = require('../host-hits');
 const { createEditToken } = require('../edit-token');
-const { authorisePreview, buildPublicExperimentList, createPreviewToken, previewUrl, editUrl, cacheControlForExperimentsQuery, pageUrlError, classifyPreviewRefusal } = require('../preview-access');
+const { authorisePreview, buildPublicExperimentList, createPreviewToken, previewUrl, editUrl, cacheControlForExperimentsQuery, pageUrlError, classifyPreviewRefusal, refusalForPreviewAuth } = require('../preview-access');
 const {
   checkHost,
   pageHostFromRequest,
@@ -184,6 +184,8 @@ router.get('/', async (req, res) => {
   try {
     const scope = await openPublicScope(req);
     if (!scope) {
+      const tokenRefused = refusalForPreviewAuth(previewAuth);
+      if (tokenRefused) return res.json({ experiments: [], preview_refused: tokenRefused });
       if (!previewAuth.ok) return res.json({ experiments: [] });
       return res.json({
         experiments: [],
@@ -249,8 +251,8 @@ router.get('/', async (req, res) => {
       }
     }
 
-    let previewRefused = null;
-    if (previewAuth.ok && !previewExperiment && !previewExpired) {
+    let previewRefused = refusalForPreviewAuth(previewAuth);
+    if (!previewRefused && previewAuth.ok && !previewExperiment && !previewExpired) {
       previewRefused = await explainPreviewRefusal(previewAuth, scope, url, req);
     }
 

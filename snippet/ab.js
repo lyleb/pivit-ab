@@ -192,8 +192,11 @@
  *
  * Selectors and applying changes live on PivitRuntime (also exported for tests).
  * The visual editor uses the same helpers, so a selector saved from the editor
- * is what visitors get. Positional selectors (nth-child / nth-of-type and the
- * other structural pseudos) are applied once, inline, exactly as before.
+ * is what visitors get. A positional selector (nth-child / nth-of-type and the
+ * other structural pseudos) is watched until it matches once, for up to ten
+ * seconds, then left alone so a later insert does not move the change. Other
+ * selectors stay watched after the first match, so a later render is updated
+ * once. The page is not held blank for that wait.
  */
 (function (root) {
   const ELEMENT_WAIT_MS = 4000;
@@ -401,7 +404,7 @@
   let ga4Experiments = [];
   let ga4Reporting = false;
   // Bump when editor.js changes so a cached copy cannot keep the old variant.
-  const EDITOR_VERSION = '20261031a';
+  const EDITOR_VERSION = '20261031b';
   // Bump when device-preview.js changes so a cached shell cannot skip JavaScript.
   const DEVICE_PREVIEW_VERSION = '20261021a';
 
@@ -648,11 +651,24 @@
   // Style and hide on a non-positional selector become a <style> rule (current
   // and later matches, no per-element write). Text, HTML, attributes and the
   // structural types are applied to matches now and to elements added later.
+  // A positional selector is included in that watch until it matches once.
   let pageApplier = null;
-  function applyVariantChanges(variant) {
+  function applyVariantChanges(variant, options) {
     if (!variant) return null;
-    if (!pageApplier) pageApplier = api.createApplier(document);
+    if (!pageApplier) {
+      const applierOptions = {};
+      if (options && options.preview) applierOptions.onMissed = showPreviewMiss;
+      pageApplier = api.createApplier(document, applierOptions);
+    }
     return pageApplier.applyAll(variant.changes || [], variant.id || 'variant');
+  }
+
+  // A route change can render the element this page gave up on. The same
+  // applier tries again. A positional change that already matched stays put.
+  function rewatchPendingChanges() {
+    if (pageApplier && typeof pageApplier.rewatchUnmatched === 'function') {
+      pageApplier.rewatchUnmatched();
+    }
   }
 
   function sendEvent(experimentId, variantId, visitorId, eventType, goalId, changeApplied) {
@@ -1429,28 +1445,46 @@
     return '[ab] preview mode — ' + message;
   }
 
+  function mountPreviewNotice(id, message) {
+    let banner = document.getElementById(id);
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = id;
+      banner.setAttribute('role', 'status');
+      banner.style.position = 'fixed';
+      banner.style.top = '0';
+      banner.style.left = '0';
+      banner.style.right = '0';
+      banner.style.zIndex = '2147483646';
+      banner.style.background = '#fff8e8';
+      banner.style.color = '#3f3420';
+      banner.style.padding = '16px 20px';
+      banner.style.fontFamily = '-apple-system, "Segoe UI", Roboto, sans-serif';
+      banner.style.fontSize = '14px';
+      banner.style.lineHeight = '1.45';
+      banner.style.boxShadow = '0 2px 10px rgba(19,23,35,0.12)';
+      const parent = document.body || document.documentElement;
+      if (parent) parent.appendChild(banner);
+    }
+    banner.textContent = message;
+    return banner;
+  }
+
   function showPreviewRefusal(refusal) {
     if (document.getElementById('pivit-preview-refused')) return;
-    const banner = document.createElement('div');
-    banner.id = 'pivit-preview-refused';
-    banner.setAttribute('role', 'status');
-    banner.style.position = 'fixed';
-    banner.style.top = '0';
-    banner.style.left = '0';
-    banner.style.right = '0';
-    banner.style.zIndex = '2147483646';
-    banner.style.background = '#fff8e8';
-    banner.style.color = '#3f3420';
-    banner.style.padding = '16px 20px';
-    banner.style.fontFamily = '-apple-system, "Segoe UI", Roboto, sans-serif';
-    banner.style.fontSize = '14px';
-    banner.style.lineHeight = '1.45';
-    banner.style.boxShadow = '0 2px 10px rgba(19,23,35,0.12)';
-    banner.textContent = (refusal && refusal.message)
+    const message = (refusal && refusal.message)
       ? refusal.message
       : 'This preview was not applied, so the original page is showing.';
-    const parent = document.body || document.documentElement;
-    if (parent) parent.appendChild(banner);
+    mountPreviewNotice('pivit-preview-refused', message);
+  }
+
+  const previewMissedSelectors = [];
+  function showPreviewMiss(change) {
+    const selector = change && change.selector ? String(change.selector) : '';
+    if (selector && previewMissedSelectors.indexOf(selector) === -1) previewMissedSelectors.push(selector);
+    const message = api.previewMissMessage(previewMissedSelectors);
+    if (typeof console !== 'undefined' && console.warn) console.warn('[ab] preview mode — ' + message);
+    mountPreviewNotice('pivit-preview-missed', message);
   }
 
   function previewVariant(experiments, preview) {
@@ -1674,7 +1708,7 @@
           const selector = previewActivation.type === 'element' ? '' : api.elementSelectorOf(match.experiment);
           const query = api.elementQuery(document, selector);
           if (query.state === 'present' || query.state === 'none') {
-            applyVariantChanges(match.variant);
+            applyVariantChanges(match.variant, { preview: true });
             console.info(api.previewInfo(match.experiment, match.variant, { found: true, reason: query.state }));
           } else if (query.state === 'invalid') {
             console.info(api.previewInfo(match.experiment, match.variant, { found: false, reason: 'invalid' }));
@@ -1684,7 +1718,7 @@
             revealPage();
             console.info('[ab] preview mode — waiting for "' + selector + '" before showing experiment "' + match.experiment.name + '". No events are being logged.');
             const gate = await api.waitForElement(document, selector);
-            if (gate.found) applyVariantChanges(match.variant);
+            if (gate.found) applyVariantChanges(match.variant, { preview: true });
             console.info(api.previewInfo(match.experiment, match.variant, gate));
             return;
           }
@@ -1779,6 +1813,7 @@
         // An edit or preview address is a full-load handoff. A client-side
         // change into one of those must not enrol or send a view.
         if (nextMode.type === 'edit' || nextMode.type === 'preview') return;
+        rewatchPendingChanges();
         const token = navigationGate.start();
         fetch(publicExperimentsUrl(href, fetchAsTest))
           .then(function (res) { return res.json(); })
@@ -1820,6 +1855,7 @@
         // data-spa="off": tests and URL goals stay on the full load. GA4
         // still follows the address, once per address, as before.
         bindSpaRouteChanges(window, function () {
+          rewatchPendingChanges();
           const href = window.location.href;
           const token = navigationGate.start();
           fetch(publicExperimentsUrl(href, fetchAsTest))
@@ -1840,6 +1876,10 @@
       // A missing element does not hold the page blank: a site-wide URL rule
       // would otherwise hide every page that will never have the button.
       // The observer still applies the variant if the element appears in time.
+      // A change whose own element renders late is applied when it appears,
+      // for up to ten seconds. That wait does not keep the anti-flicker
+      // class on: the change is written before the next paint once the
+      // element is in the document.
       revealPage();
 
       // Check "visited a URL" goals on every page load — including pages with no
@@ -3269,6 +3309,10 @@
     return /:(?:nth-child|nth-of-type|nth-last-child|nth-last-of-type|first-child|last-child|first-of-type|last-of-type|only-child|only-of-type)\b/.test(selector || '');
   }
 
+  // How long a change that matches nothing keeps being watched. A route
+  // change can start this again. The page is not hidden for this long.
+  const WATCH_LIMIT_MS = 10000;
+
   function classTokens(el) {
     if (!el) return [];
     let raw = '';
@@ -3278,10 +3322,132 @@
     return raw.trim().split(/\s+/).filter(Boolean);
   }
 
-  function uniqueSelector(el, doc) {
-    const body = (doc && doc.body) || (typeof document !== 'undefined' ? document.body : null);
+  function resolveQuery(doc) {
+    if (doc && typeof doc.querySelectorAll === 'function') {
+      return function (selector) { return doc.querySelectorAll(selector); };
+    }
+    // A caller that passed a body and no query cannot be checked. Do not
+    // fall through to a global document, or a Node test would change shape.
+    if (doc && doc.body) return null;
+    if (typeof document !== 'undefined' && document && typeof document.querySelectorAll === 'function') {
+      return function (selector) { return document.querySelectorAll(selector); };
+    }
+    return null;
+  }
+
+  function matchesOnly(queryAll, selector, el) {
+    if (!queryAll || !selector) return false;
+    let list;
+    try { list = queryAll(selector); } catch (err) { return false; }
+    if (!list || list.length !== 1) return false;
+    const found = list[0] || (typeof list.item === 'function' ? list.item(0) : null);
+    return found === el;
+  }
+
+  function attrEscape(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  function dataAttrNames(el) {
+    const names = [];
+    if (el && typeof el.getAttributeNames === 'function') {
+      el.getAttributeNames().forEach((name) => {
+        if (String(name).indexOf('data-') === 0) names.push(String(name));
+      });
+    } else if (el && el.attributes) {
+      Object.keys(el.attributes).forEach((name) => {
+        if (String(name).indexOf('data-') === 0) names.push(String(name));
+      });
+    }
+    const preferred = ['data-testid', 'data-test', 'data-id', 'data-section', 'data-section-id', 'data-cy'];
+    names.sort((a, b) => {
+      const ia = preferred.indexOf(a);
+      const ib = preferred.indexOf(b);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+    return names;
+  }
+
+  function attrValue(el, name) {
+    if (el && typeof el.getAttribute === 'function') return el.getAttribute(name);
+    if (el && el.attributes && Object.prototype.hasOwnProperty.call(el.attributes, name)) return el.attributes[name];
+    return null;
+  }
+
+  function elementClassSel(el) {
+    const tag = String(el.tagName).toLowerCase();
+    const pool = poolFor(classTokens(el));
+    if (!pool.length) return tag;
+    return tag + '.' + pool.map(cssEscape).join('.');
+  }
+
+  function anchorSel(el) {
     if (!el || !el.tagName) return '';
     if (el.id) return '#' + cssEscape(el.id);
+    const pool = poolFor(classTokens(el));
+    if (!pool.length) return '';
+    return String(el.tagName).toLowerCase() + '.' + pool.map(cssEscape).join('.');
+  }
+
+  // id, then a unique class chain (section.hero h1), then a data attribute.
+  // Empty when nothing on the page matches this element alone.
+  function stableSelector(el, queryAll) {
+    if (!el || !el.tagName || !queryAll) return '';
+    if (el.id) {
+      const idSel = '#' + cssEscape(el.id);
+      if (matchesOnly(queryAll, idSel, el)) return idSel;
+    }
+    const pool = poolFor(classTokens(el));
+    const selfBit = elementClassSel(el);
+    if (pool.length && matchesOnly(queryAll, selfBit, el)) return selfBit;
+
+    const ancestors = [];
+    let node = el.parentElement;
+    while (node && node.nodeType === 1 && ancestors.length < 8) {
+      const tag = String(node.tagName || '').toUpperCase();
+      if (tag === 'BODY' || tag === 'HTML') break;
+      ancestors.push(node);
+      node = node.parentElement;
+    }
+    const tail = pool.length ? selfBit : String(el.tagName).toLowerCase();
+    for (let i = 0; i < ancestors.length; i++) {
+      const near = anchorSel(ancestors[i]);
+      if (!near) continue;
+      const combined = near + ' ' + tail;
+      if (matchesOnly(queryAll, combined, el)) return combined;
+    }
+    for (let i = 0; i < ancestors.length; i++) {
+      const near = anchorSel(ancestors[i]);
+      if (!near) continue;
+      for (let j = i + 1; j < ancestors.length; j++) {
+        const far = anchorSel(ancestors[j]);
+        if (!far) continue;
+        const combined = far + ' ' + near + ' ' + tail;
+        if (matchesOnly(queryAll, combined, el)) return combined;
+      }
+    }
+
+    const names = dataAttrNames(el);
+    const tag = String(el.tagName).toLowerCase();
+    for (let i = 0; i < names.length; i++) {
+      const name = names[i];
+      if (name.indexOf('data-pivit') === 0) continue;
+      if (/^data-(?:react|emotion|styled)/.test(name)) continue;
+      const value = attrValue(el, name);
+      if (value == null || value === '') continue;
+      const attr = '[' + name + '="' + attrEscape(value) + '"]';
+      if (matchesOnly(queryAll, tag + attr, el)) return tag + attr;
+      if (matchesOnly(queryAll, attr, el)) return attr;
+    }
+    return '';
+  }
+
+  // The structural path. Used when no id, class chain or data attribute
+  // matches this element alone, and when the page cannot be queried.
+  function positionalSelector(el, doc, allowId) {
+    const body = (doc && doc.body) || (typeof document !== 'undefined' ? document.body : null);
+    if (!el || !el.tagName) return '';
+    if (allowId && el.id) return '#' + cssEscape(el.id);
     const path = [];
     let node = el;
     while (node && node.nodeType === 1 && node !== body) {
@@ -3299,6 +3465,17 @@
       node = parent;
     }
     return path.join(' > ');
+  }
+
+  function uniqueSelector(el, doc) {
+    if (!el || !el.tagName) return '';
+    const queryAll = resolveQuery(doc);
+    if (queryAll) {
+      const stable = stableSelector(el, queryAll);
+      if (stable) return stable;
+      return positionalSelector(el, doc, false);
+    }
+    return positionalSelector(el, doc, true);
   }
 
   function poolFor(tokens) {
@@ -3381,9 +3558,99 @@
   }
 
   function shouldWatch(change) {
-    if (!change || !change.selector || !WATCH_TYPES[change.type]) return false;
-    if (isPositionalSelector(change.selector)) return false;
+    if (!change || !change.selector) return false;
+    if (WATCH_TYPES[change.type]) return true;
+    // Style and hide on a positional selector cannot use a stylesheet: the
+    // rule would retarget when the page structure changes. Watch the element
+    // until it appears, then stop.
+    if (isPositionalSelector(change.selector) && (change.type === 'style' || change.type === 'hide')) return true;
+    return false;
+  }
+
+  function decodeHtmlText(text) {
+    return String(text)
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+  }
+
+  function parseAttrList(raw) {
+    const attrs = Object.create(null);
+    const re = /([^\s"'=<>\/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+    let match;
+    while ((match = re.exec(String(raw || '')))) {
+      const name = match[1].toLowerCase();
+      let value = '';
+      if (match[2] != null) value = match[2];
+      else if (match[3] != null) value = match[3];
+      else if (match[4] != null) value = match[4];
+      attrs[name] = value;
+    }
+    return attrs;
+  }
+
+  function significantAttrs(attrs) {
+    const out = Object.create(null);
+    Object.keys(attrs).sort().forEach((name) => {
+      if (name === 'class' && !String(attrs[name] || '').trim()) return;
+      if (name === 'style' && !String(attrs[name] || '').trim()) return;
+      if (name.indexOf('data-pivit') === 0) return;
+      out[name] = attrs[name];
+    });
+    return out;
+  }
+
+  function sameAttrMap(a, b) {
+    const ak = Object.keys(a);
+    const bk = Object.keys(b);
+    if (ak.length !== bk.length) return false;
+    for (let i = 0; i < ak.length; i++) {
+      if (a[ak[i]] !== b[ak[i]]) return false;
+    }
     return true;
+  }
+
+  function parseSingleElement(html) {
+    const trimmed = String(html || '').trim();
+    const match = trimmed.match(/^<([a-zA-Z][\w:-]*)\b([^>]*)>([\s\S]*)<\/\1>\s*$/);
+    if (!match) return null;
+    return { tag: match[1].toLowerCase(), attrs: parseAttrList(match[2]), inner: match[3] };
+  }
+
+  // The text, when the replacement is the same element with different text
+  // and no nested tags. Null when the markup itself changed, so the editor
+  // keeps a replace change. An empty string is a real text change.
+  function textOnlyReplacement(originalHtml, nextHtml) {
+    const original = parseSingleElement(originalHtml);
+    const next = parseSingleElement(nextHtml);
+    if (!original || !next) return null;
+    if (original.tag !== next.tag) return null;
+    if (!sameAttrMap(significantAttrs(original.attrs), significantAttrs(next.attrs))) return null;
+    if (/<[a-zA-Z!/]/.test(original.inner) || /<[a-zA-Z!/]/.test(next.inner)) return null;
+    const text = decodeHtmlText(next.inner);
+    if (text === decodeHtmlText(original.inner)) return null;
+    return text;
+  }
+
+  function changeFromHtmlEdit(selector, beforeHtml, afterHtml) {
+    const text = textOnlyReplacement(beforeHtml, afterHtml);
+    if (typeof text === 'string') return { selector: selector, type: 'text', value: text };
+    return { selector: selector, type: 'replace', value: afterHtml };
+  }
+
+  function previewMissMessage(selectors) {
+    const list = [];
+    const source = Array.isArray(selectors) ? selectors : [selectors];
+    source.forEach((item) => {
+      const name = item == null ? '' : String(item).trim();
+      if (name && list.indexOf(name) === -1) list.push(name);
+    });
+    if (list.length === 0) return "Change not applied: the element wasn't found on this page.";
+    if (list.length === 1) return "Change not applied: the element wasn't found on this page (" + list[0] + ").";
+    return "Changes not applied: these elements weren't found on this page (" + list.join(', ') + ").";
   }
 
   function cssDomId(key) {
@@ -3685,13 +3952,20 @@
     };
     const Observer = (options && options.MutationObserver) || (typeof MutationObserver !== 'undefined' ? MutationObserver : null);
     const skip = (options && options.skip) || function () { return false; };
+    const setTimer = (options && options.setTimeout) || (typeof setTimeout === 'function' ? setTimeout : function () { return null; });
+    const clearTimerFn = (options && options.clearTimeout) || (typeof clearTimeout === 'function' ? clearTimeout : function () {});
+    const watchLimitMs = options && Number.isFinite(options.watchLimitMs) ? options.watchLimitMs : WATCH_LIMIT_MS;
+    const onMissed = options && options.onMissed;
     const seen = new Set();
     const watched = [];
+    const retired = [];
     let observer = null;
     let pending = [];
     let scheduled = false;
     let applying = 0;
     let domApplies = 0;
+    let watchTimer = null;
+    let watchGeneration = 0;
 
     function inject(css, key) {
       if (!css) return;
@@ -3894,9 +4168,84 @@
       });
     }
 
+    function hasUnmatched() {
+      for (let i = 0; i < watched.length; i++) {
+        if (!watched[i].matched) return true;
+      }
+      return false;
+    }
+
+    function clearWatchTimer() {
+      watchGeneration += 1;
+      if (watchTimer == null) return;
+      const id = watchTimer;
+      watchTimer = null;
+      try { clearTimerFn(id); } catch (err) { /* already cleared */ }
+    }
+
+    function disconnectObserver() {
+      if (observer) observer.disconnect();
+      observer = null;
+    }
+
+    // A positional change leaves the watch list after it matches, so a node
+    // inserted in front does not take the change. Other selectors stay, so a
+    // later render of the same element is updated once. The mark stops the
+    // same node being written twice.
+    function settleWatches() {
+      for (let i = watched.length - 1; i >= 0; i--) {
+        const entry = watched[i];
+        if (entry.matched) continue;
+        if (matchCount(entry.change.selector) > 0) {
+          entry.matched = true;
+          if (isPositionalSelector(entry.change.selector)) watched.splice(i, 1);
+        }
+      }
+      if (!hasUnmatched()) clearWatchTimer();
+      if (!watched.length) disconnectObserver();
+    }
+
+    function onWatchLimit() {
+      const missed = [];
+      for (let i = watched.length - 1; i >= 0; i--) {
+        const entry = watched[i];
+        if (entry.matched) continue;
+        const found = matchCount(entry.change.selector);
+        if (found > 0) {
+          applyDomQuery(entry.change, entry.key, true);
+          entry.matched = true;
+          if (isPositionalSelector(entry.change.selector)) watched.splice(i, 1);
+          continue;
+        }
+        missed.push(entry.change);
+        retired.push(entry);
+        watched.splice(i, 1);
+      }
+      if (!watched.length) disconnectObserver();
+      missed.forEach((change) => {
+        if (typeof onMissed !== 'function') return;
+        try { onMissed(change); }
+        catch (err) { console.warn('[ab] preview notice failed:', err); }
+      });
+    }
+
+    function armWatchLimit() {
+      if (watchTimer != null || !hasUnmatched()) return;
+      const generation = watchGeneration;
+      watchTimer = setTimer(() => {
+        if (generation !== watchGeneration) return;
+        watchTimer = null;
+        onWatchLimit();
+      }, watchLimitMs);
+      if (watchTimer && typeof watchTimer.unref === 'function') {
+        try { watchTimer.unref(); } catch (err) { /* browser timers have no unref */ }
+      }
+    }
+
     function flush() {
       const batch = pending.splice(0, 40);
       batch.forEach(processNode);
+      settleWatches();
       if (pending.length) scheduleFlush();
     }
 
@@ -3965,8 +4314,15 @@
       const track = shouldWatch(change);
       const found = applyDomQuery(change, key, track);
       if (track) {
-        watched.push({ change, key });
-        ensureObserver();
+        const positional = isPositionalSelector(change.selector);
+        const matched = found > 0;
+        // Keep watching a positional selector only until the first match.
+        // After that, a new node in the same slot must not take the change.
+        if (!positional || !matched) {
+          watched.push({ change: change, key: key, matched: matched });
+          ensureObserver();
+          if (!matched) armWatchLimit();
+        }
       }
       return { checked: true, applied: found > 0 };
     }
@@ -3985,13 +4341,29 @@
       return { checked, applied: hit, ok: checked > 0 ? hit === checked : null };
     }
 
+    function rewatchUnmatched() {
+      if (!retired.length) return;
+      const again = retired.splice(0, retired.length);
+      again.forEach((entry) => {
+        const found = applyDomQuery(entry.change, entry.key, true);
+        const positional = isPositionalSelector(entry.change.selector);
+        if (found > 0 && positional) return;
+        watched.push({ change: entry.change, key: entry.key, matched: found > 0 });
+      });
+      if (watched.length) ensureObserver();
+      clearWatchTimer();
+      armWatchLimit();
+    }
+
     function disconnect() {
-      if (observer) observer.disconnect();
-      observer = null;
+      clearWatchTimer();
+      watched.length = 0;
+      retired.length = 0;
+      disconnectObserver();
       clearBannerTimer(doc, options && options.clearInterval);
     }
 
-    return { applyAll, applyOne, flush, disconnect };
+    return { applyAll, applyOne, flush, disconnect, rewatchUnmatched };
   }
 
   return {
@@ -4001,8 +4373,13 @@
     isGeneratedClass,
     isPositionalSelector,
     uniqueSelector,
+    stableSelector,
     generaliseSelector,
     cssForChange,
+    textOnlyReplacement,
+    changeFromHtmlEdit,
+    previewMissMessage,
+    WATCH_LIMIT_MS,
     createApplier,
     applyBanner,
     nextLondonMidnight,

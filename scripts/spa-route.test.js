@@ -578,6 +578,10 @@ assert.ok(refreshBody.includes("nextMode.type === 'preview'"));
 assert.ok(refreshBody.includes('deliverNavigation'));
 assert.ok(refreshBody.includes('checkUrlGoals'));
 assert.ok(refreshBody.includes('publicExperimentsUrl(href, fetchAsTest)'));
+assert.ok(refreshBody.includes('rewatchPendingChanges()'));
+const spaOffAt = snippetSrc.indexOf('data-spa="off"', recheckAt);
+const spaOffBody = snippetSrc.slice(spaOffAt, spaOffAt + 900);
+assert.ok(spaOffBody.includes('rewatchPendingChanges()'));
 assert.ok(snippetSrc.includes('data-spa="off"'));
 
 const helpPage = fs.readFileSync(path.join(__dirname, '../public/help.html'), 'utf8');

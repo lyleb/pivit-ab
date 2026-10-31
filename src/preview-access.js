@@ -20,32 +20,37 @@ function createPreviewToken(variantId, expiresInMs = PREVIEW_TTL_MS, now = Date.
   return Buffer.from(payload).toString('base64url') + '.' + sign(payload);
 }
 
-function inspectPreviewToken(token, variantId, now = Date.now()) {
-  if (!token || typeof token !== 'string' || !variantId) return null;
+// ok with claims, or a reason the snippet can show. A bad signature is
+// token_invalid even when the expiry looks old: the clock is only trusted
+// after the signature matches. now === exp is still valid.
+function readPreviewToken(token, variantId, now = Date.now()) {
+  if (!token || typeof token !== 'string' || !variantId) return { ok: false, reason: 'token_invalid' };
   const parts = token.split('.');
-  if (parts.length !== 2) return null;
+  if (parts.length !== 2) return { ok: false, reason: 'token_invalid' };
   const [payloadB64, sig] = parts;
 
   let payload;
   try {
     payload = Buffer.from(payloadB64, 'base64url').toString();
   } catch (err) {
-    return null;
+    return { ok: false, reason: 'token_invalid' };
   }
 
   const expectedSig = sign(payload);
   const sigBuf = Buffer.from(sig);
   const expectedBuf = Buffer.from(expectedSig);
-  if (sigBuf.length !== expectedBuf.length) return null;
-  if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
+  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
+    return { ok: false, reason: 'token_invalid' };
+  }
 
   const payloadParts = payload.split('.');
-  if (payloadParts.length !== 3 && payloadParts.length !== 5) return null;
+  if (payloadParts.length !== 3 && payloadParts.length !== 5) return { ok: false, reason: 'token_invalid' };
   const [kind, tokenVariantId, expStr] = payloadParts;
-  if (kind !== 'preview' || tokenVariantId !== String(variantId)) return null;
+  if (kind !== 'preview' || tokenVariantId !== String(variantId)) return { ok: false, reason: 'token_invalid' };
 
   const exp = parseInt(expStr, 10);
-  if (!Number.isFinite(exp) || now > exp) return null;
+  if (!Number.isFinite(exp)) return { ok: false, reason: 'token_invalid' };
+  if (now > exp) return { ok: false, reason: 'token_expired' };
 
   let accountId = null;
   let siteId = null;
@@ -53,7 +58,13 @@ function inspectPreviewToken(token, variantId, now = Date.now()) {
     accountId = payloadParts[3] || null;
     siteId = payloadParts[4] && payloadParts[4] !== '-' ? payloadParts[4] : null;
   }
-  return { variantId: String(variantId), accountId, siteId };
+  return { ok: true, claims: { variantId: String(variantId), accountId, siteId } };
+}
+
+function inspectPreviewToken(token, variantId, now = Date.now()) {
+  const read = readPreviewToken(token, variantId, now);
+  if (!read.ok) return null;
+  return read.claims;
 }
 
 function verifyPreviewToken(token, variantId, now = Date.now()) {
@@ -64,9 +75,11 @@ function verifyPreviewToken(token, variantId, now = Date.now()) {
 // signed for that exact variant are required.
 function authorisePreview({ preview, previewVariant, previewToken, now } = {}) {
   const on = preview === '1' || preview === 'true' || preview === true;
-  if (!on || !previewVariant || !previewToken) return { ok: false };
-  const claims = inspectPreviewToken(String(previewToken), String(previewVariant), now);
-  if (!claims) return { ok: false };
+  if (!on) return { ok: false };
+  if (!previewVariant || !previewToken) return { ok: false, reason: 'token_invalid' };
+  const read = readPreviewToken(String(previewToken), String(previewVariant), now);
+  if (!read.ok) return { ok: false, reason: read.reason };
+  const claims = read.claims;
   const result = { ok: true, variantId: claims.variantId };
   // Tokens minted before accounts existed have neither id. Leave those fields
   // off so the old return shape stays the same.
@@ -244,6 +257,8 @@ function editUrl(pageUrl, variantId, token) {
 // is, and the snippet says why. Codes stay stable so the dashboard and the
 // snippet can recognise them. Messages do not name another agency's test.
 const PREVIEW_REFUSAL_MESSAGES = {
+  token_invalid: 'This preview link is not valid, so pivitlab shows the original page. Open Preview again from the test.',
+  token_expired: 'This preview link has expired, so pivitlab shows the original page. Open Preview again from the test.',
   wrong_site: 'This preview was not applied. This page\'s snippet belongs to a different site from the test, so pivitlab shows the original page. Choose the site that owns this page, then preview again.',
   domain_not_allowed: 'This preview was not applied. This page\'s domain is not allowed for the test, so pivitlab shows the original page. Add the domain on the test, then preview again.',
   url_mismatch: 'This preview was not applied. This page does not match the test\'s URL rule, so pivitlab shows the original page. Open a page the test is set to run on, or change Match.',
@@ -251,6 +266,12 @@ const PREVIEW_REFUSAL_MESSAGES = {
 };
 
 function classifyPreviewRefusal(input) {
+  const tokenReason = input && (input.reason === 'token_invalid' || input.reason === 'token_expired')
+    ? input.reason
+    : '';
+  if (tokenReason) {
+    return { code: tokenReason, reason: tokenReason, message: PREVIEW_REFUSAL_MESSAGES[tokenReason] };
+  }
   const found = !!(input && input.found === true);
   const sameAccount = !!(input && input.sameAccount === true);
   const siteMatches = !(input && input.siteMatches === false);
@@ -260,7 +281,14 @@ function classifyPreviewRefusal(input) {
   if (!found || !sameAccount || !siteMatches) code = 'wrong_site';
   else if (!hostServes) code = 'domain_not_allowed';
   else if (!urlMatches) code = 'url_mismatch';
-  return { code, message: PREVIEW_REFUSAL_MESSAGES[code] };
+  return { code, reason: code, message: PREVIEW_REFUSAL_MESSAGES[code] };
+}
+
+// A preview request whose token cannot be trusted. Null when this request
+// is not a rejected preview, so a normal snippet fetch stays unchanged.
+function refusalForPreviewAuth(previewAuth) {
+  if (!previewAuth || previewAuth.ok || !previewAuth.reason) return null;
+  return classifyPreviewRefusal({ reason: previewAuth.reason });
 }
 
 // Live GET /api/experiments is left uncached-by-us (no Cache-Control change).
@@ -282,5 +310,6 @@ module.exports = {
   previewUrl,
   editUrl,
   classifyPreviewRefusal,
+  refusalForPreviewAuth,
   cacheControlForExperimentsQuery,
 };
