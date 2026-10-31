@@ -91,6 +91,24 @@ async function main() {
   const { personAccess } = require('../src/person-state');
   const { LIMITED_MESSAGE } = require('../src/rate-limit');
   const { deleteUser } = require('../src/person-state');
+  async function codeFor(token) {
+    const sent = await request(server, 'POST', '/api/auth/join', { token }, {});
+    assert.strictEqual(sent.status, 200, sent.text);
+    assert.strictEqual(sent.json.code_sent, true);
+    assert.ok(!sent.json.role);
+    const mail = takeLastLoggedEmail();
+    assert.ok(mail && mail.text, 'join code email');
+    assert.strictEqual(mail.tag, 'agency-join-code');
+    const code = (mail.text.match(/\b(\d{6})\b/) || [])[1];
+    assert.ok(code, mail.text);
+    return code;
+  }
+
+  async function joinAgency(token, jar) {
+    const code = await codeFor(token);
+    return request(server, 'POST', '/api/auth/join', { token, code }, jar);
+  }
+
   const {
       CANNOT_INVITE,
       ALREADY_MEMBER,
@@ -205,7 +223,27 @@ async function main() {
     assert.strictEqual((await db.query(`SELECT used_at FROM account_invites WHERE id = $1`, [created.json.invite.id])).rows[0].used_at, null);
 
     const joiner = {};
-    const joined = await request(server, 'POST', '/api/auth/join', { token }, joiner);
+    const sentCode = await request(server, 'POST', '/api/auth/join', { token }, joiner);
+    assert.strictEqual(sentCode.status, 200, sentCode.text);
+    assert.strictEqual(sentCode.json.code_sent, true);
+    const codeMail = takeLastLoggedEmail();
+    assert.strictEqual(codeMail.to, 'ada@example.co.uk');
+    assert.ok(codeMail.text.includes('6-digit') || /\b\d{6}\b/.test(codeMail.text));
+    const adaCode = (codeMail.text.match(/\b(\d{6})\b/) || [])[1];
+    const notYet = await db.query(`SELECT id FROM users WHERE email = 'ada@example.co.uk'`);
+    assert.strictEqual(notYet.rows.length, 0);
+    assert.strictEqual(
+      (await db.query(`SELECT used_at FROM account_invites WHERE id = $1`, [created.json.invite.id])).rows[0].used_at,
+      null
+    );
+    const wrongCode = adaCode === '000000' ? '000001' : '000000';
+    const wrong = await request(server, 'POST', '/api/auth/join', { token, code: wrongCode }, {});
+    assert.strictEqual(wrong.status, 401, wrong.text);
+    assert.strictEqual(
+      (await db.query(`SELECT used_at FROM account_invites WHERE id = $1`, [created.json.invite.id])).rows[0].used_at,
+      null
+    );
+    const joined = await request(server, 'POST', '/api/auth/join', { token, code: adaCode }, joiner);
     assert.strictEqual(joined.status, 200, joined.text);
     assert.deepStrictEqual(joined.json, { role: 'owner' });
     const again = await request(server, 'POST', '/api/auth/join', { token }, {});
@@ -227,6 +265,7 @@ async function main() {
     );
     assert.strictEqual(adaMembership.rows[0].role, 'member');
     assert.strictEqual(adaMembership.rows[0].removed_at, null);
+    await db.query(`DELETE FROM rate_limits WHERE bucket LIKE 'account-invite-accept:%' OR bucket LIKE 'auth-ip:%' OR bucket LIKE 'auth-email:%'`);
     const adaMe = await request(server, 'GET', '/api/auth/me', null, joiner);
     assert.strictEqual(adaMe.json.account.id, heclrId);
     assert.strictEqual(adaMe.json.membership, 'member');
@@ -237,7 +276,8 @@ async function main() {
       role: 'member',
       send: false,
     }, joiner);
-    assert.strictEqual(memberCreate.status, 404, memberCreate.text);
+    assert.strictEqual(memberCreate.status, 403, memberCreate.text);
+    assert.ok(memberCreate.json.error.includes('view-only'));
 
     const betaAccount = await db.query(
       `INSERT INTO accounts (name, legacy) VALUES ('Beta Ltd', false) RETURNING id`
@@ -269,8 +309,15 @@ async function main() {
     assert.ok(mailed.html.includes('>Join this agency<'));
     assert.ok(mailed.html.includes('pivitlab'));
     assert.ok(!mailed.html.includes('Pivitlab'));
+    const beaToken = tokenFrom(emailed.json.link);
+    const beaCode = await codeFor(beaToken);
+    const beaBefore = await db.query(
+      `SELECT account_id FROM memberships WHERE user_id = $1`,
+      [betaUser.rows[0].id]
+    );
+    assert.ok(beaBefore.rows.every((row) => row.account_id !== heclrId));
     const beaJar = {};
-    const beaJoin = await request(server, 'POST', '/api/auth/join', { token: tokenFrom(emailed.json.link) }, beaJar);
+    const beaJoin = await request(server, 'POST', '/api/auth/join', { token: beaToken, code: beaCode }, beaJar);
     assert.strictEqual(beaJoin.status, 200, beaJoin.text);
     const beaMe = await request(server, 'GET', '/api/auth/me', null, beaJar);
     assert.strictEqual(beaMe.json.account.id, heclrId);
@@ -332,7 +379,7 @@ async function main() {
       send: false,
     }, owner);
     assert.strictEqual(reused.status, 201, reused.text);
-    const reusedJoin = await request(server, 'POST', '/api/auth/join', { token: tokenFrom(reused.json.link) }, {});
+    const reusedJoin = await joinAgency(tokenFrom(reused.json.link), {});
     assert.strictEqual(reusedJoin.status, 200, reusedJoin.text);
     const reusedUser = await db.query(`SELECT id, deleted_at FROM users WHERE email = 'gone@example.co.uk'`);
     assert.notStrictEqual(reusedUser.rows[0].id, deletedPerson.rows[0].id);
@@ -348,9 +395,7 @@ async function main() {
     }, owner);
     assert.strictEqual(archived.status, 201, archived.text);
     const archivedJar = {};
-    const archivedJoin = await request(server, 'POST', '/api/auth/join', {
-      token: tokenFrom(archived.json.link),
-    }, archivedJar);
+    const archivedJoin = await joinAgency(tokenFrom(archived.json.link), archivedJar);
     assert.strictEqual(archivedJoin.status, 200, archivedJoin.text);
 
     const held = await request(server, 'POST', '/api/account/members/invites', {
@@ -370,7 +415,7 @@ async function main() {
     );
     await db.query(`UPDATE users SET suspended_at = NULL WHERE email = 'held@example.co.uk'`);
     const heldJar = {};
-    const heldOpen = await request(server, 'POST', '/api/auth/join', { token: tokenFrom(held.json.link) }, heldJar);
+    const heldOpen = await joinAgency(tokenFrom(held.json.link), heldJar);
     assert.strictEqual(heldOpen.status, 200, heldOpen.text);
 
     const doomed = await db.query(
@@ -453,7 +498,7 @@ async function main() {
     const oldAccept = await request(server, 'POST', '/api/auth/join', { token: tokenFrom(resent.json.link) }, {});
     assert.strictEqual(oldAccept.status, 400);
     const newJar = {};
-    const newAccept = await request(server, 'POST', '/api/auth/join', { token: tokenFrom(resentOk.json.link) }, newJar);
+    const newAccept = await joinAgency(tokenFrom(resentOk.json.link), newJar);
     assert.strictEqual(newAccept.status, 200, newAccept.text);
 
     const removedMember = await db.query(
@@ -470,7 +515,7 @@ async function main() {
       send: false,
     }, owner);
     assert.strictEqual(returned.status, 201, returned.text);
-    const returnedJoin = await request(server, 'POST', '/api/auth/join', { token: tokenFrom(returned.json.link) }, {});
+    const returnedJoin = await joinAgency(tokenFrom(returned.json.link), {});
     assert.strictEqual(returnedJoin.status, 200, returnedJoin.text);
     const returnedRow = await db.query(
       `SELECT role, removed_at FROM memberships WHERE user_id = $1 AND account_id = $2`,

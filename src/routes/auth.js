@@ -284,8 +284,10 @@ router.get('/join', async (req, res) => {
 
 router.post('/join', async (req, res) => {
   try {
-    const result = await acceptAccountInvite(req.body && req.body.token, req);
+    const body = req.body || {};
+    const result = await acceptAccountInvite(body.token, req, body.code);
     if (sendFlowResult(res, result)) return;
+    if (result.codeSent) return res.json({ ok: true, code_sent: true });
     await beginUserSession(req, result);
     res.json({ role: 'owner' });
   } catch (err) {
