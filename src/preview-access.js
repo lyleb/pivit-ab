@@ -240,6 +240,29 @@ function editUrl(pageUrl, variantId, token) {
   ]);
 }
 
+// A signed preview that the public API will not apply. The page stays as it
+// is, and the snippet says why. Codes stay stable so the dashboard and the
+// snippet can recognise them. Messages do not name another agency's test.
+const PREVIEW_REFUSAL_MESSAGES = {
+  wrong_site: 'This preview was not applied. This page\'s snippet belongs to a different site from the test, so pivitlab shows the original page. Choose the site that owns this page, then preview again.',
+  domain_not_allowed: 'This preview was not applied. This page\'s domain is not allowed for the test, so pivitlab shows the original page. Add the domain on the test, then preview again.',
+  url_mismatch: 'This preview was not applied. This page does not match the test\'s URL rule, so pivitlab shows the original page. Open a page the test is set to run on, or change Match.',
+  unavailable: 'This preview was not applied, so pivitlab shows the original page.',
+};
+
+function classifyPreviewRefusal(input) {
+  const found = !!(input && input.found === true);
+  const sameAccount = !!(input && input.sameAccount === true);
+  const siteMatches = !(input && input.siteMatches === false);
+  const hostServes = !!(input && input.hostServes === true);
+  const urlMatches = !!(input && input.urlMatches === true);
+  let code = 'unavailable';
+  if (!found || !sameAccount || !siteMatches) code = 'wrong_site';
+  else if (!hostServes) code = 'domain_not_allowed';
+  else if (!urlMatches) code = 'url_mismatch';
+  return { code, message: PREVIEW_REFUSAL_MESSAGES[code] };
+}
+
 // Live GET /api/experiments is left uncached-by-us (no Cache-Control change).
 // A preview response is tied to one variant and must not be reused for the next.
 function cacheControlForExperimentsQuery(query) {
@@ -258,5 +281,6 @@ module.exports = {
   pageUrlError,
   previewUrl,
   editUrl,
+  classifyPreviewRefusal,
   cacheControlForExperimentsQuery,
 };

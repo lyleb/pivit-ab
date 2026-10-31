@@ -138,7 +138,41 @@ const experimentsSrc = fs.readFileSync(path.join(__dirname, '../src/routes/exper
 assert.ok(experimentsSrc.includes("AND status = 'running'"));
 assert.ok(!experimentsSrc.includes('statusClause'));
 assert.ok(experimentsSrc.includes('authorisePreview'));
+assert.strictEqual(preview.classifyPreviewRefusal({
+  found: true,
+  sameAccount: true,
+  siteMatches: false,
+  urlMatches: false,
+  hostServes: false,
+}).code, 'wrong_site');
+assert.strictEqual(preview.classifyPreviewRefusal({
+  found: true,
+  sameAccount: true,
+  siteMatches: true,
+  urlMatches: true,
+  hostServes: false,
+}).code, 'domain_not_allowed');
+assert.strictEqual(preview.classifyPreviewRefusal({
+  found: true,
+  sameAccount: true,
+  siteMatches: true,
+  urlMatches: false,
+  hostServes: true,
+}).code, 'url_mismatch');
+assert.ok(preview.classifyPreviewRefusal({ found: false, sameAccount: false }).message.includes('pivitlab'));
+assert.ok(!preview.classifyPreviewRefusal({ found: false, sameAccount: false }).message.includes('Pivitlab'));
+const domainRefusal = preview.classifyPreviewRefusal({
+  found: true, sameAccount: true, siteMatches: true, urlMatches: true, hostServes: false,
+});
+assert.ok(domainRefusal.message.includes('domain is not allowed'));
+const urlRefusal = preview.classifyPreviewRefusal({
+  found: true, sameAccount: true, siteMatches: true, urlMatches: false, hostServes: true,
+});
+assert.ok(urlRefusal.message.includes('URL rule'));
+
 assert.ok(experimentsSrc.includes('applyHostScope(matchedPreview, req)'));
+assert.ok(experimentsSrc.includes('classifyPreviewRefusal'));
+assert.ok(experimentsSrc.includes('preview_refused'));
 assert.ok(experimentsSrc.includes('checkHost') || experimentsSrc.includes('applyHostScope'));
 assert.ok(experimentsSrc.includes('cacheControlForExperimentsQuery(req.query)'));
 assert.ok(experimentsSrc.includes('editUrl(page_url'));
@@ -148,6 +182,13 @@ assert.ok(experimentsSrc.includes('if (pageProblem) return res.status(400)'));
 const snippet = fs.readFileSync(path.join(__dirname, '../snippet/ab.js'), 'utf8');
 assert.ok(snippet.includes('ab_preview_token'));
 assert.ok(snippet.includes('data.preview'));
+assert.ok(snippet.includes('preview_refused'));
+assert.ok(snippet.includes('previewRefusalLine'));
+assert.ok(snippet.includes("console.warn(api.previewRefusalLine(data.preview_refused))"));
+const runtime = require('../snippet/ab.js');
+assert.ok(runtime.previewRefusalLine({ message: 'This page does not match.' }).includes('[ab] preview mode —'));
+assert.ok(runtime.previewRefusalLine({ message: 'This page does not match.' }).includes('This page does not match.'));
+assert.ok(runtime.previewRefusalLine(null).includes('original page'));
 assert.ok(!snippet.includes("previewVariantId ? '&preview=1'"));
 const init = snippet.slice(snippet.indexOf('async function init'));
 const previewBranch = init.indexOf('data.preview && data.preview.variant_id');

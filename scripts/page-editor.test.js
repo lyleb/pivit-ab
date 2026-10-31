@@ -7,6 +7,9 @@ const path = require('path');
 const vm = require('vm');
 
 const editorSrc = fs.readFileSync(path.join(__dirname, '../snippet/editor.js'), 'utf8');
+assert.ok(editorSrc.includes('This picks the element by its position on the page, so it may break if the page layout changes.'));
+assert.ok(editorSrc.includes('isPositionalSelector(suggested)'));
+assert.ok(!editorSrc.includes('positional selector'));
 const variantId = '11111111-1111-4111-8111-111111111111';
 const expId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 

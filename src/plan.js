@@ -25,6 +25,10 @@ const DEFAULT_RELATIVE = 0.1;
 const DEFAULT_MIN_RUNTIME_DAYS = 14;
 const MIN_RUNTIME_DAYS = 7;
 const MIN_BASELINE_VISITORS = 100;
+// Longer than a year is not a useful duration. The visitor count stays;
+// the sentence says there is not enough traffic to turn it into weeks.
+const MAX_DURATION_WEEKS = 52;
+const DEFAULT_BASELINE_LABEL = 'Assumed baseline conversion rate: 3%, because there is not enough past data yet. You can change it under Advanced. This is how many visitors convert today. It is separate from the relative change you are trying to detect (Medium is about 10%).';
 
 const EFFECT_CHOICES = [
   { id: 'small', relative: 0.05, label: 'Small change', hint: 'about 5% relative' },
@@ -115,11 +119,13 @@ function formatCount(value) {
 
 function planSentence({ visitorsPerVariant, estimatedWeeks }) {
   const visitors = formatCount(visitorsPerVariant);
-  if (estimatedWeeks) {
-    const weekWord = estimatedWeeks === 1 ? 'week' : 'weeks';
-    return `You'll need about ${visitors} visitors per variant, roughly ${estimatedWeeks} ${weekWord} at your current traffic.`;
+  const weeks = Number(estimatedWeeks);
+  const usable = Number.isFinite(weeks) && weeks >= 1 && weeks <= MAX_DURATION_WEEKS;
+  if (!usable) {
+    return `You'll need about ${visitors} visitors per variant. Not enough traffic to estimate how long that takes.`;
   }
-  return `You'll need about ${visitors} visitors per variant. Add weekly traffic to estimate how long that takes.`;
+  const weekWord = weeks === 1 ? 'week' : 'weeks';
+  return `You'll need about ${visitors} visitors per variant, roughly ${weeks} ${weekWord} at your current traffic.`;
 }
 
 function explanation({ comparisons, alphaPerComparison, minRuntimeDays, assumedPair }) {
@@ -317,8 +323,10 @@ return {
   POWER,
   ALPHA,
   DEFAULT_BASELINE,
+  DEFAULT_BASELINE_LABEL,
   DEFAULT_RELATIVE,
   DEFAULT_MIN_RUNTIME_DAYS,
+  MAX_DURATION_WEEKS,
   MIN_RUNTIME_DAYS,
   MIN_BASELINE_VISITORS,
   EFFECT_CHOICES,

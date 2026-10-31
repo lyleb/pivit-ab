@@ -276,6 +276,7 @@
   api.createActivationSession = createActivationSession;
   api.previewWaits = previewWaits;
   api.previewInfo = previewInfo;
+  api.previewRefusalLine = previewRefusalLine;
   api.mayBucketExperiment = mayBucketExperiment;
   api.assignVariant = assignVariant;
   api.normaliseGa4MeasurementId = normaliseGa4MeasurementId;
@@ -1421,6 +1422,37 @@
       + '". No events are being logged.';
   }
 
+  function previewRefusalLine(refusal) {
+    const message = refusal && typeof refusal.message === 'string' && refusal.message
+      ? refusal.message
+      : 'This preview was not applied, so the original page is showing.';
+    return '[ab] preview mode — ' + message;
+  }
+
+  function showPreviewRefusal(refusal) {
+    if (document.getElementById('pivit-preview-refused')) return;
+    const banner = document.createElement('div');
+    banner.id = 'pivit-preview-refused';
+    banner.setAttribute('role', 'status');
+    banner.style.position = 'fixed';
+    banner.style.top = '0';
+    banner.style.left = '0';
+    banner.style.right = '0';
+    banner.style.zIndex = '2147483646';
+    banner.style.background = '#fff8e8';
+    banner.style.color = '#3f3420';
+    banner.style.padding = '16px 20px';
+    banner.style.fontFamily = '-apple-system, "Segoe UI", Roboto, sans-serif';
+    banner.style.fontSize = '14px';
+    banner.style.lineHeight = '1.45';
+    banner.style.boxShadow = '0 2px 10px rgba(19,23,35,0.12)';
+    banner.textContent = (refusal && refusal.message)
+      ? refusal.message
+      : 'This preview was not applied, so the original page is showing.';
+    const parent = document.body || document.documentElement;
+    if (parent) parent.appendChild(banner);
+  }
+
   function previewVariant(experiments, preview) {
     if (!preview || !preview.variant_id) return null;
     const list = experiments || [];
@@ -1628,6 +1660,14 @@
         const match = data.preview && data.preview.variant_id === mode.variantId
           ? previewVariant(data.experiments, data.preview)
           : null;
+        if (!match && data && data.preview_refused) {
+          if (typeof console !== 'undefined' && console.warn) {
+            console.warn(api.previewRefusalLine(data.preview_refused));
+          }
+          showPreviewRefusal(data.preview_refused);
+          revealPage();
+          return;
+        }
         if (match) {
           api.mountStepsNote(document, match.variant && match.variant.steps_note);
           const previewActivation = api.activationOf(match.experiment);

@@ -6,6 +6,7 @@ const { detectSRM } = require('./srm');
 const { normaliseHost } = require('./host-scope');
 const {
   DEFAULT_BASELINE,
+  DEFAULT_BASELINE_LABEL,
   MIN_BASELINE_VISITORS,
   buildPlan,
   autoPlanInput,
@@ -239,7 +240,7 @@ async function suggest(experimentId, query = db.query.bind(db), accountId) {
   const baseline = fromOwn || fromPage || {
     baseline_rate: DEFAULT_BASELINE,
     baseline_source: 'default',
-    baseline_label: 'Estimate: 3%, because there is not enough past data yet. You can change it.',
+    baseline_label: DEFAULT_BASELINE_LABEL,
   };
   const traffic = await recentWeeklyVisitors([experimentId, ...related], query)
     || await weeklyFromHostHits(experiment, query)
