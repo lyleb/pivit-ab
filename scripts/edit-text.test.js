@@ -246,6 +246,54 @@ async function flush() {
     value: 'Goods from the hill, ready this week.',
   }]);
 
+  // Edit element HTML that only changes the text is saved as Edit text.
+  const runtime = require('../snippet/ab.js');
+  const htmlEnv = harness();
+  htmlEnv.headline.cloneNode = () => ({
+    querySelectorAll() { return []; },
+    getAttribute() { return null; },
+    removeAttribute() {},
+    outerHTML: '<h1 class="">Fresh flowers, delivered tomorrow</h1>',
+  });
+  htmlEnv.sandbox.Array = Array;
+  htmlEnv.sandbox.Object = Object;
+  htmlEnv.sandbox.JSON = JSON;
+  htmlEnv.sandbox.window.PivitRuntime = {
+    generaliseSelector() { return 'h1'; },
+    isPositionalSelector() { return false; },
+    uniqueSelector() { return '#headline'; },
+    changeFromHtmlEdit: runtime.changeFromHtmlEdit,
+  };
+  vm.runInNewContext(editorSrc, htmlEnv.sandbox, { filename: 'editor.js' });
+  await flush();
+  htmlEnv.document.getElementById('pivit-pick-btn').click();
+  htmlEnv.dispatchClick(htmlEnv.headline);
+  findExact(htmlEnv.document.body, 'Just this element').click();
+  findExact(htmlEnv.document.body, '✎ Edit element').click();
+  await flush();
+  const htmlAreas = [];
+  walk(htmlEnv.document.body, (node) => {
+    if (node.tagName === 'TEXTAREA') htmlAreas.push(node);
+  });
+  assert.strictEqual(htmlAreas[0].value, '<h1 class="">Fresh flowers, delivered tomorrow</h1>');
+  htmlAreas[0].value = '<h1 class="">Fresh flowers, delivered today</h1>';
+  let panelRoot = htmlAreas[0];
+  while (panelRoot.parentElement && panelRoot.parentElement !== htmlEnv.document.body) {
+    panelRoot = panelRoot.parentElement;
+  }
+  findExact(panelRoot, 'Apply').click();
+  await flush();
+  findExact(htmlEnv.document.body, '💾 Save').click();
+  await flush();
+  const htmlPatch = htmlEnv.fetches.filter((call) => call.opts.method === 'PATCH');
+  assert.strictEqual(htmlPatch.length, 1);
+  const htmlSaved = JSON.parse(htmlPatch[0].opts.body);
+  assert.deepStrictEqual(htmlSaved.changes, [{
+    selector: '#headline',
+    type: 'text',
+    value: 'Fresh flowers, delivered today',
+  }]);
+
   console.log('edit-text tests passed');
 })().catch((err) => {
   console.error(err);

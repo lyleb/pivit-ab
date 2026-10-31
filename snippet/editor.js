@@ -12,7 +12,11 @@
  * element's text and does not ask for HTML. "Edit element" still opens a panel
  * with HTML / CSS / JS tabs. Each part becomes its own entry in the Changes
  * list ('replace', 'stylesheet', 'js'), so it can be edited or removed
- * independently later. "Whole page" does not need an element.
+ * independently later. If the HTML tab only changes the text of the same
+ * element, that part is saved as a text change instead of a replace. The
+ * selector prefers an id, a unique class chain, or a data attribute, and
+ * uses a positional path only when nothing else matches this element alone.
+ * "Whole page" does not need an element.
  * Its CSS and JavaScript are stored as page_css and page_js. "Insert banner"
  * does not need an element either. It stores one banner change: text, an
  * optional countdown, colours, top or bottom, sticky, and an optional link.
@@ -247,7 +251,9 @@
   // The visitor snippet owns this, so a selector confirmed here is the one
   // that gets saved and applied. The copy below is only if that script is missing.
   function getSelector(el) {
-    if (window.PivitRuntime) return window.PivitRuntime.uniqueSelector(el);
+    if (window.PivitRuntime && typeof window.PivitRuntime.uniqueSelector === 'function') {
+      return window.PivitRuntime.uniqueSelector(el, document);
+    }
     if (el.id) return '#' + cssEscape(el.id);
     const path = [];
     let node = el;
@@ -1767,7 +1773,7 @@
   // list entry) — applies directly to the live DOM, no reload needed, since
   // adding something new doesn't require reversing anything.
   function ensureApplier() {
-    if (editorApplier || !window.PivitRuntime) return editorApplier;
+    if (editorApplier || !window.PivitRuntime || typeof window.PivitRuntime.createApplier !== 'function') return editorApplier;
     editorApplier = window.PivitRuntime.createApplier(document, {
       // Don't let a broad selector rewrite the editor chrome.
       skip: (el) => !!(root && (el === root || root.contains(el))),
@@ -1920,6 +1926,15 @@
 
   const collapse = (str) => str.replace(/\s+/g, ' ').trim();
 
+  // A whole-element edit that only changes the text is stored as Edit text.
+  // Nested markup, a different tag, or a real attribute change stays a replace.
+  function changeFromHtmlEdit(selector, beforeHtml, afterHtml) {
+    if (window.PivitRuntime && typeof window.PivitRuntime.changeFromHtmlEdit === 'function') {
+      return window.PivitRuntime.changeFromHtmlEdit(selector, beforeHtml, afterHtml);
+    }
+    return { selector, type: 'replace', value: afterHtml };
+  }
+
   // The three parts of "Edit element" are stored as three separate entries.
   const EDIT_SET_TYPES = ['replace', 'stylesheet', 'js'];
 
@@ -1960,7 +1975,7 @@
         { key: 'html', label: 'HTML', value: baseHtml,
           hint: cur('replace')
             ? "This is the markup the element is being replaced with. Edit it to tweak the replacement. Clear this tab to put back the page's original element."
-            : "The element's current markup on the page, including the effect of any other changes you've made to it. Edit it, or paste new HTML to replace it. Leave it unchanged to keep the element as it is." },
+            : "The element's current markup on the page, including the effect of any other changes you've made to it. Edit it, or paste new HTML to replace it. Leave it unchanged to keep the element as it is. If the only difference is the text, it is saved as an Edit text change." },
         { key: 'css', label: 'CSS', value: cur('stylesheet') ? cur('stylesheet').value : cssSkeleton,
           hint: "Plain CSS applied to the whole page" + (cur('stylesheet') ? '.' : ', pre-filled with a rule for this element.') +
             " Add !important to beat the site's own styles — z-index, colours, :hover and media queries all work. If you change the element's id or classes above, update the selector here too." +
@@ -1981,11 +1996,15 @@
         // update it; cleared -> drop it; new -> create it.
         if (cur('replace')) {
           if (!html) changed = true;
-          else if (collapse(html) !== collapse(cur('replace').value)) { next.replace = { ...cur('replace'), value: html }; changed = true; }
+          else if (collapse(html) !== collapse(cur('replace').value)) {
+            next.replace = changeFromHtmlEdit(selector, cur('replace').value, html);
+            changed = true;
+          }
           else next.replace = cur('replace');
         } else if (html && collapse(html) !== collapse(baseHtml)) {
           if (!target) return { error: "This selector doesn't match anything on the page right now, so its HTML can't be replaced." };
-          next.replace = { selector, type: 'replace', value: html }; changed = true;
+          next.replace = changeFromHtmlEdit(selector, baseHtml, html);
+          changed = true;
         }
         if (cur('stylesheet')) {
           if (cssEmpty) changed = true;

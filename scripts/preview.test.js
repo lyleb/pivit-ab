@@ -22,12 +22,32 @@ assert.strictEqual(preview.verifyPreviewToken(token, variantId, now + 60 * 60 * 
 assert.strictEqual(preview.verifyPreviewToken('not-a-token', variantId, now), false);
 assert.strictEqual(preview.verifyPreviewToken(createEditToken(variantId), variantId, now), false);
 
-assert.deepStrictEqual(preview.authorisePreview({ preview: '1' }), { ok: false });
-assert.deepStrictEqual(preview.authorisePreview({ preview: '1', previewVariant: variantId }), { ok: false });
+assert.deepStrictEqual(preview.authorisePreview({ preview: '1' }), { ok: false, reason: 'token_invalid' });
+assert.deepStrictEqual(preview.authorisePreview({ preview: '1', previewVariant: variantId }), { ok: false, reason: 'token_invalid' });
 assert.deepStrictEqual(
   preview.authorisePreview({ preview: '1', previewVariant: variantId, previewToken: 'nope', now }),
-  { ok: false }
+  { ok: false, reason: 'token_invalid' }
 );
+assert.deepStrictEqual(
+  preview.authorisePreview({
+    preview: '1',
+    previewVariant: variantId,
+    previewToken: token,
+    now: now + 60 * 60 * 1000 + 1,
+  }),
+  { ok: false, reason: 'token_expired' }
+);
+const invalidRefusal = preview.refusalForPreviewAuth({ ok: false, reason: 'token_invalid' });
+const expiredRefusal = preview.refusalForPreviewAuth({ ok: false, reason: 'token_expired' });
+assert.strictEqual(invalidRefusal.code, 'token_invalid');
+assert.strictEqual(invalidRefusal.reason, 'token_invalid');
+assert.ok(invalidRefusal.message.includes('not valid'));
+assert.ok(invalidRefusal.message.includes('pivitlab'));
+assert.ok(!invalidRefusal.message.includes('Pivitlab'));
+assert.strictEqual(expiredRefusal.code, 'token_expired');
+assert.ok(expiredRefusal.message.includes('expired'));
+assert.strictEqual(preview.refusalForPreviewAuth({ ok: false }), null);
+assert.strictEqual(preview.refusalForPreviewAuth({ ok: true, variantId }), null);
 assert.deepStrictEqual(
   preview.authorisePreview({ preview: '1', previewVariant: variantId, previewToken: token, now: now + 500 }),
   { ok: true, variantId }
@@ -172,6 +192,8 @@ assert.ok(urlRefusal.message.includes('URL rule'));
 
 assert.ok(experimentsSrc.includes('applyHostScope(matchedPreview, req)'));
 assert.ok(experimentsSrc.includes('classifyPreviewRefusal'));
+assert.ok(experimentsSrc.includes('refusalForPreviewAuth(previewAuth)'));
+assert.strictEqual(experimentsSrc.split('refusalForPreviewAuth(previewAuth)').length, 3);
 assert.ok(experimentsSrc.includes('preview_refused'));
 assert.ok(experimentsSrc.includes('checkHost') || experimentsSrc.includes('applyHostScope'));
 assert.ok(experimentsSrc.includes('cacheControlForExperimentsQuery(req.query)'));
@@ -189,6 +211,15 @@ const runtime = require('../snippet/ab.js');
 assert.ok(runtime.previewRefusalLine({ message: 'This page does not match.' }).includes('[ab] preview mode —'));
 assert.ok(runtime.previewRefusalLine({ message: 'This page does not match.' }).includes('This page does not match.'));
 assert.ok(runtime.previewRefusalLine(null).includes('original page'));
+assert.strictEqual(
+  runtime.previewMissMessage('section.hero h1'),
+  "Change not applied: the element wasn't found on this page (section.hero h1)."
+);
+assert.ok(runtime.previewMissMessage(['section.hero h1', 'a.cta']).includes('section.hero h1'));
+assert.ok(runtime.previewMissMessage(['section.hero h1', 'a.cta']).includes('a.cta'));
+assert.ok(snippet.includes('pivit-preview-missed'));
+assert.ok(snippet.includes('showPreviewMiss'));
+assert.ok(snippet.includes('rewatchUnmatched'));
 assert.ok(!snippet.includes("previewVariantId ? '&preview=1'"));
 const init = snippet.slice(snippet.indexOf('async function init'));
 const previewBranch = init.indexOf('data.preview && data.preview.variant_id');

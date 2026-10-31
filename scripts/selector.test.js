@@ -163,4 +163,126 @@ assert.strictEqual(runtime.cssForChange({ selector: 'span.badge:nth-of-type(2)',
 assert.strictEqual(runtime.cssForChange({ selector: 'span.badge:nth-of-type(2)', type: 'hide' }), '');
 assert.strictEqual(runtime.cssForChange({ type: 'stylesheet', selector: '', value: '.a{color:red}' }), '');
 
+// A unique class chain beats a positional path. Two h1s on the page, one
+// inside section.hero, so the saved selector is section.hero h1.
+function pageEl(tag, className, children, id, attrs) {
+  const node = el(tag, className, children, id);
+  node.attributes = attrs || {};
+  node.getAttribute = (name) => (Object.prototype.hasOwnProperty.call(node.attributes, name) ? node.attributes[name] : null);
+  node.getAttributeNames = () => Object.keys(node.attributes);
+  return node;
+}
+
+function selectorParts(selector) {
+  return selector.trim().split(/\s+/);
+}
+
+function compoundMatches(node, compound) {
+  const attrs = [];
+  let rest = compound.replace(/\[([^\]=]+)="([^"]*)"\]/g, (_, name, value) => {
+    attrs.push({ name, value });
+    return '';
+  });
+  const idMatch = rest.match(/#([A-Za-z0-9_-]+)/);
+  const id = idMatch ? idMatch[1] : '';
+  rest = rest.replace(/#[A-Za-z0-9_-]+/g, '');
+  const classes = [];
+  rest = rest.replace(/\.([A-Za-z0-9_-]+)/g, (_, cls) => { classes.push(cls); return ''; });
+  const tag = rest.trim().toLowerCase();
+  if (tag && node.tagName.toLowerCase() !== tag) return false;
+  if (id && node.id !== id) return false;
+  const have = (node.className || '').split(/\s+/).filter(Boolean);
+  if (!classes.every((cls) => have.indexOf(cls) !== -1)) return false;
+  return attrs.every((attr) => node.getAttribute(attr.name) === attr.value);
+}
+
+function treeQuery(root, selector) {
+  const all = walk(root, []);
+  const parts = selectorParts(selector);
+  return all.filter((node) => {
+    if (!compoundMatches(node, parts[parts.length - 1])) return false;
+    let ancestor = node.parentElement;
+    for (let i = parts.length - 2; i >= 0; i--) {
+      while (ancestor && !compoundMatches(ancestor, parts[i])) ancestor = ancestor.parentElement;
+      if (!ancestor) return false;
+      ancestor = ancestor.parentElement;
+    }
+    return true;
+  });
+}
+
+const heroHeading = pageEl('h1', '');
+const hero = pageEl('section', 'hero', [heroHeading]);
+const main = pageEl('main', 'wrap', [hero]);
+const otherHeading = pageEl('h1', '');
+const footer = pageEl('footer', '', [otherHeading]);
+const fernhill = pageEl('body', '', [main, footer]);
+const fernhillQuery = (selector) => treeQuery(fernhill, selector);
+assert.strictEqual(runtime.stableSelector(heroHeading, fernhillQuery), 'section.hero h1');
+assert.strictEqual(runtime.uniqueSelector(heroHeading, { querySelectorAll: fernhillQuery, body: fernhill }), 'section.hero h1');
+assert.ok(!runtime.isPositionalSelector(runtime.uniqueSelector(heroHeading, { querySelectorAll: fernhillQuery, body: fernhill })));
+
+const secondHeroHeading = pageEl('h1', '');
+hero.children.push(secondHeroHeading);
+secondHeroHeading.parentElement = hero;
+const positional = runtime.uniqueSelector(heroHeading, { querySelectorAll: fernhillQuery, body: fernhill });
+assert.ok(runtime.isPositionalSelector(positional), positional);
+hero.children.pop();
+secondHeroHeading.parentElement = null;
+
+const namedHeading = pageEl('h1', 'title', [], 'hero-title');
+const namedSection = pageEl('section', 'hero', [namedHeading]);
+const namedPage = pageEl('body', '', [namedSection, pageEl('h1', 'title')]);
+assert.strictEqual(
+  runtime.uniqueSelector(namedHeading, { querySelectorAll: (selector) => treeQuery(namedPage, selector), body: namedPage }),
+  '#hero-title'
+);
+
+const tested = pageEl('h1', '', [], '', { 'data-testid': 'hero-title' });
+const plain = pageEl('h1', '');
+const testedPage = pageEl('body', '', [tested, plain]);
+assert.strictEqual(
+  runtime.stableSelector(tested, (selector) => treeQuery(testedPage, selector)),
+  'h1[data-testid="hero-title"]'
+);
+
+assert.strictEqual(
+  runtime.textOnlyReplacement(
+    '<h1 class="">Fresh flowers, delivered tomorrow</h1>',
+    '<h1 class="">Fresh flowers, delivered today</h1>'
+  ),
+  'Fresh flowers, delivered today'
+);
+assert.strictEqual(
+  runtime.textOnlyReplacement(
+    '<h1>Fresh flowers, delivered tomorrow</h1>',
+    '<h1 class="">Fresh flowers, delivered today</h1>'
+  ),
+  'Fresh flowers, delivered today'
+);
+assert.strictEqual(
+  runtime.changeFromHtmlEdit(
+    'section.hero h1',
+    '<h1 class="">Old headline</h1>',
+    '<h1 class="">Fresh flowers, delivered today</h1>'
+  ).type,
+  'text'
+);
+assert.strictEqual(
+  runtime.textOnlyReplacement('<h1 class="hero">Hi</h1>', '<h1 class="hero" id="x">Hi there</h1>'),
+  null
+);
+assert.strictEqual(
+  runtime.textOnlyReplacement('<h1>Hi <em>there</em></h1>', '<h1>Hi <em>friend</em></h1>'),
+  null
+);
+assert.strictEqual(
+  runtime.changeFromHtmlEdit('h1', '<h1>Hi</h1>', '<h1 class="hero">Hi there</h1>').type,
+  'replace'
+);
+
+const editorSrc = require('fs').readFileSync(require('path').join(__dirname, '../snippet/editor.js'), 'utf8');
+assert.ok(editorSrc.includes('uniqueSelector(el, document)'));
+assert.ok(editorSrc.includes('changeFromHtmlEdit'));
+
 console.log('selector.test.js ok');

@@ -211,11 +211,14 @@ function addBadge(doc, text) {
   return el;
 }
 
-function applierFor(doc) {
-  return runtime.createApplier(doc, {
+function applierFor(doc, extra) {
+  return runtime.createApplier(doc, Object.assign({
     schedule: (fn) => fn(),
     MutationObserver: doc.MutationObserver,
-  });
+    // Missing selectors arm a ten-second watch. These tests do not wait for it.
+    setTimeout: () => 0,
+    clearTimeout: () => {},
+  }, extra || {}));
 }
 
 function styleTags(doc) {
@@ -311,7 +314,8 @@ function styleTags(doc) {
 }
 
 // A positional selector still changes only the element it matched at apply
-// time. Inserting a badge in front does not move the change.
+// time. Inserting a badge in front does not move the change. The mark keeps
+// a second pass from writing it again.
 {
   const doc = createDocument();
   const first = addBadge(doc, 'A');
@@ -331,7 +335,7 @@ function styleTags(doc) {
   doc.insertFirst(inserted);
   assert.strictEqual(inserted.textContent, 'N');
   assert.strictEqual(first.textContent, 'Z');
-  assert.strictEqual(first.getAttribute('data-pivit-applied'), null);
+  assert.ok(String(first.getAttribute('data-pivit-applied')).indexOf('pos:0') !== -1);
 }
 
 // Positional style stays an inline style. A class selector becomes CSS.
@@ -614,6 +618,8 @@ function styleTags(doc) {
     now: () => new Date('2026-01-15T22:00:00.000Z'),
     setInterval: () => 0,
     clearInterval: () => {},
+    setTimeout: () => 0,
+    clearTimeout: () => {},
   }).applyAll([
     { type: 'banner', text: 'First', countdown: 'none', position: 'top', sticky: true },
     { type: 'banner', text: 'Sale ends in', countdown: 'midnight', position: 'top', sticky: true },
@@ -645,5 +651,132 @@ assert.strictEqual(runtime.formatRemaining(-5), '0h 00m 00s');
 assert.strictEqual(runtime.bannerHref('javascript:alert(1)'), '');
 assert.strictEqual(runtime.bannerHref('https://cantsaythat.co.uk/sale'), 'https://cantsaythat.co.uk/sale');
 assert.strictEqual(runtime.bannerHref('/pricing'), '/pricing');
+
+function addHero(doc, text) {
+  const heading = doc.createElement('h1');
+  heading.textContent = text;
+  const section = doc.createElement('section');
+  section.className = 'hero';
+  section.attributes.class = 'hero';
+  section.appendChild(heading);
+  const main = doc.createElement('main');
+  main.className = 'wrap';
+  main.attributes.class = 'wrap';
+  main.appendChild(section);
+  const shell = doc.createElement('div');
+  shell.appendChild(main);
+  doc.body.appendChild(shell);
+  return heading;
+}
+
+function manualTimers() {
+  const timers = [];
+  return {
+    timers,
+    setTimeout(fn, ms) {
+      const entry = { fn, ms, cleared: false };
+      timers.push(entry);
+      return timers.length;
+    },
+    clearTimeout(id) {
+      if (timers[id - 1]) timers[id - 1].cleared = true;
+    },
+  };
+}
+
+// The element is not in the document when the experiment arrives. A positional
+// selector and a class chain both apply once it is rendered, and a second
+// pass does not write again. A positional match is not moved onto a node
+// inserted in front afterwards.
+{
+  const doc = createDocument();
+  const applier = applierFor(doc);
+  applier.applyAll([
+    { selector: 'div:nth-of-type(1) > main.wrap > section.hero > h1', type: 'text', value: 'Fresh flowers, delivered today' },
+  ], 'pos');
+  const heading = addHero(doc, 'Old headline');
+  assert.strictEqual(heading.textContent, 'Fresh flowers, delivered today');
+  assert.ok(String(heading.getAttribute('data-pivit-applied')).indexOf('pos:0') !== -1);
+  doc.notify([heading]);
+  assert.strictEqual(heading.textContent, 'Fresh flowers, delivered today');
+  const inserted = doc.createElement('h1');
+  inserted.textContent = 'Other';
+  heading.parentElement.insertBefore = undefined;
+  heading.parentElement.children.unshift(inserted);
+  inserted.parentElement = heading.parentElement;
+  doc.notify([inserted]);
+  assert.strictEqual(inserted.textContent, 'Other');
+  assert.strictEqual(heading.textContent, 'Fresh flowers, delivered today');
+}
+
+{
+  const doc = createDocument();
+  const applier = applierFor(doc);
+  const change = {
+    selector: 'section.hero h1',
+    type: 'js',
+    value: 'el.setAttribute("data-n", String(Number(el.getAttribute("data-n") || 0) + 1))',
+  };
+  applier.applyAll([change], 'late');
+  const heading = addHero(doc, 'Old headline');
+  assert.strictEqual(heading.getAttribute('data-n'), '1');
+  doc.notify([heading]);
+  assert.strictEqual(heading.getAttribute('data-n'), '1');
+  const again = doc.createElement('h1');
+  again.textContent = 'Second';
+  heading.parentElement.appendChild(again);
+  assert.strictEqual(again.getAttribute('data-n'), '1');
+}
+
+// Still missing after the watch window: the preview notice runs, and the
+// change is not applied to an element added after that. A route change
+// starts the watch again and applies it.
+{
+  const doc = createDocument();
+  const clock = manualTimers();
+  const missed = [];
+  const applier = runtime.createApplier(doc, {
+    schedule: (fn) => fn(),
+    MutationObserver: doc.MutationObserver,
+    watchLimitMs: runtime.WATCH_LIMIT_MS,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    onMissed: (change) => { missed.push(change.selector); },
+  });
+  applier.applyAll([
+    { selector: 'section.hero h1', type: 'text', value: 'Fresh flowers, delivered today' },
+    { selector: 'a.missing-cta', type: 'text', value: 'Shop' },
+  ], 'wait');
+  assert.strictEqual(clock.timers.length, 1);
+  assert.strictEqual(clock.timers[0].ms, 10000);
+  clock.timers[0].fn();
+  assert.deepStrictEqual(missed, ['a.missing-cta', 'section.hero h1']);
+  const heading = addHero(doc, 'Old headline');
+  assert.strictEqual(heading.textContent, 'Old headline');
+  applier.rewatchUnmatched();
+  assert.strictEqual(heading.textContent, 'Fresh flowers, delivered today');
+}
+
+// A match inside the window clears the wait, so the notice does not run.
+{
+  const doc = createDocument();
+  const clock = manualTimers();
+  const missed = [];
+  const applier = runtime.createApplier(doc, {
+    schedule: (fn) => fn(),
+    MutationObserver: doc.MutationObserver,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    onMissed: (change) => { missed.push(change.selector); },
+  });
+  applier.applyAll([
+    { selector: 'section.hero h1', type: 'text', value: 'Fresh flowers, delivered today' },
+  ], 'soon');
+  const heading = addHero(doc, 'Old headline');
+  assert.strictEqual(heading.textContent, 'Fresh flowers, delivered today');
+  assert.strictEqual(clock.timers[0].cleared, true);
+  clock.timers[0].fn();
+  assert.deepStrictEqual(missed, []);
+}
 
 console.log('apply.test.js ok');
