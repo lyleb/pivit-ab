@@ -126,13 +126,13 @@ assert.ok(index.includes('id="wizard-type"'));
 assert.ok(index.includes('value="demo">Demo</option>'));
 assert.ok(index.includes('UI.demoBadgeHtml()'));
 assert.ok(index.includes('This demo test counts test traffic only'));
-assert.ok(index.includes('href="/assets/pivit.css?v=8"'));
+assert.ok(index.includes('href="/assets/pivit.css?v=9"'));
 const demoCopyAt = index.indexOf('This demo test counts test traffic only');
 assert.ok(demoCopyAt > 0);
 assert.ok(!index.slice(demoCopyAt, demoCopyAt + 400).includes('not the verdict'));
 assert.ok(client.includes('UI.demoBadgeHtml()'));
 assert.ok(client.includes('UI.demoRuntimeNote()'));
-assert.ok(client.includes('href="/assets/pivit.css?v=8"'));
+assert.ok(client.includes('href="/assets/pivit.css?v=9"'));
 assert.ok(/\.badge\.demo\s*\{[^}]*text-transform:\s*none/.test(css));
 
 const schema = read('src/db/schema.sql');

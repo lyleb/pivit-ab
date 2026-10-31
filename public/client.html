@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>pivitlab — Viewer</title>
-<link rel="stylesheet" href="/assets/pivit.css?v=8">
+<link rel="stylesheet" href="/assets/pivit.css?v=9">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="/admin-ui.js"></script>
 <style>
@@ -160,6 +160,7 @@
         </div>
         <p class="muted">A visitor who converts more than once still counts as one conversion.</p>
         <div id="goal-breakdown" hidden></div>
+        <div id="goal-funnel" hidden></div>
         <div class="chart-wrap rate-wrap" id="rate-chart-wrap"><canvas id="rate-chart"></canvas></div>
         <div class="trend-row" id="trend-toggle">
           <span class="muted">Trend:</span>
@@ -610,6 +611,8 @@ function hideLiveResults() {
   document.getElementById('results-msg').textContent = '';
   const goals = document.getElementById('goal-breakdown');
   if (goals) { goals.hidden = true; goals.innerHTML = ''; }
+  const funnel = document.getElementById('goal-funnel');
+  if (funnel) { funnel.hidden = true; funnel.innerHTML = ''; }
   if (rateChart) { rateChart.destroy(); rateChart = null; }
   if (trendChart) { trendChart.destroy(); trendChart = null; }
   currentTrendSeries = [];
@@ -677,6 +680,7 @@ async function loadLiveResults(exp) {
   if (result.data.blinded || reading.mode === 'blind') {
     msgEl.textContent = '';
     note.innerHTML = '<p>Results stay hidden until the plan is reached.</p>';
+    renderClientFunnel(null);
     return;
   }
   msgEl.textContent = '';
@@ -697,6 +701,7 @@ async function loadLiveResults(exp) {
   }
   document.getElementById('results-live').hidden = false;
   renderClientGoals(result.data.goals, result.data.primary_goal);
+  renderClientFunnel(result.data.funnel);
   document.getElementById('results-body').innerHTML = results.map((item) => `<tr>
     <td>${UI.escapeHtml(item.variant_name)}</td>
     <td class="num">${item.visitors}</td>
@@ -760,6 +765,15 @@ function renderClientGoals(goals, primaryGoal) {
   }).join('');
   mount.hidden = false;
   mount.innerHTML = `<p class="muted">Each goal counts a visitor once, even if they trigger it several times.</p>${blocks}`;
+}
+
+function renderClientFunnel(funnel) {
+  const mount = document.getElementById('goal-funnel');
+  if (!mount) return;
+  const html = UI.renderFunnel ? UI.renderFunnel(funnel, { kind: 'viewer' }) : '';
+  if (!html) { mount.hidden = true; mount.innerHTML = ''; return; }
+  mount.hidden = false;
+  mount.innerHTML = html;
 }
 
 function boundedRate(visitors, conversions) {

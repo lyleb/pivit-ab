@@ -510,3 +510,49 @@ body.auth-page {
 @media (max-width: 640px) {
   .auth-card { width: 100%; padding: 28px 20px; }
 }
+
+.goal-funnel { margin-top: 22px; }
+.goal-funnel h2 { margin-bottom: 8px; }
+.funnel-variant {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.funnel-variant h3 { margin-top: 0; }
+.funnel-step {
+  display: grid;
+  grid-template-columns: 2.2em minmax(0, 1fr);
+  gap: 4px 12px;
+  align-items: start;
+  margin-top: 12px;
+}
+.funnel-num {
+  width: 2em;
+  height: 2em;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #262a38;
+  font-weight: 700;
+  font-size: 0.85em;
+}
+.funnel-label { font-weight: 650; }
+.funnel-count { margin-top: 2px; }
+.funnel-bar {
+  height: 8px;
+  margin-top: 6px;
+  background: #262a38;
+  border-radius: 99px;
+  overflow: hidden;
+}
+.funnel-bar > span { display: block; height: 100%; background: var(--mint); }
+.funnel-step.is-unmeasured .funnel-num { background: transparent; border: 1px dashed var(--border); color: var(--text-muted); }
+.funnel-step.is-unmeasured .funnel-count { color: var(--text-muted); }
+.g-step-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.g-step-actions button { min-height: var(--tap); margin: 0; }
+@media (max-width: 640px) {
+  .funnel-variant { padding: 12px; }
+  .funnel-count { overflow-wrap: anywhere; }
+}

@@ -5,9 +5,11 @@
 // js_condition waits until an expression the owner wrote is true.
 // manual waits until the page calls pivit.activate with this test's key.
 //
-// The two questions stay separate. element_selector asks whether this page
-// should run the test at all. activation asks when the counting starts.
-// A test that leaves activation on page_load is unchanged.
+// page_load, js_condition and manual still honour element_selector. An
+// element start uses activation_value only. A leftover element_selector is
+// cleared when that start is saved, and the snippet ignores it if it is
+// still stored, so a stale selector cannot block the test. A test that
+// leaves activation on page_load is unchanged.
 
 const { normaliseElementSelector } = require('./element-selector');
 

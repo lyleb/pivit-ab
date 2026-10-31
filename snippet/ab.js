@@ -42,18 +42,22 @@
  * or manual. page_load is the default and is today's behaviour, including
  * the four second element_selector wait when that field is set. element
  * waits for activation_value, a CSS selector, for as long as the visitor
- * stays on this page. It does not use the four second limit. js_condition
- * waits until activation_value, an expression, is true. It is checked when
- * the DOM changes and every 500 milliseconds, for up to 10 minutes. A throw
- * is caught. After three errors in a row, checking stops and one message is
- * written to the console. The page is not broken. manual waits until the
- * page calls pivit.activate with the experiment id, including a call queued
- * before this file loads as pivit.push(['activate', id]). The visitor is
- * assigned, the variant is applied, and the view and GA4
- * experience_impression are sent only after that start. A visitor who never
- * reaches it is not assigned and is not counted. If element_selector is also
- * set, both have to be satisfied, and the watch uses the activation's own
- * limit rather than four seconds. An invalid selector or an unreadable
+ * stays on this page. It does not use the four second limit.
+ * activation_value is the only selector for that start. A leftover
+ * element_selector is ignored, so a stale value cannot stop the test.
+ * js_condition waits until activation_value, an expression, is true. It is
+ * checked when the DOM changes and every 500 milliseconds, for up to 10
+ * minutes. A throw is caught. After three errors in a row, checking stops
+ * and one message is written to the console. The page is not broken. manual
+ * waits until the page calls pivit.activate with the experiment id,
+ * including a call queued before this file loads as
+ * pivit.push(['activate', id]). The visitor is assigned, the variant is
+ * applied, and the view and GA4 experience_impression are sent only after
+ * that start. A visitor who never reaches it is not assigned and is not
+ * counted. If element_selector is also set on a page_load, js_condition, or
+ * manual start, both have to be satisfied, and a delayed start uses its own
+ * limit rather than four seconds. An element start does not also require
+ * element_selector. An invalid selector or an unreadable
  * condition does not run the test. Leaving the address the test matched
  * cancels the watch. Preview shows the variant straight away and does not
  * wait. The editor (ab_edit) does not wait and does not count the visit.
@@ -903,7 +907,9 @@
 
   // present when the test may start. missing when a watch should continue.
   // invalid when a selector cannot be queried. page_load only looks at
-  // element_selector, which is what tests already do.
+  // element_selector, which is what tests already do. An element start
+  // looks only at activation_value. A leftover element_selector must not
+  // keep the visitor unassigned.
   function activationQuery(doc, experiment) {
     const activation = activationOf(experiment);
     if (activation.type === 'js_condition' || activation.type === 'manual') {
@@ -911,14 +917,9 @@
     }
     if (activation.type === 'element') {
       if (!activation.selector) return { state: 'invalid', selector: '' };
-      const act = elementQuery(doc, activation.selector);
-      if (act.state !== 'present') return act;
+      return elementQuery(doc, activation.selector);
     }
-    const extra = elementQuery(doc, elementSelectorOf(experiment));
-    if (activation.type === 'element' && extra.state === 'none') {
-      return { state: 'present', selector: activation.selector };
-    }
-    return extra;
+    return elementQuery(doc, elementSelectorOf(experiment));
   }
 
   // present once the start has happened and element_selector, when set, is
@@ -1282,7 +1283,7 @@
     const d = deps || {};
     const activation = activationOf(experiment);
     if (activation.type === 'element') {
-      return waitForActivation(d.document, activation.selector, elementSelectorOf(experiment), d).then(function (gate) {
+      return waitForActivation(d.document, activation.selector, '', d).then(function (gate) {
         if (!gate.found) return { exposed: false, reason: gate.reason, selector: gate.selector || activation.selector };
         if (typeof d.isStale === 'function' && d.isStale()) {
           return { exposed: false, reason: 'stale', selector: activation.selector };
@@ -1362,9 +1363,14 @@
     };
   }
 
-  // Preview does not wait for an element start. The older element rule
-  // still waits about four seconds, the same as before.
+  // Preview does not wait for an element start, and it does not wait for a
+  // leftover element_selector on that start either. The older element rule
+  // still waits about four seconds when the test starts on page load.
   function previewWaits(experiment) {
+    const activation = activationOf(experiment);
+    if (activation.type === 'element') {
+      return { activation: true, selector: '', waitForElementRule: false };
+    }
     const selector = elementSelectorOf(experiment);
     return {
       activation: activationDelays(experiment),
@@ -1384,8 +1390,8 @@
   function previewInfo(experiment, variant, gate) {
     const variantName = variant && variant.name ? variant.name : '';
     const experimentName = experiment && experiment.name ? experiment.name : '';
-    const selector = elementSelectorOf(experiment);
     const activation = activationOf(experiment);
+    const selector = activation.type === 'element' ? '' : elementSelectorOf(experiment);
     const found = !gate || gate.found !== false;
     if (selector && !found) {
       return '[ab] preview mode — not showing variant "' + variantName + '" for experiment "' + experimentName
@@ -1624,7 +1630,8 @@
           : null;
         if (match) {
           api.mountStepsNote(document, match.variant && match.variant.steps_note);
-          const selector = api.elementSelectorOf(match.experiment);
+          const previewActivation = api.activationOf(match.experiment);
+          const selector = previewActivation.type === 'element' ? '' : api.elementSelectorOf(match.experiment);
           const query = api.elementQuery(document, selector);
           if (query.state === 'present' || query.state === 'none') {
             applyVariantChanges(match.variant);

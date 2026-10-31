@@ -143,7 +143,7 @@ A single-page app still checks the address. If the visitor moves to a page the t
 
 Preview shows the variant straight away, so you can look at it without waiting for the element. That visit is not counted. The editor is unchanged. A visit with `?pivit_qa=1` is still marked as test traffic, and only once the element has appeared.
 
-If you set both the element rule and this element appears, both have to be on the page. pivitlab keeps watching for the whole visit, rather than giving up after four seconds.
+**This element appears** uses that selector only. A selector saved earlier under **Only run when this element is on the page** is not used, and saving this start clears it. The older four-second rule still applies when the test starts as the page loads. A JavaScript condition, or `pivit.activate`, can still require that older element as well.
 
 ## JavaScript condition
 
@@ -255,6 +255,18 @@ window.dataLayer.push({ event: 'checkout_step', step_name: 'confirmation' });
 ```
 
 The push is left as it is, so Tag Manager still sees it. pivitlab does not count its own `experience_impression` event.
+
+## Funnel steps
+
+You can mark up to five goals as ordered steps. On the results page, each variant shows a funnel: how many visitors reached each step, that count as a share of the first counted step, and the drop-off between steps.
+
+A visitor counts at a step only if they reached that step and every earlier counted step first, in order. The same time or later still counts. Each visitor counts once. An early hit that is out of order does not block a later hit of the same step that is in order.
+
+A checkout can use custom events. The page can send `checkout_step` with `step_name` set to basket, details, payment and confirmation. Mark four custom goals, with **Only when…** `step_name` equal to those names, as steps 1 to 4. Element goals such as `#step-basket`, `#step-details`, `#step-payment` and `#step-confirmation` work the same way. The buttons on that page are `#continue-to-details`, `#continue-to-payment` and `#pay-now`.
+
+If the test does not start on page load, visitors are not in a variant until it starts. A step with no variant data is shown as **No variant data**. It is left out of the order, and it is not a 100% drop-off. A test that starts when the page loads still requires every earlier step.
+
+Visits with `?pivit_qa=1` stay out of the funnel unless you include test traffic. The test-traffic panel counts only test traffic, and opening it is not an early look.
 
 ## Send to GA4
 

@@ -73,6 +73,19 @@ assert.strictEqual(runtime.activationQuery({ querySelector: () => { throw new Er
   activation_type: 'element',
   activation_value: '::bad',
 }).state, 'invalid');
+assert.strictEqual(runtime.activationQuery({
+  querySelector(selector) { return selector === '#step-payment' ? { nodeType: 1 } : null; },
+}, {
+  activation_type: 'element',
+  activation_value: '#step-payment',
+  element_selector: '#payment-step',
+}).state, 'present');
+assert.strictEqual(runtime.activationQuery({
+  querySelector() { return null; },
+}, {
+  activation_type: 'page_load',
+  element_selector: '#payment-step',
+}).state, 'missing');
 
 const shown = runtime.previewInfo(
   { name: 'Checkout', activation_type: 'element', activation_value: '#step-payment' },
@@ -89,7 +102,23 @@ assert.strictEqual(runtime.previewWaits({
 assert.strictEqual(runtime.previewWaits({
   activation_type: 'element',
   activation_value: '#step-payment',
-  element_selector: '#pay-now',
+  element_selector: '#payment-step',
+}).waitForElementRule, false);
+const stalePreview = runtime.previewInfo(
+  {
+    name: 'Checkout',
+    activation_type: 'element',
+    activation_value: '#step-payment',
+    element_selector: '#payment-step',
+  },
+  { name: 'Offer' },
+  { found: true }
+);
+assert.ok(stalePreview.includes('#step-payment'));
+assert.ok(!stalePreview.includes('#payment-step'));
+assert.strictEqual(runtime.previewWaits({
+  activation_type: 'page_load',
+  element_selector: '#payment-step',
 }).waitForElementRule, true);
 const plain = runtime.previewInfo({ name: 'Headline' }, { name: 'Control' }, { found: true });
 assert.strictEqual(
@@ -246,23 +275,47 @@ async function main() {
   assert.strictEqual(neverSettled, false);
   assert.deepStrictEqual(neverCalls, []);
 
-  const both = harness();
-  const bothCalls = [];
-  const bothPending = runtime.exposeWhenReady(experiment({ element_selector: '#pay-now' }), {
-    document: both.doc,
-    MutationObserver: both.MutationObserver,
-    setTimer() { throw new Error('both rules wait for the visit, not four seconds'); },
-    onExpose() { bothCalls.push('expose'); },
+  const stale = harness();
+  const staleCalls = [];
+  const stalePending = runtime.exposeWhenReady(experiment({ element_selector: '#payment-step' }), {
+    document: stale.doc,
+    MutationObserver: stale.MutationObserver,
+    setTimer() { throw new Error('an element start must not wait for a leftover selector'); },
+    onExpose() { staleCalls.push('expose'); },
   });
-  both.setSelectors({ '#step-payment': { nodeType: 1 } });
-  both.notify();
-  await Promise.resolve();
-  assert.deepStrictEqual(bothCalls, []);
-  both.setSelectors({ '#step-payment': { nodeType: 1 }, '#pay-now': { nodeType: 1 } });
-  both.notify();
-  const bothResult = await bothPending;
-  assert.strictEqual(bothResult.exposed, true);
-  assert.deepStrictEqual(bothCalls, ['expose']);
+  stale.setSelectors({ '#step-payment': { nodeType: 1 } });
+  stale.notify();
+  const staleResult = await stalePending;
+  assert.strictEqual(staleResult.exposed, true);
+  assert.deepStrictEqual(staleCalls, ['expose']);
+
+  const pageLoad = harness();
+  const pageLoadCalls = [];
+  const pageLoadMissed = await runtime.exposeWhenReady({
+    id: 'exp-legacy',
+    activation_type: 'page_load',
+    element_selector: '#payment-step',
+  }, {
+    document: pageLoad.doc,
+    MutationObserver: pageLoad.MutationObserver,
+    setTimer(fn) { fn(); return 0; },
+    onExpose() { pageLoadCalls.push('expose'); },
+  });
+  assert.strictEqual(pageLoadMissed.exposed, false);
+  assert.deepStrictEqual(pageLoadCalls, []);
+  pageLoad.setSelectors({ '#payment-step': { nodeType: 1 } });
+  const pageLoadFound = await runtime.exposeWhenReady({
+    id: 'exp-legacy',
+    activation_type: 'page_load',
+    element_selector: '#payment-step',
+  }, {
+    document: pageLoad.doc,
+    MutationObserver: pageLoad.MutationObserver,
+    setTimer() { throw new Error('a selector that is already on the page must not wait'); },
+    onExpose() { pageLoadCalls.push('expose'); },
+  });
+  assert.strictEqual(pageLoadFound.exposed, true);
+  assert.deepStrictEqual(pageLoadCalls, ['expose']);
 
   const invalidCalls = [];
   const invalid = await runtime.exposeWhenReady(experiment({ activation_value: '::bad' }), {
@@ -915,7 +968,13 @@ async function main() {
   assert.ok(helpDoc.includes("document.getElementById('step-payment')"));
   assert.ok(helpDoc.includes("pivit.activate('YOUR_TEST_KEY')"));
   const migrateFile = fs.readFileSync(path.join(__dirname, '../src/db/migrate.js'), 'utf8');
-  assert.ok(!migrateFile.includes("version: '022'"));
+  assert.ok(migrateFile.includes("{ version: '022', name: 'element-activation-selector', run: applyElementActivationSelector }"));
+  assert.ok(help.includes('uses that selector only'));
+  assert.ok(helpDoc.includes('uses that selector only'));
+  assert.ok(help.includes('#step-details'));
+  assert.ok(helpDoc.includes('#step-details'));
+  assert.ok(!help.includes('both have to be on the page'));
+  assert.ok(!helpDoc.includes('both have to be on the page'));
 
   console.log('activation tests passed');
 }

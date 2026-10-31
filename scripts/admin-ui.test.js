@@ -213,6 +213,31 @@ assert.strictEqual(
 );
 assert.strictEqual(ui.goalResultLabel({ type: 'custom', label: 'Custom event', detail: 'payment_complete' }), 'Custom event payment_complete');
 assert.strictEqual(ui.describeGoal({ type: 'custom', name: 'Paid', event: 'payment_complete' }), 'Paid → custom event payment_complete');
+assert.strictEqual(ui.describeGoal({ type: 'custom', name: 'Details', event: 'checkout_step', step: 2 }), 'Details → custom event checkout_step · funnel step 2');
+const funnelHtml = ui.renderFunnel({
+  activation_delays: true,
+  baseline_step: 3,
+  steps: [
+    { step: 1, key: 'basket', label: 'Basket' },
+    { step: 2, key: 'details', label: 'Details' },
+    { step: 3, key: 'payment', label: 'Payment' },
+  ],
+  variants: [{
+    variant_name: 'Control',
+    steps: [
+      { step: 1, label: 'Basket', visitors: null, unmeasured: true, rate_of_step_1: null, drop_off: null },
+      { step: 2, label: 'Details', visitors: null, unmeasured: true, rate_of_step_1: null, drop_off: null },
+      { step: 3, label: 'Payment', visitors: 4, unmeasured: false, rate_of_step_1: 100, drop_off: null },
+    ],
+  }],
+}, { kind: 'owner' });
+assert.ok(funnelHtml.includes('No variant data'));
+assert.ok(funnelHtml.includes('Details'));
+assert.ok(funnelHtml.includes('Not counted. Visitors were not in a variant yet.'));
+assert.ok(funnelHtml.includes('Include test traffic'));
+assert.ok(funnelHtml.includes('of step 3'));
+assert.ok(!funnelHtml.includes('100% drop-off'));
+assert.strictEqual(ui.renderFunnel({ steps: [] }, { kind: 'viewer' }), '');
 assert.strictEqual(
   ui.describeGoal({
     type: 'custom',

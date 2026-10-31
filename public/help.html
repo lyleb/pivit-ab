@@ -40,6 +40,7 @@
     <li><a href="#manual-activation">When the page calls pivit.activate</a></li>
     <li><a href="#element-goal">When this element appears</a></li>
     <li><a href="#custom-event">Custom event</a></li>
+    <li><a href="#funnel-steps">Funnel steps</a></li>
     <li><a href="#ga4">Send to GA4</a></li>
   </ol>
 
@@ -160,7 +161,7 @@
   <p><strong>This element appears</strong> waits for a CSS selector for the whole visit. The visitor is counted, the variant is shown, and the view is sent only after that element is on the page. A visitor who never sees it is not counted. A checkout can use <code>#step-payment</code> so only people who reach payment are in the test. The four-second wait does not apply here.</p>
   <p>A single-page app still checks the address. If the visitor moves to a page the test does not match before the element appears, they are not counted. If the address stays the same, as on a checkout that swaps the step in place, pivitlab keeps watching until they leave.</p>
   <p>Preview shows the variant straight away, so you can look at it without waiting for the element. That visit is not counted. The editor is unchanged. A visit with <code>?pivit_qa=1</code> is still marked as test traffic, and only once the element has appeared.</p>
-  <p>If you set both the element rule and this element appears, both have to be on the page. pivitlab keeps watching for the whole visit, rather than giving up after four seconds.</p>
+  <p><strong>This element appears</strong> uses that selector only. A selector saved earlier under <strong>Only run when this element is on the page</strong> is not used, and saving this start clears it. The older four-second rule still applies when the test starts as the page loads. A JavaScript condition, or <code>pivit.activate</code>, can still require that older element as well.</p>
 
   <h2 id="js-condition">JavaScript condition</h2>
   <p><strong>A JavaScript condition is true</strong> waits until an expression you write is true. For example, <code>window.checkout &amp;&amp; checkout.step === 3</code>.</p>
@@ -214,6 +215,13 @@ window.dataLayer.push({ event: 'payment_complete' });</code></pre>
   <pre><code>window.dataLayer = window.dataLayer || [];
 window.dataLayer.push({ event: 'checkout_step', step_name: 'confirmation' });</code></pre>
   <p>The push is left as it is, so Tag Manager still sees it. pivitlab does not count its own <code>experience_impression</code> event.</p>
+
+  <h2 id="funnel-steps">Funnel steps</h2>
+  <p>You can mark up to five goals as ordered steps. On the results page, each variant shows a funnel: how many visitors reached each step, that count as a share of the first counted step, and the drop-off between steps.</p>
+  <p>A visitor counts at a step only if they reached that step and every earlier counted step first, in order. The same time or later still counts. Each visitor counts once. An early hit that is out of order does not block a later hit of the same step that is in order.</p>
+  <p>A checkout can use custom events. The page can send <code>checkout_step</code> with <code>step_name</code> set to basket, details, payment and confirmation. Mark four custom goals, with <strong>Only when…</strong> <code>step_name</code> equal to those names, as steps 1 to 4. Element goals such as <code>#step-basket</code>, <code>#step-details</code>, <code>#step-payment</code> and <code>#step-confirmation</code> work the same way. The buttons on that page are <code>#continue-to-details</code>, <code>#continue-to-payment</code> and <code>#pay-now</code>.</p>
+  <p>If the test does not start on page load, visitors are not in a variant until it starts. A step with no variant data is shown as <strong>No variant data</strong>. It is left out of the order, and it is not a 100% drop-off. A test that starts when the page loads still requires every earlier step.</p>
+  <p>Visits with <code>?pivit_qa=1</code> stay out of the funnel unless you include test traffic. The test-traffic panel counts only test traffic, and opening it is not an early look.</p>
 
   <h2 id="ga4">Send to GA4</h2>
   <p>On Home, each site has <strong>Send to GA4</strong> and a box for that site's GA4 measurement ID. The ID starts with G-. This is included on paid plans. pivitlab has no priced plans yet. Paid plan is the switch that lets an agency use Send to GA4. A Platform admin sets it on Home, on the Send to GA4 card. That card also says how many sites have Send to GA4 switched on.</p>

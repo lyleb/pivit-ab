@@ -37,6 +37,7 @@ async function main() {
         status TEXT NOT NULL DEFAULT 'draft',
         goals JSONB NOT NULL DEFAULT '[]',
         goals_scope TEXT NOT NULL DEFAULT 'shared',
+        activation_type TEXT NOT NULL DEFAULT 'page_load',
         goals_migrated BOOLEAN NOT NULL DEFAULT false,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
@@ -283,6 +284,87 @@ async function main() {
     assert.strictEqual(rolled.rows[0].host, 'pivit.click');
     assert.strictEqual(rolled.rows[0].referrer_origin, 'https://cantsaythat.co.uk');
     assert.strictEqual(Number(rolled.rows[0].hit_count), 2);
+
+    const funnelExp = await db.query(
+      `INSERT INTO experiments (name, url_match, status, goals, goals_scope, activation_type)
+       VALUES ('Checkout', '/play', 'running', $1::jsonb, 'shared', 'page_load') RETURNING id`,
+      [JSON.stringify([
+        { id: 'basket', type: 'custom', event: 'checkout_step', name: 'Basket', step: 1, when: [{ key: 'step_name', value: 'basket' }] },
+        { id: 'details', type: 'custom', event: 'checkout_step', name: 'Details', step: 2, when: [{ key: 'step_name', value: 'details' }] },
+        { id: 'payment', type: 'element', selector: '#step-payment', name: 'Payment', step: 3 },
+        { id: 'confirmation', type: 'custom', event: 'checkout_step', name: 'Confirmation', step: 4, when: [{ key: 'step_name', value: 'confirmation' }] },
+      ])]
+    );
+    const funnelId = funnelExp.rows[0].id;
+    const funnelControl = await db.query(
+      `INSERT INTO variants (experiment_id, name, traffic_split) VALUES ($1, 'Control', 50) RETURNING id`,
+      [funnelId]
+    );
+    const funnelOffer = await db.query(
+      `INSERT INTO variants (experiment_id, name, traffic_split) VALUES ($1, 'Offer', 50) RETURNING id`,
+      [funnelId]
+    );
+    async function funnelTrack(variantId, visitorId, eventType, goalId, at, flags) {
+      await db.query(
+        `INSERT INTO events (experiment_id, variant_id, visitor_id, event_type, goal_id, created_at, is_test, excluded_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [funnelId, variantId, visitorId, eventType, goalId, at, !!(flags && flags.isTest), flags && flags.excluded ? at : null]
+      );
+    }
+    const funnelControlId = funnelControl.rows[0].id;
+    await funnelTrack(funnelControlId, 'a', 'view', null, '2026-10-01T10:00:00Z');
+    await funnelTrack(funnelControlId, 'a', 'convert', 'basket', '2026-10-01T10:01:00Z');
+    await funnelTrack(funnelControlId, 'a', 'convert', 'details', '2026-10-01T10:02:00Z');
+    await funnelTrack(funnelControlId, 'b', 'view', null, '2026-10-01T10:00:00Z');
+    await funnelTrack(funnelControlId, 'b', 'convert', 'basket', '2026-10-01T10:01:00Z');
+    await funnelTrack(funnelControlId, 'qa', 'view', null, '2026-10-01T10:00:00Z', { isTest: true });
+    await funnelTrack(funnelControlId, 'qa', 'convert', 'basket', '2026-10-01T10:01:00Z', { isTest: true });
+    await funnelTrack(funnelControlId, 'qa', 'convert', 'details', '2026-10-01T10:02:00Z', { isTest: true });
+    await funnelTrack(funnelControlId, 'qa', 'convert', 'payment', '2026-10-01T10:03:00Z', { isTest: true });
+    await funnelTrack(funnelControlId, 'bot', 'view', null, '2026-10-01T10:00:00Z', { excluded: true });
+    await funnelTrack(funnelControlId, 'bot', 'convert', 'basket', '2026-10-01T10:01:00Z', { excluded: true });
+    await funnelTrack(funnelOffer.rows[0].id, 'c', 'view', null, '2026-10-01T11:00:00Z');
+    const liveFunnel = await metrics.getFunnel(funnelId);
+    const liveControl = liveFunnel.variants.find((row) => row.variant_id === funnelControlId);
+    assert.deepStrictEqual(liveControl.steps.map((row) => row.visitors), [2, 1, 0, 0]);
+    assert.strictEqual(liveControl.steps[1].label, 'Details');
+    assert.strictEqual(liveControl.steps[1].drop_off, 50);
+    const withTest = await metrics.getFunnel(funnelId, { includeTest: true });
+    const testControl = withTest.variants.find((row) => row.variant_id === funnelControlId);
+    assert.strictEqual(testControl.steps[0].visitors, 3);
+    assert.strictEqual(testControl.steps[2].visitors, 1);
+    const testOnly = await metrics.getFunnel(funnelId, { testOnly: true });
+    const onlyControl = testOnly.variants.find((row) => row.variant_id === funnelControlId);
+    assert.deepStrictEqual(onlyControl.steps.map((row) => row.visitors), [1, 1, 1, 0]);
+
+    const lateExp = await db.query(
+      `INSERT INTO experiments (name, url_match, status, goals, goals_scope, activation_type)
+       VALUES ('Late', '/play', 'running', $1::jsonb, 'shared', 'element') RETURNING id`,
+      [JSON.stringify([
+        { id: 'basket', type: 'custom', event: 'checkout_step', name: 'Basket', step: 1 },
+        { id: 'details', type: 'custom', event: 'checkout_step', name: 'Details', step: 2 },
+        { id: 'payment', type: 'element', selector: '#step-payment', name: 'Payment', step: 3 },
+      ])]
+    );
+    const lateId = lateExp.rows[0].id;
+    const lateVariant = await db.query(
+      `INSERT INTO variants (experiment_id, name, traffic_split) VALUES ($1, 'Control', 100) RETURNING id`,
+      [lateId]
+    );
+    await db.query(
+      `INSERT INTO events (experiment_id, variant_id, visitor_id, event_type, goal_id, created_at)
+       VALUES ($1, $2, 'payer', 'view', null, '2026-10-01T12:00:00Z'),
+              ($1, $2, 'payer', 'convert', 'payment', '2026-10-01T12:03:00Z')`,
+      [lateId, lateVariant.rows[0].id]
+    );
+    const lateFunnel = await metrics.getFunnel(lateId);
+    assert.strictEqual(lateFunnel.activation_type, 'element');
+    assert.strictEqual(lateFunnel.variants[0].steps[0].unmeasured, true);
+    assert.strictEqual(lateFunnel.variants[0].steps[1].unmeasured, true);
+    assert.strictEqual(lateFunnel.variants[0].steps[1].label, 'Details');
+    assert.strictEqual(lateFunnel.variants[0].steps[1].visitors, null);
+    assert.strictEqual(lateFunnel.variants[0].steps[2].visitors, 1);
+    assert.strictEqual(lateFunnel.baseline_step, 3);
 
     console.log('metrics-db tests passed');
   } finally {

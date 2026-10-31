@@ -145,5 +145,112 @@ assert.ok(clientSrc.includes('getPrimaryVariantData'));
 assert.ok(clientSrc.includes('getTimeseries'));
 assert.ok(!resultsSrc.includes("COUNT(*) FILTER (WHERE e.event_type = 'convert')"));
 assert.ok(!clientSrc.includes("COUNT(*) FILTER (WHERE e.event_type = 'convert')"));
+assert.ok(resultsSrc.includes('getFunnel'));
+assert.ok(resultsSrc.includes('funnel: visible ? funnel : null'));
+assert.ok(clientSrc.includes('getFunnel'));
+assert.ok(clientSrc.includes('funnel: visible ? funnel : null'));
+
+const stepGoals = [
+  { key: 'basket', type: 'custom', label: 'Basket', step: 1 },
+  { key: 'details', type: 'custom', label: 'Details', step: 2 },
+  { key: 'payment', type: 'custom', label: 'Payment', step: 3 },
+  { key: 'confirmation', type: 'custom', label: 'Confirmation', step: 4 },
+];
+
+function funnelEvents() {
+  const rows = [];
+  for (let i = 1; i <= 8; i += 1) {
+    const id = 'v' + i;
+    rows.push(event({ visitor_id: id, event_type: 'view', created_at: '2026-10-01T10:00:00Z' }));
+    rows.push(event({ visitor_id: id, event_type: 'convert', goal_id: 'basket', created_at: '2026-10-01T10:01:00Z' }));
+    if (i <= 6) rows.push(event({ visitor_id: id, event_type: 'convert', goal_id: 'details', created_at: '2026-10-01T10:02:00Z' }));
+    if (i <= 4) rows.push(event({ visitor_id: id, event_type: 'convert', goal_id: 'payment', created_at: '2026-10-01T10:03:00Z' }));
+    if (i <= 2) rows.push(event({ visitor_id: id, event_type: 'convert', goal_id: 'confirmation', created_at: '2026-10-01T10:04:00Z' }));
+  }
+  rows.push(event({ visitor_id: 'v1', event_type: 'convert', goal_id: 'basket', created_at: '2026-10-01T10:05:00Z' }));
+  rows.push(event({ visitor_id: 'outsider', event_type: 'convert', goal_id: 'basket', created_at: '2026-10-01T10:01:00Z' }));
+  rows.push(event({
+    variant_id: 'v2',
+    variant_name: 'Offer',
+    visitor_id: 'o1',
+    event_type: 'view',
+    created_at: '2026-10-01T11:00:00Z',
+  }));
+  rows.push(event({
+    variant_id: 'v2',
+    variant_name: 'Offer',
+    visitor_id: 'o1',
+    event_type: 'convert',
+    goal_id: 'basket',
+    created_at: '2026-10-01T11:01:00Z',
+  }));
+  return rows;
+}
+
+const happy = metrics.summariseFunnel(funnelEvents(), stepGoals, { activationType: 'page_load' });
+assert.strictEqual(happy.ordered, true);
+assert.strictEqual(happy.baseline_step, 1);
+assert.strictEqual(happy.activation_delays, false);
+const controlFunnel = happy.variants.find((row) => row.variant_id === 'v1');
+assert.deepStrictEqual(controlFunnel.steps.map((row) => row.visitors), [8, 6, 4, 2]);
+assert.deepStrictEqual(controlFunnel.steps.map((row) => row.rate_of_step_1), [100, 75, 50, 25]);
+assert.deepStrictEqual(controlFunnel.steps.map((row) => row.drop_off), [null, 25, 33.33, 50]);
+assert.deepStrictEqual(controlFunnel.steps.map((row) => row.unmeasured), [false, false, false, false]);
+const offerFunnel = happy.variants.find((row) => row.variant_id === 'v2');
+assert.strictEqual(offerFunnel.steps[0].visitors, 1);
+assert.strictEqual(offerFunnel.steps[1].visitors, 0);
+
+const disorder = metrics.summariseFunnel([
+  event({ visitor_id: 'late', event_type: 'view', created_at: '2026-10-01T10:00:00Z' }),
+  event({ visitor_id: 'late', event_type: 'convert', goal_id: 'details', created_at: '2026-10-01T10:01:00Z' }),
+  event({ visitor_id: 'late', event_type: 'convert', goal_id: 'basket', created_at: '2026-10-01T10:02:00Z' }),
+  event({ visitor_id: 'late', event_type: 'convert', goal_id: 'details', created_at: '2026-10-01T10:03:00Z' }),
+], stepGoals, { activationType: 'page_load' });
+assert.deepStrictEqual(disorder.variants[0].steps.map((row) => row.visitors), [1, 1, 0, 0]);
+
+const sameTime = metrics.summariseFunnel([
+  event({ visitor_id: 'same', event_type: 'view', created_at: '2026-10-01T10:00:00Z' }),
+  event({ visitor_id: 'same', event_type: 'convert', goal_id: 'basket', created_at: '2026-10-01T10:01:00Z' }),
+  event({ visitor_id: 'same', event_type: 'convert', goal_id: 'details', created_at: '2026-10-01T10:01:00Z' }),
+], stepGoals, { activationType: 'page_load' });
+assert.strictEqual(sameTime.variants[0].steps[1].visitors, 1);
+
+const skipped = metrics.summariseFunnel([
+  event({ visitor_id: 'gap', event_type: 'view', created_at: '2026-10-01T10:00:00Z' }),
+  event({ visitor_id: 'gap', event_type: 'convert', goal_id: 'basket', created_at: '2026-10-01T10:01:00Z' }),
+  event({ visitor_id: 'gap', event_type: 'convert', goal_id: 'payment', created_at: '2026-10-01T10:03:00Z' }),
+], stepGoals, { activationType: 'page_load' });
+assert.deepStrictEqual(skipped.variants[0].steps.map((row) => row.visitors), [1, 0, 0, 0]);
+
+const empty = metrics.summariseFunnel([], [{ key: 'cta', type: 'click', label: 'CTA' }], { activationType: 'page_load' });
+assert.deepStrictEqual(empty.steps, []);
+assert.deepStrictEqual(empty.variants, []);
+
+const strictEmpty = metrics.summariseFunnel([
+  event({ visitor_id: 'pay', event_type: 'view', created_at: '2026-10-01T10:00:00Z' }),
+  event({ visitor_id: 'pay', event_type: 'convert', goal_id: 'payment', created_at: '2026-10-01T10:03:00Z' }),
+], stepGoals, { activationType: 'page_load' });
+assert.strictEqual(strictEmpty.variants[0].steps[0].unmeasured, false);
+assert.strictEqual(strictEmpty.variants[0].steps[2].visitors, 0);
+
+const delayed = metrics.summariseFunnel([
+  event({ visitor_id: 'pay', event_type: 'view', created_at: '2026-10-01T10:00:00Z' }),
+  event({ visitor_id: 'pay', event_type: 'convert', goal_id: 'payment', created_at: '2026-10-01T10:03:00Z' }),
+  event({ visitor_id: 'pay', event_type: 'convert', goal_id: 'confirmation', created_at: '2026-10-01T10:04:00Z' }),
+  event({ visitor_id: 'only-pay', event_type: 'view', created_at: '2026-10-01T11:00:00Z' }),
+  event({ visitor_id: 'only-pay', event_type: 'convert', goal_id: 'payment', created_at: '2026-10-01T11:03:00Z' }),
+], stepGoals, { activationType: 'element' });
+assert.strictEqual(delayed.activation_delays, true);
+assert.strictEqual(delayed.baseline_step, 3);
+assert.strictEqual(delayed.variants[0].steps[0].unmeasured, true);
+assert.strictEqual(delayed.variants[0].steps[0].visitors, null);
+assert.strictEqual(delayed.variants[0].steps[1].unmeasured, true);
+assert.strictEqual(delayed.variants[0].steps[1].label, 'Details');
+assert.strictEqual(delayed.variants[0].steps[2].visitors, 2);
+assert.strictEqual(delayed.variants[0].steps[2].rate_of_step_1, 100);
+assert.strictEqual(delayed.variants[0].steps[3].visitors, 1);
+assert.strictEqual(delayed.variants[0].steps[3].rate_of_step_1, 50);
+assert.strictEqual(delayed.variants[0].steps[3].drop_off, 50);
+assert.ok(delayed.rule.includes('no variant data'));
 
 console.log('metrics tests passed');

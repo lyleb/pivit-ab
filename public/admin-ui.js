@@ -279,10 +279,17 @@
     return parts.length ? ' where ' + parts.join(' and ') : '';
   }
 
+  function funnelStepSuffix(goal) {
+    const step = Number(goal && goal.step);
+    if (!Number.isInteger(step) || step < 1 || step > 5) return '';
+    return ' · funnel step ' + step;
+  }
+
   function describeGoal(goal) {
     if (!goal) return '';
     const type = goal.type || 'click';
     const label = goal.name || goal.id || (type === 'url' ? 'Visited URL' : (type === 'element' ? 'Element appears' : (type === 'custom' ? 'Custom event' : 'Click')));
+    let text = label;
     if (type === 'url') {
       const target = goal.url_match || '';
       const how = {
@@ -291,19 +298,19 @@
         starts_with: 'starts with',
         regex: 'matches',
       }[goal.match || 'contains'] || 'contains';
-      return target ? `${label} → URL ${how} ${target}` : label;
-    }
-    if (type === 'element') {
+      text = target ? `${label} → URL ${how} ${target}` : label;
+    } else if (type === 'element') {
       const target = goal.selector || goal.detail || '';
-      return target ? `${label} → element appears ${target}` : label;
-    }
-    if (type === 'custom') {
+      text = target ? `${label} → element appears ${target}` : label;
+    } else if (type === 'custom') {
       const eventName = goal.event || goal.detail || '';
       const where = customWhenText(goal.when);
-      return eventName ? `${label} → custom event ${eventName}${where}` : label;
+      text = eventName ? `${label} → custom event ${eventName}${where}` : label;
+    } else {
+      const target = goal.selector || '';
+      text = target ? `${label} → ${target}` : label;
     }
-    const target = goal.selector || '';
-    return target ? `${label} → ${target}` : label;
+    return text + funnelStepSuffix(goal);
   }
 
   // Results headings name the type, so a click, a URL and an element that
@@ -1191,7 +1198,7 @@
 
   const ACTIVATION_HINTS = {
     page_load: 'The test starts when the address matches. This is the usual setting, and it is how tests work today.',
-    element: 'pivitlab watches for this element for the whole visit. The visitor is counted only after it appears. Visitors who never see it are left out.',
+    element: 'pivitlab watches for this element for the whole visit. The visitor is counted only after it appears. Visitors who never see it are left out. A selector saved under Only run when this element is on the page is not used for this start.',
     js_condition: 'pivitlab checks this expression when the page changes, and every half a second, for up to 10 minutes. A condition that throws does not break the page. After repeated errors, checking stops and one message is written to the console. Only someone who can write page JavaScript can set or change this. pivitlab checks that when you save.',
     manual: 'The visitor is counted only after the page calls pivit.activate with this test\'s key. The call can be queued before the snippet loads. Preview still shows the variant straight away. Test traffic rules are unchanged.',
   };
@@ -1217,6 +1224,69 @@
       '',
       "pivit.activate('" + key + "');",
     ].join('\n');
+  }
+
+  function funnelPercent(value) {
+    if (value == null || !Number.isFinite(Number(value))) return '';
+    const n = Number(value);
+    return n.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1') + '%';
+  }
+
+  // kind is owner, viewer, or test. An empty step list renders nothing.
+  // Unmeasured steps are shown, and they are not drawn as a drop-off.
+  function renderFunnel(funnel, options) {
+    const opts = options || {};
+    if (!funnel || !Array.isArray(funnel.steps) || funnel.steps.length === 0) return '';
+    const kind = opts.kind || 'owner';
+    const baseline = funnel.baseline_step;
+    const notes = [];
+    if (kind === 'test') {
+      notes.push('Test traffic only. Opening this is not an early look.');
+    } else if (kind === 'owner') {
+      notes.push('Each visitor counts once, and only if they reached the earlier counted steps first. Visits with ?pivit_qa=1 are left out unless you tick Include test traffic.');
+      notes.push('The new and returning filter does not change this funnel.');
+    } else {
+      notes.push('Each visitor counts once, and only if they reached the earlier counted steps first.');
+    }
+    const anyUnmeasured = (funnel.variants || []).some((variant) =>
+      (variant.steps || []).some((row) => row.unmeasured)
+    );
+    if (funnel.activation_delays && anyUnmeasured) {
+      notes.push('This test does not start on page load. A step with no variant data is left out, because visitors were not in a variant yet.');
+    }
+    const cards = (funnel.variants || []).map((variant) => {
+      const rows = (variant.steps || []).map((row) => {
+        if (row.unmeasured) {
+          return `<div class="funnel-step is-unmeasured">
+            <div class="funnel-num">${escapeHtml(String(row.step))}</div>
+            <div>
+              <div class="funnel-label">${escapeHtml(row.label || '')}</div>
+              <div class="funnel-count">No variant data</div>
+              <p class="hint">Not counted. Visitors were not in a variant yet.</p>
+            </div>
+          </div>`;
+        }
+        const rate = funnelPercent(row.rate_of_step_1);
+        const ofStep = baseline != null && rate
+          ? ` <span class="hint">of step ${escapeHtml(String(baseline))}</span>`
+          : '';
+        const width = Math.max(0, Math.min(100, Number(row.rate_of_step_1) || 0));
+        const drop = row.drop_off == null
+          ? ''
+          : `<p class="hint">${escapeHtml(funnelPercent(row.drop_off))} drop-off${row.drop_off_count == null ? '' : ' (' + escapeHtml(String(row.drop_off_count)) + ')'}</p>`;
+        return `<div class="funnel-step">
+          <div class="funnel-num">${escapeHtml(String(row.step))}</div>
+          <div>
+            <div class="funnel-label">${escapeHtml(row.label || '')}</div>
+            <div class="funnel-count">${escapeHtml(String(row.visitors))} <span class="hint">visitors</span>${rate ? ' · ' + escapeHtml(rate) : ''}${ofStep}</div>
+            <div class="funnel-bar" aria-hidden="true"><span style="width:${width}%"></span></div>
+            ${drop}
+          </div>
+        </div>`;
+      }).join('');
+      return `<section class="funnel-variant"><h3>${escapeHtml(variant.variant_name || 'Variant')}</h3>${rows}</section>`;
+    }).join('');
+    return `<div class="goal-funnel"><h2>Funnel</h2>${notes.map((line) => `<p class="hint">${escapeHtml(line)}</p>`).join('')}${cards}</div>`;
   }
 
   function ga4AgencySitesText(count) {
@@ -1260,6 +1330,7 @@
     CUSTOM_GOAL_HELP,
     describeGoal,
     goalResultLabel,
+    renderFunnel,
     MAX_VARIANTS,
     canAddVariant,
     variantCapMessage,

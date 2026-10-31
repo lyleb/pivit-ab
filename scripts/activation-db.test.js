@@ -56,7 +56,8 @@ async function main() {
   assert.ok(!schema.includes('activation_type'), 'activation columns stay out of schema.sql');
   assert.ok(migrateSrc.includes("{ version: '019', name: 'activation', run: applyActivation }"));
   assert.ok(migrateSrc.indexOf("version: '018'") < migrateSrc.indexOf("version: '019'"));
-  assert.ok(!migrateSrc.includes("version: '022'"), 'js_condition and manual reuse the activation columns');
+  assert.ok(migrateSrc.includes("{ version: '022', name: 'element-activation-selector', run: applyElementActivationSelector }"));
+  assert.ok(!schema.includes('element_selector = NULL'), 'the data fix stays out of schema.sql');
 
   const admin = await pg.connectAdmin();
   if (!admin) {
@@ -119,6 +120,40 @@ async function main() {
     assert.strictEqual(created.json.activation_type, 'element');
     assert.strictEqual(created.json.activation_value, '#step-payment');
     const id = created.json.id;
+
+    const staleCreate = await request(ownerServer, 'POST', '/api/experiments', {
+      name: 'Stale selector',
+      url_match: 'https://site3-checkout.netlify.app/play',
+      url_match_type: 'contains',
+      activation_type: 'element',
+      activation_value: '#step-payment',
+      element_selector: '#payment-step',
+      allowed_hosts: ['site3-checkout.netlify.app'],
+    });
+    assert.strictEqual(staleCreate.status, 201);
+    assert.strictEqual(staleCreate.json.element_selector, null);
+
+    await db.query(`UPDATE experiments SET element_selector = '#payment-step' WHERE id = $1`, [id]);
+    const clearedSelector = await request(ownerServer, 'PATCH', `/api/experiments/${id}/activation`, {
+      activation_type: 'element',
+      activation_value: '#step-payment',
+    });
+    assert.strictEqual(clearedSelector.status, 200);
+    assert.strictEqual(clearedSelector.json.element_selector, null);
+
+    await db.query(
+      `UPDATE experiments SET activation_type = 'element', activation_value = '#step-payment', element_selector = '#payment-step' WHERE id = $1`,
+      [staleCreate.json.id]
+    );
+    const { applyElementActivationSelector } = require('../src/db/element-activation-selector');
+    await applyElementActivationSelector(db);
+    const migrated = await db.query(`SELECT element_selector FROM experiments WHERE id = $1`, [staleCreate.json.id]);
+    assert.strictEqual(migrated.rows[0].element_selector, null);
+    await db.query(`UPDATE experiments SET element_selector = '#pay-now', activation_type = 'page_load' WHERE id = $1`, [plain.json.id]);
+    await applyElementActivationSelector(db);
+    const stillLegacy = await db.query(`SELECT element_selector, activation_type FROM experiments WHERE id = $1`, [plain.json.id]);
+    assert.strictEqual(stillLegacy.rows[0].element_selector, '#pay-now');
+    assert.strictEqual(stillLegacy.rows[0].activation_type, 'page_load');
     await db.query(`UPDATE experiments SET status = 'running' WHERE id = $1`, [id]);
 
     const page = await request(

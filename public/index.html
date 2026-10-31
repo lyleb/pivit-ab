@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>pivitlab</title>
-<link rel="stylesheet" href="/assets/pivit.css?v=8">
+<link rel="stylesheet" href="/assets/pivit.css?v=9">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="/url-match.js"></script>
 <script src="/plan.js"></script>
@@ -236,6 +236,8 @@
     margin-top: 10px; background: var(--card-2); border: 1px solid var(--border); border-radius: 8px;
   }
   .goal-row .full-width { grid-column: 1 / -1; }
+  .g-step-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .g-step-actions button { min-height: 44px; margin: 0; }
   .g-when-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
   .g-when-row input { margin: 0; flex: 1; min-width: 0; }
   .g-when-eq { color: var(--text-muted); }
@@ -747,7 +749,7 @@
           <p class="hint" id="wizard-match-hint">Contains. The test runs on any page whose address includes this text.</p>
           <label for="wizard-element">Only run when this element is on the page</label>
           <input id="wizard-element" placeholder='button[name="add"]' spellcheck="false" autocomplete="off">
-          <p class="hint" id="wizard-element-hint">Optional. The URL rule still applies. For example, <span class="mono">button[name="add"]</span> or <span class="mono">.product-form__submit</span>. This looks for about four seconds. It is separate from when the test starts.</p>
+          <p class="hint" id="wizard-element-hint">Optional. The URL rule still applies. For example, <span class="mono">button[name="add"]</span> or <span class="mono">.product-form__submit</span>. This looks for about four seconds. It is not used when the test starts because an element appears.</p>
           <label for="wizard-activation">Start the test when…</label>
           <select id="wizard-activation">
             <option value="page_load">the page loads</option>
@@ -801,7 +803,7 @@
 
         <div id="wizard-step-3" class="wizard-step" hidden>
           <p id="wizard-goals-site" class="hint" hidden>Choose a site before adding goals. Suggestions stay with that site.</p>
-          <p class="hint" style="margin-top:0;">Optional. Goals are saved once for the experiment and apply to every variant, including Control. Skip if you will add them in the editor.</p>
+          <p class="hint" style="margin-top:0;">Optional. Goals are saved once for the experiment and apply to every variant, including Control. Tick Funnel step on up to five goals and put them in order. Skip if you will add them in the editor.</p>
           <p style="margin-top:10px;"><a class="picker-link picker-bookmarklet" href="#">Selector Picker</a> <span class="hint">Drag to your bookmarks bar, then click it on the live page.</span></p>
           <div id="wizard-popular-goals"></div>
           <div id="wizard-goals-list"></div>
@@ -2733,12 +2735,13 @@ function renderTestTrafficResults(data) {
           <div class="table-scroll"><table><thead><tr><th>Variant</th><th class="num">Conversions</th><th class="num">Conversion events</th><th class="num">Rate</th></tr></thead><tbody>${goalRows}</tbody></table></div>`;
       }).join('')
       : '');
+  const funnel = UI.renderFunnel ? UI.renderFunnel(data.funnel, { kind: 'test' }) : '';
   return `<div class="table-scroll" tabindex="0" role="region" aria-label="Test traffic results (scrolls sideways)">
     <table>
       <thead><tr><th>Variant</th><th class="num">Visitors</th><th class="num">Conversions</th><th class="num">Conversion events</th><th class="num">Rate</th></tr></thead>
       <tbody>${body}</tbody>
     </table>
-  </div>${goals}`;
+  </div>${goals}${funnel}`;
 }
 
 async function loadTestTrafficResults(expId) {
@@ -2778,7 +2781,9 @@ function previewRule(source) {
     matchType: (source && (source.matchType || source.url_match_type)) || 'contains',
     allowedHosts: Array.isArray(hosts) ? hosts : [],
     origin: (source && source.origin) || '',
-    elementSelector: (source && (source.elementSelector || source.element_selector)) || '',
+    elementSelector: (source && (source.activationType || source.activation_type)) === 'element'
+      ? ''
+      : ((source && (source.elementSelector || source.element_selector)) || ''),
     activationType: (source && (source.activationType || source.activation_type)) || 'page_load',
     activationValue: (source && (source.activationValue || source.activation_value)) || '',
   };
@@ -2834,6 +2839,14 @@ function syncActivationInputs(prefix) {
   if (jsWrap) jsWrap.hidden = type !== 'js_condition';
   if (manualWrap) manualWrap.hidden = type !== 'manual';
   if (hint && UI.activationHint) hint.textContent = UI.activationHint(type);
+  const legacy = document.getElementById(prefix + '-element');
+  const legacyHint = document.getElementById(prefix + '-element-hint');
+  if (legacy) legacy.disabled = type === 'element';
+  if (legacyHint) {
+    legacyHint.textContent = type === 'element'
+      ? 'This test starts when an element appears, so that element is the one that counts. The older four-second rule is not used. Saving clears a selector left in this box.'
+      : 'Optional. The URL rule still applies. For example, button[name="add"] or .product-form__submit. This looks for about four seconds. It is not used when the test starts because an element appears.';
+  }
   if (type === 'manual') fillManualActivation(prefix);
 }
 
@@ -2997,7 +3010,7 @@ function renderDetail() {
           <span class="badge ${STATUS_CLASS[exp.status] || 'paused'}">${UI.escapeHtml(exp.status)}</span>
           ${UI.isDemoTest(exp) ? UI.demoBadgeHtml() : ''}
           <span class="mono">${UI.escapeHtml(exp.url_match || '—')}</span>
-          ${exp.element_selector ? `<span class="mono" title="Only runs when this element is on the page">${UI.escapeHtml(exp.element_selector)}</span>` : ''}
+          ${exp.activation_type === 'element' || !exp.element_selector ? '' : `<span class="mono" title="Only runs when this element is on the page">${UI.escapeHtml(exp.element_selector)}</span>`}
           ${activationMetaHtml(exp)}
           ${matchBadge(exp)}
           ${noDomainBadge(exp)}
@@ -3157,6 +3170,7 @@ function renderDetail() {
             </table>
           </div>
           <div id="goal-breakdown" hidden></div>
+          <div id="goal-funnel" hidden></div>
           <p class="hint table-scroll-hint">Swipe the table sideways for more columns.</p>
           <div class="chart-wrap rate-wrap" id="rate-chart-wrap" hidden><canvas id="rate-chart"></canvas></div>
           <div style="margin-top:16px;" class="inline-actions">
@@ -3197,8 +3211,8 @@ function renderDetail() {
         </select>
         <p class="hint" id="settings-match-hint"></p>
         <label for="settings-element">Only run when this element is on the page</label>
-        <input id="settings-element" spellcheck="false" autocomplete="off" placeholder='button[name="add"]' value="${UI.escapeHtml(exp.element_selector || '')}">
-        <p class="hint">Optional. The URL rule still applies. For example, <span class="mono">button[name="add"]</span> or <span class="mono">.product-form__submit</span>. This looks for about four seconds. It is separate from when the test starts.</p>
+        <input id="settings-element" spellcheck="false" autocomplete="off" placeholder='button[name="add"]' value="${activationType === 'element' ? '' : UI.escapeHtml(exp.element_selector || '')}">
+        <p class="hint" id="settings-element-hint">Optional. The URL rule still applies. For example, <span class="mono">button[name="add"]</span> or <span class="mono">.product-form__submit</span>. This looks for about four seconds. It is not used when the test starts because an element appears.</p>
         <label for="settings-activation">Start the test when…</label>
         <select id="settings-activation">
           <option value="page_load"${activationType === 'page_load' ? ' selected' : ''}>the page loads</option>
@@ -3592,7 +3606,7 @@ function renderGoalBlocks() {
   if (intro) {
     intro.textContent = divergent
       ? 'These variants do not measure the same goals, so each list is still saved on its own variant. Past results stay as they are.'
-      : 'Goals are set once for this experiment and apply to every variant, including Control. Renaming a goal does not split its history.';
+      : 'Goals are set once for this experiment and apply to every variant, including Control. Renaming a goal does not split its history. Tick Funnel step on up to five goals and put them in order.';
   }
   if (divergent) {
     mount.innerHTML = renderDivergentGoals() + `
@@ -3611,7 +3625,8 @@ function renderGoalBlocks() {
     <div id="detail-goals-list"></div>
     <button type="button" class="btn-ghost" style="margin-top:10px;" data-action="add-goal-row">+ Add goal</button>
     <div style="margin-top:12px;"><button type="button" data-action="save-goals">Save goals</button></div>`;
-  (currentDetail.goals || []).forEach((goal) => addGoalRow(goal, 'detail-goals-list'));
+  orderGoalsForEditor(currentDetail.goals || []).forEach((goal) => addGoalRow(goal, 'detail-goals-list'));
+  paintFunnelSteps('detail-goals-list');
 }
 
 function renderDivergentGoals() {
@@ -4036,10 +4051,14 @@ async function saveDetailSettings() {
   if (!matchResult.ok) { msg.className = 'error-msg'; msg.textContent = matchResult.message; return; }
   currentDetail.url_match_type = matchResult.data.url_match_type;
   const elementField = document.getElementById('settings-element');
+  const activationDraft = readActivation('settings');
+  const elementValue = activationDraft.activation_type === 'element'
+    ? ''
+    : (elementField ? elementField.value.trim() : '');
   const elementResult = await callApi(`/api/experiments/${currentDetail.id}/element-selector`, {
     method: 'PATCH',
     headers: authHeaders(),
-    body: JSON.stringify({ element_selector: elementField ? elementField.value.trim() : '' }),
+    body: JSON.stringify({ element_selector: elementValue }),
   });
   if (!elementResult.ok) { msg.className = 'error-msg'; msg.textContent = elementResult.message; return; }
   currentDetail.element_selector = elementResult.data.element_selector;
@@ -4054,6 +4073,10 @@ async function saveDetailSettings() {
   if (!activationResult.ok) { msg.className = 'error-msg'; msg.textContent = activationResult.message; return; }
   currentDetail.activation_type = activationResult.data.activation_type;
   currentDetail.activation_value = activationResult.data.activation_value;
+  if (Object.prototype.hasOwnProperty.call(activationResult.data, 'element_selector')) {
+    currentDetail.element_selector = activationResult.data.element_selector;
+  }
+  if (currentDetail.activation_type === 'element' && elementField) elementField.value = '';
   const hostsResult = await callApi(`/api/experiments/${currentDetail.id}/hosts`, {
     method: 'PATCH',
     headers: authHeaders(),
@@ -4567,6 +4590,8 @@ function showResultsGate(text) {
   if (rateChart) { rateChart.destroy(); rateChart = null; }
   if (trendChart) { trendChart.destroy(); trendChart = null; }
   currentTrendSeries = [];
+  const funnel = document.getElementById('goal-funnel');
+  if (funnel) { funnel.hidden = true; funnel.innerHTML = ''; }
 }
 
 function paintSplit(data) {
@@ -4646,6 +4671,8 @@ async function loadResults() {
     if (rateChart) { rateChart.destroy(); rateChart = null; }
     if (trendChart) { trendChart.destroy(); trendChart = null; }
     currentTrendSeries = [];
+    const blindFunnel = document.getElementById('goal-funnel');
+    if (blindFunnel) { blindFunnel.hidden = true; blindFunnel.innerHTML = ''; }
     return;
   }
   let nudgeSentence = '';
@@ -4677,6 +4704,7 @@ async function loadResults() {
   const tbody = document.getElementById('results-body');
   tbody.innerHTML = results.map((r) => `<tr><td>${UI.escapeHtml(r.variant_name)}</td><td class="num">${r.visitors}</td><td class="num">${r.new_visitors}</td><td class="num">${r.returning_visitors}</td><td class="num">${r.clicks}</td><td class="num">${r.conversions}</td><td class="num">${r.conversion_events != null ? r.conversion_events : ''}</td><td class="num">${r.conversion_rate}%</td></tr>`).join('');
   renderGoalBreakdown(result.data.goals, result.data.primary_goal);
+  renderGoalFunnel(result.data.funnel, 'owner');
   document.getElementById('results-table').style.display = 'table';
 
   const rateWrap = document.getElementById('rate-chart-wrap');
@@ -4763,6 +4791,15 @@ function renderGoalBreakdown(goals, primaryGoal) {
   mount.innerHTML = `<p class="hint" style="margin-top:18px;">Each goal counts a visitor once, even if they trigger it several times.${primaryGoal ? ' The headline rate above uses the primary goal.' : ' The headline rate above counts a visitor once if they hit any goal.'}</p>${blocks}`;
 }
 
+function renderGoalFunnel(funnel, kind) {
+  const mount = document.getElementById('goal-funnel');
+  if (!mount) return;
+  const html = UI.renderFunnel ? UI.renderFunnel(funnel, { kind: kind || 'owner' }) : '';
+  if (!html) { mount.hidden = true; mount.innerHTML = ''; return; }
+  mount.hidden = false;
+  mount.innerHTML = html;
+}
+
 async function loadHostHits() {
   const msg = document.getElementById('host-hits-msg');
   const summary = document.getElementById('host-hits-summary');
@@ -4812,6 +4849,13 @@ async function loadHostHits() {
 }
 
 document.addEventListener('change', (e) => {
+  if (e.target && e.target.classList && e.target.classList.contains('g-step-on')) {
+    const list = e.target.closest('#wizard-goals-list, #detail-goals-list');
+    if (list) {
+      paintFunnelSteps(list.id);
+      if (list.id === 'wizard-goals-list') rememberWizardGoals();
+    }
+  }
   if (!e.target || !currentDetail) return;
   if (e.target.id === 'visitor-type-filter') loadResults();
   if (e.target.id === 'include-test-traffic') {
@@ -5247,7 +5291,8 @@ async function renderWizard() {
   if (wizard.step === 3) {
     const list = document.getElementById('wizard-goals-list');
     if (!list.childElementCount && wizard.goalRows.length) {
-      wizard.goalRows.forEach((g) => addGoalRow(g, 'wizard-goals-list'));
+      orderGoalsForEditor(wizard.goalRows).forEach((g) => addGoalRow(g, 'wizard-goals-list'));
+      paintFunnelSteps('wizard-goals-list');
     }
     paintGoalSiteLine();
     loadPopularGoals('wizard-popular-goals', 'wizard');
@@ -5345,7 +5390,7 @@ async function persistWizardBasics() {
         name: wizard.name,
         url_match: wizard.url,
         url_match_type: wizard.match || (window.PivitUrl ? PivitUrl.defaultPageMatch(wizard.url) : 'contains'),
-        element_selector: wizard.elementSelector || '',
+        element_selector: wizard.activationType === 'element' ? '' : (wizard.elementSelector || ''),
         ...activationPayload({ activation_type: wizard.activationType, activation_value: wizard.activationValue }),
         client_id: wizard.clientId || null,
         allowed_hosts: wizard.hosts,
@@ -5365,7 +5410,8 @@ async function persistWizardBasics() {
     ];
     if (/^https?:\/\//i.test(wizard.url)) wizard.pageUrl = wizard.url;
     if (result.data.url_match_type) wizard.match = result.data.url_match_type;
-    if (result.data.element_selector != null) wizard.elementSelector = result.data.element_selector || '';
+    if (result.data.activation_type === 'element') wizard.elementSelector = '';
+    else if (result.data.element_selector != null) wizard.elementSelector = result.data.element_selector || '';
     if (result.data.activation_type) wizard.activationType = result.data.activation_type;
     wizard.activationValue = result.data.activation_value || '';
     saveWizard();
@@ -5374,10 +5420,10 @@ async function persistWizardBasics() {
   }
   const elementResult = await callApi(`/api/experiments/${wizard.expId}/element-selector`, {
     method: 'PATCH', headers: authHeaders(),
-    body: JSON.stringify({ element_selector: wizard.elementSelector || '' }),
+    body: JSON.stringify({ element_selector: wizard.activationType === 'element' ? '' : (wizard.elementSelector || '') }),
   });
   if (!elementResult.ok) { wizardMsg(elementResult.message); return false; }
-  wizard.elementSelector = elementResult.data.element_selector || '';
+  wizard.elementSelector = wizard.activationType === 'element' ? '' : (elementResult.data.element_selector || '');
   const activationResult = await callApi(`/api/experiments/${wizard.expId}/activation`, {
     method: 'PATCH', headers: authHeaders(),
     body: JSON.stringify(activationPayload({
@@ -5470,7 +5516,8 @@ async function persistWizardGoals() {
   const list = document.getElementById('wizard-goals-list');
   if (list) {
     list.innerHTML = '';
-    wizard.goalRows.forEach((goal) => addGoalRow(goal, 'wizard-goals-list'));
+    orderGoalsForEditor(wizard.goalRows).forEach((goal) => addGoalRow(goal, 'wizard-goals-list'));
+    paintFunnelSteps('wizard-goals-list');
   }
   saveWizard();
   return true;
@@ -5848,6 +5895,88 @@ function ensureWhenRow(host) {
   syncWhenAdd(host);
 }
 
+function orderGoalsForEditor(goals) {
+  const list = Array.isArray(goals) ? goals : [];
+  const stepped = [];
+  const rest = [];
+  list.forEach((goal, index) => {
+    const step = Number(goal && goal.step);
+    if (Number.isInteger(step) && step >= 1 && step <= 5) stepped.push({ goal, step, index });
+    else rest.push({ goal, index });
+  });
+  stepped.sort((a, b) => a.step - b.step || a.index - b.index);
+  return stepped.map((item) => item.goal).concat(rest.map((item) => item.goal));
+}
+
+function goalRowHasValue(row) {
+  const valueEl = row.querySelector('.g-value');
+  return !!(valueEl && valueEl.value.trim());
+}
+
+function paintFunnelSteps(listId) {
+  const list = document.getElementById(listId);
+  if (!list) return;
+  const rows = Array.from(list.querySelectorAll('.goal-row'));
+  const checked = rows.filter((row) => {
+    const box = row.querySelector('.g-step-on');
+    return box && box.checked && goalRowHasValue(row);
+  });
+  checked.forEach((row, index) => {
+    const box = row.querySelector('.g-step-on');
+    const label = row.querySelector('.g-step-label');
+    const note = row.querySelector('.g-step-note');
+    const up = row.querySelector('.g-step-up');
+    const down = row.querySelector('.g-step-down');
+    if (index >= 5) {
+      if (box) box.checked = false;
+      row.dataset.step = '';
+      if (label) label.textContent = '';
+      if (note) {
+        note.hidden = false;
+        note.textContent = 'A test can have at most 5 funnel steps.';
+      }
+      if (up) up.disabled = true;
+      if (down) down.disabled = true;
+      return;
+    }
+    row.dataset.step = String(index + 1);
+    if (label) label.textContent = 'Step ' + (index + 1);
+    if (note) { note.hidden = true; note.textContent = ''; }
+    if (up) up.disabled = index === 0;
+    if (down) down.disabled = index === Math.min(checked.length, 5) - 1;
+  });
+  rows.forEach((row) => {
+    const box = row.querySelector('.g-step-on');
+    if (box && box.checked && goalRowHasValue(row)) return;
+    const note = row.querySelector('.g-step-note');
+    const kept = note && note.textContent === 'A test can have at most 5 funnel steps.';
+    row.dataset.step = '';
+    const label = row.querySelector('.g-step-label');
+    if (label) label.textContent = '';
+    const up = row.querySelector('.g-step-up');
+    const down = row.querySelector('.g-step-down');
+    if (up) up.disabled = true;
+    if (down) down.disabled = true;
+    if (note && !kept) { note.hidden = true; note.textContent = ''; }
+  });
+}
+
+function moveFunnelStep(row, direction) {
+  const list = row && row.parentElement;
+  if (!list) return;
+  const checked = Array.from(list.querySelectorAll('.goal-row')).filter((item) => {
+    const box = item.querySelector('.g-step-on');
+    return box && box.checked && goalRowHasValue(item);
+  });
+  const index = checked.indexOf(row);
+  const target = checked[index + direction];
+  if (index < 0 || !target) return;
+  if (direction < 0) list.insertBefore(row, target);
+  else list.insertBefore(target, row);
+  paintFunnelSteps(list.id);
+  if (list.id === 'wizard-goals-list') rememberWizardGoals();
+}
+
 function addGoalRow(prefill, listId) {
   const list = document.getElementById(listId || 'wizard-goals-list');
   if (!list) return;
@@ -5889,6 +6018,15 @@ function addGoalRow(prefill, listId) {
       <p class="hint">Every condition has to match. Up to 3. For example, step_name = confirmation. Leave this empty to count every event with that name.</p>
     </div>
     <p class="hint g-custom-help full-width" hidden></p>
+    <div class="g-step full-width">
+      <div class="g-step-actions">
+        <label class="check"><input type="checkbox" class="g-step-on"> Funnel step</label>
+        <span class="g-step-label hint"></span>
+        <button type="button" class="btn-ghost g-step-up">Move earlier</button>
+        <button type="button" class="btn-ghost g-step-down">Move later</button>
+      </div>
+      <p class="hint g-step-note" hidden></p>
+    </div>
     <div class="g-test full-width" hidden>
       <label>Test this URL</label>
       <div class="goal-test">
@@ -5898,7 +6036,7 @@ function addGoalRow(prefill, listId) {
       </div>
     </div>
     <div style="align-self:end;">
-      <button type="button" class="remove-row" onclick="this.closest('.goal-row').remove()">Remove</button>
+      <button type="button" class="remove-row">Remove</button>
     </div>
   `;
   list.appendChild(row);
@@ -5961,16 +6099,25 @@ function addGoalRow(prefill, listId) {
       fillWhen(whenEl, prefill.when);
     }
     else valueEl.value = prefill.selector || '';
+    const step = Number(prefill.step);
+    if (Number.isInteger(step) && step >= 1 && step <= 5) {
+      const stepBox = row.querySelector('.g-step-on');
+      if (stepBox) stepBox.checked = true;
+      row.dataset.step = String(step);
+    }
   }
   renderValueField();
 }
 
 function collectGoals(listId) {
+  paintFunnelSteps(listId);
   return Array.from(document.querySelectorAll(`#${listId} .goal-row`)).map((row) => {
     const type = row.querySelector('.g-type').value;
     const value = row.querySelector('.g-value').value.trim();
     const name = row.querySelector('.g-name').value.trim();
     const goal = { id: row.dataset.goalId || '', name, type };
+    const stepBox = row.querySelector('.g-step-on');
+    if (stepBox && stepBox.checked && row.dataset.step) goal.step = Number(row.dataset.step);
     if (type === 'url') {
       goal.url_match = value;
       goal.match = row.querySelector('.g-match').value || 'contains';
@@ -6056,6 +6203,22 @@ document.body.addEventListener('click', async (e) => {
 });
 
 document.body.addEventListener('click', (e) => {
+  const move = e.target.closest('.g-step-up, .g-step-down');
+  if (move) {
+    moveFunnelStep(move.closest('.goal-row'), move.classList.contains('g-step-up') ? -1 : 1);
+    return;
+  }
+  const removed = e.target.closest('.goal-row .remove-row');
+  if (removed && !removed.classList.contains('g-when-remove')) {
+    const row = removed.closest('.goal-row');
+    const list = row && row.parentElement;
+    if (row) row.remove();
+    if (list && list.id) {
+      paintFunnelSteps(list.id);
+      if (list.id === 'wizard-goals-list') rememberWizardGoals();
+    }
+    return;
+  }
   const add = e.target.closest('.g-when-add');
   if (add) {
     const host = add.closest('.g-when');
