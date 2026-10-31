@@ -349,6 +349,64 @@ assert.ok(lockedMismatch.includes('Create it again'));
 assert.ok(!lockedMismatch.includes('Choose the site that owns'));
 assert.strictEqual(ui.domainMismatchMessage('https://www.site3-checkout.netlify.app/play', ['site3-checkout.netlify.app']), '');
 assert.strictEqual(ui.domainMismatchMessage('/play', ['site3-checkout.netlify.app']), '');
+assert.ok(mismatch.includes('Preview and the live test will not run'));
+assert.ok(lockedMismatch.includes('Preview and the live test will not run'));
+
+const fernhillSites = [
+  { id: 'shop', domains: ['fernhill-shop.netlify.app', 'demo.pivitlab.com'] },
+  { id: 'site2', domains: ['site2-spa.netlify.app'] },
+  { id: 'site3', domains: ['site3-checkout.netlify.app'] },
+];
+assert.strictEqual(ui.wizardSiteValue(fernhillSites, ''), '');
+assert.strictEqual(ui.wizardSiteValue(fernhillSites, 'site2'), 'site2');
+assert.deepStrictEqual(ui.siteDomainsFor(fernhillSites, 'site2'), ['site2-spa.netlify.app']);
+assert.deepStrictEqual(
+  ui.siteDomainsFor(fernhillSites, ui.wizardSiteValue(fernhillSites, 'site3')),
+  ['site3-checkout.netlify.app']
+);
+const onlySite = [{ id: 'site2', domains: ['site2-spa.netlify.app'] }];
+assert.strictEqual(ui.wizardSiteValue(onlySite, ''), 'site2');
+assert.strictEqual(ui.wizardSiteValue(onlySite, 'remembered-shop'), 'site2');
+assert.deepStrictEqual(
+  ui.siteDomainsFor(onlySite, ui.wizardSiteValue(onlySite, 'remembered-shop')),
+  ['site2-spa.netlify.app']
+);
+assert.deepStrictEqual(ui.siteDomainsFor(fernhillSites, ''), []);
+assert.deepStrictEqual(ui.siteDomainsFor(fernhillSites, 'missing'), []);
+const reviewWarning = ui.reviewDomainWarning(
+  ['https://fernhill-shop.netlify.app/', ''],
+  ui.siteDomainsFor(fernhillSites, ui.wizardSiteValue(fernhillSites, 'site2')),
+  ['site2-spa.netlify.app'],
+  { locked: true }
+);
+assert.ok(reviewWarning.includes('fernhill-shop.netlify.app'));
+assert.ok(reviewWarning.includes('site2-spa.netlify.app'));
+assert.ok(reviewWarning.includes('Preview and the live test will not run on this page'));
+assert.ok(reviewWarning.includes('Create it again'));
+const hostsOnly = ui.reviewDomainWarning(
+  ['https://fernhill-shop.netlify.app/'],
+  [],
+  ['site2-spa.netlify.app'],
+  { locked: true }
+);
+assert.ok(hostsOnly.includes('site2-spa.netlify.app'));
+assert.ok(hostsOnly.includes('will not run'));
+assert.strictEqual(ui.reviewDomainWarning(
+  ['https://www.site2-spa.netlify.app/shop'],
+  ['site2-spa.netlify.app'],
+  ['site2-spa.netlify.app']
+), '');
+const shopOnRecord = ui.reviewDomainWarning(
+  ['https://fernhill-shop.netlify.app/'],
+  ['fernhill-shop.netlify.app'],
+  ['site2-spa.netlify.app'],
+  { locked: true }
+);
+assert.ok(shopOnRecord.includes('site2-spa.netlify.app'));
+assert.strictEqual(ui.startMismatchPrompt(''), '');
+assert.ok(ui.startMismatchPrompt(reviewWarning).endsWith('\n\nStart this test anyway?'));
+assert.strictEqual(ui.wizardReviewAction(false), 'Save as draft');
+assert.strictEqual(ui.wizardReviewAction(true), 'Open the experiment');
 assert.strictEqual(ui.wizardContinueDecision({ step: 1, busy: true }, 1000).ok, false);
 assert.strictEqual(ui.wizardContinueDecision({ step: 1, busy: false, advancedAt: 1000 }, 1200).reason, 'guard');
 const forward = ui.wizardContinueDecision({ step: 1, busy: false, advancedAt: 0 }, 5000);
@@ -367,7 +425,36 @@ assert.ok(dashboard.includes('id="wizard-site-mismatch"'));
 assert.ok(dashboard.includes('id="settings-site-mismatch"'));
 assert.ok(dashboard.includes("next.textContent = 'Save as draft'"));
 assert.ok(!dashboard.includes("next.textContent = 'Save plan'"));
+assert.ok(!dashboard.includes("next.textContent = 'Review'"));
+assert.ok(dashboard.includes('wizardReviewAction'));
+assert.ok(!dashboard.includes('id="wizard-save-draft"'));
 assert.ok(dashboard.includes('>Save sample-size plan</button>'));
 assert.ok(!dashboard.includes('>Save plan</button>'));
+assert.ok(dashboard.includes('Whole page (no element chosen)'));
+assert.ok(!dashboard.includes('Any page that matches the URL rule'));
+assert.ok(dashboard.includes('A goal is needed before this test can be started'));
+assert.ok(dashboard.includes('id="wizard-add-goal"'));
+assert.ok(dashboard.includes('id="wizard-fix-url"'));
+assert.ok(dashboard.includes('Back to the page URL'));
+assert.ok(dashboard.includes('id="wizard-review-mismatch"'));
+assert.ok(dashboard.includes('startMismatchPrompt'));
+const summaryFn = dashboard.slice(dashboard.indexOf('function renderWizardSummary'), dashboard.indexOf('async function saveWizardPlan'));
+assert.ok(summaryFn.includes('refreshWizardDomainWarning'));
+const syncFn = dashboard.slice(dashboard.indexOf('function syncWizardMatch'), dashboard.indexOf('function hostFromPageUrl'));
+assert.ok(syncFn.includes('refreshWizardDomainWarning'));
+assert.ok(syncFn.indexOf('if (!window.PivitUrl)') < syncFn.indexOf('refreshWizardDomainWarning'));
+const hostsListener = dashboard.slice(
+  dashboard.indexOf("getElementById('wizard-hosts').addEventListener"),
+  dashboard.indexOf("getElementById('wizard-next').addEventListener")
+);
+assert.ok(hostsListener.includes('refreshWizardDomainWarning'));
+const urlListener = dashboard.slice(
+  dashboard.indexOf("getElementById('wizard-url').addEventListener"),
+  dashboard.indexOf("getElementById('wizard-match').addEventListener")
+);
+assert.ok(urlListener.includes('refreshWizardDomainWarning'));
+const siteChange = dashboard.slice(dashboard.indexOf("if (id === 'wizard-site')"), dashboard.indexOf("if (!select.value) {\n      select.value = chosenSiteId"));
+assert.ok(siteChange.includes('refreshWizardDomainWarning'));
+assert.ok(siteChange.includes('wizard.siteId'));
 
 console.log('admin-ui tests passed');
