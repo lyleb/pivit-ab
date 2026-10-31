@@ -1335,11 +1335,26 @@
 
   // The create wizard does not inherit the remembered site. One site is used
   // as it is. Several sites stay on "Choose a site" until chosenId is one of them.
+  // Ids are compared as text so a remembered id still matches the site record.
   function wizardSiteValue(sites, chosenId) {
     const list = Array.isArray(sites) ? sites : [];
-    if (list.length === 1 && list[0] && list[0].id) return String(list[0].id);
-    if (chosenId && list.some((site) => site && site.id === chosenId)) return String(chosenId);
+    if (list.length === 1 && list[0] && list[0].id != null && String(list[0].id) !== '') {
+      return String(list[0].id);
+    }
+    const wanted = chosenId == null ? '' : String(chosenId);
+    if (wanted && list.some((site) => site && site.id != null && String(site.id) === wanted)) {
+      return wanted;
+    }
     return '';
+  }
+
+  function siteDomainsFor(sites, siteId) {
+    const list = Array.isArray(sites) ? sites : [];
+    const id = siteId == null ? '' : String(siteId);
+    if (!id) return [];
+    const site = list.find((item) => item && item.id != null && String(item.id) === id);
+    if (!site || !Array.isArray(site.domains)) return [];
+    return site.domains.slice();
   }
 
   function normalisedDomainHost(value) {
@@ -1370,11 +1385,37 @@
       if (normalised && list.indexOf(normalised) === -1) list.push(normalised);
     });
     if (!list.length || list.indexOf(host) !== -1) return '';
-    const base = 'This page is on ' + host + ', which is not one of this site\'s domains (' + list.join(', ') + '). The test and its preview only run where this site\'s snippet is installed.';
+    const base = 'This page is on ' + host + ', which is not one of this site\'s domains (' + list.join(', ') + '). Preview and the live test will not run on this page. They only run where this site\'s snippet is installed.';
     if (options && options.locked) {
       return base + ' This test is already saved on the other site. Create it again on the site that owns this page.';
     }
     return base + ' Choose the site that owns this page.';
+  }
+
+  // Site domains are the snippet's site. Allowed hosts are the domains shown
+  // on the review. Either list can leave the page uncovered.
+  function reviewDomainWarning(pageUrls, siteDomains, allowedHosts, options) {
+    const urls = Array.isArray(pageUrls) ? pageUrls : [pageUrls];
+    let message = '';
+    for (let i = 0; i < urls.length; i += 1) {
+      message = domainMismatchMessage(urls[i], siteDomains, options);
+      if (message) return message;
+    }
+    for (let i = 0; i < urls.length; i += 1) {
+      message = domainMismatchMessage(urls[i], allowedHosts, options);
+      if (message) return message;
+    }
+    return '';
+  }
+
+  function startMismatchPrompt(message) {
+    const text = String(message || '').trim();
+    if (!text) return '';
+    return text + '\n\nStart this test anyway?';
+  }
+
+  function wizardReviewAction(planSaved) {
+    return planSaved ? 'Open the experiment' : 'Save as draft';
   }
 
   const WIZARD_CONTINUE_GUARD_MS = 600;
@@ -1514,7 +1555,11 @@
     ga4UptakeText,
     ga4AgencySitesText,
     wizardSiteValue,
+    siteDomainsFor,
     domainMismatchMessage,
+    reviewDomainWarning,
+    startMismatchPrompt,
+    wizardReviewAction,
     WIZARD_CONTINUE_GUARD_MS,
     wizardContinueDecision,
   };
