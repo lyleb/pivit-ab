@@ -401,7 +401,7 @@
   let ga4Experiments = [];
   let ga4Reporting = false;
   // Bump when editor.js changes so a cached copy cannot keep the old variant.
-  const EDITOR_VERSION = '20261024a';
+  const EDITOR_VERSION = '20261031a';
   // Bump when device-preview.js changes so a cached shell cannot skip JavaScript.
   const DEVICE_PREVIEW_VERSION = '20261021a';
 
