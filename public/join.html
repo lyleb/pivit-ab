@@ -17,10 +17,15 @@
   <div class="brand">
     <span class="brand-logo" role="img" aria-label="pivitlab"></span>
     <h1>Join this agency</h1>
-    <p class="hint">This link works once. Opening it does not use it up.</p>
+    <p class="hint">You can open this link as often as you like. It’s used up once you join.</p>
   </div>
   <p id="join-detail" class="hint"></p>
   <form id="join-form">
+    <div id="code-wrap" hidden>
+      <label for="code">6-digit code</label>
+      <input id="code" class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000">
+      <p class="hint">We’ve emailed a code to the invited address. It lasts 15 minutes.</p>
+    </div>
     <button id="join-btn" type="submit">Join this agency</button>
   </form>
   <p class="hint legal-note">By joining you agree to the <a href="/legal.html">terms and privacy notice</a>.</p>
@@ -33,6 +38,9 @@ const token = params.get('token') || '';
 const errorEl = document.getElementById('join-error');
 const detailEl = document.getElementById('join-detail');
 const btn = document.getElementById('join-btn');
+const codeWrap = document.getElementById('code-wrap');
+const codeInput = document.getElementById('code');
+let codeSent = false;
 
 function roleWord(role) {
   if (role === 'owner') return 'Owner';
@@ -71,25 +79,37 @@ document.getElementById('join-form').addEventListener('submit', async (event) =>
   if (!token || btn.disabled) return;
   errorEl.textContent = '';
   btn.disabled = true;
-  btn.textContent = 'Joining…';
+  const previous = btn.textContent;
+  btn.textContent = codeSent ? 'Joining…' : 'Sending code…';
+  const body = { token };
+  if (codeSent) body.code = codeInput.value.trim();
   try {
     const res = await fetch('/api/auth/join', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }),
+      body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       errorEl.textContent = data.error || "That invite isn't valid. It may have expired, or it may already have been used.";
       btn.disabled = false;
-      btn.textContent = 'Join this agency';
+      btn.textContent = codeSent ? 'Confirm and join' : 'Join this agency';
+      return;
+    }
+    if (data.code_sent) {
+      codeSent = true;
+      codeWrap.hidden = false;
+      codeInput.required = true;
+      btn.disabled = false;
+      btn.textContent = 'Confirm and join';
+      codeInput.focus();
       return;
     }
     window.location.href = '/index.html';
   } catch (err) {
     errorEl.textContent = 'Please try again.';
     btn.disabled = false;
-    btn.textContent = 'Join this agency';
+    btn.textContent = previous;
   }
 });
 </script>

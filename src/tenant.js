@@ -77,7 +77,7 @@ function accountShape(row, extra) {
     id: row.id,
     name: row.name,
     legacy: row.legacy === true,
-    role: 'owner',
+    role: extra.role || 'owner',
     userId: extra.userId || null,
     superadmin: extra.superadmin === true,
     viewAs: extra.viewAs === true,
@@ -105,6 +105,7 @@ async function resolveSessionAccount(req) {
       if (!rows[0]) return null;
       // A removed membership must not keep working on a session that was
       // already open. Sessions with no user id are the legacy password path.
+      let membershipRole = null;
       if (session.userId) {
         const member = await db.query(
           `SELECT m.role
@@ -116,11 +117,14 @@ async function resolveSessionAccount(req) {
           [session.accountId, session.userId]
         );
         if (!member.rows[0]) return null;
+        membershipRole = member.rows[0].role;
       }
-      return accountShape(rows[0], {
+      const extra = {
         userId: session.userId || null,
         superadmin: !!(actor && actor.is_superadmin),
-      });
+      };
+      if (membershipRole) extra.role = membershipRole;
+      return accountShape(rows[0], extra);
     }
     const legacy = await legacyAccount();
     if (!legacy) return null;

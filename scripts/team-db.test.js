@@ -167,7 +167,7 @@ async function main() {
       username: 'nope-view',
       password: 'password1',
     });
-    assert.strictEqual(memberCreate.status, 404, memberCreate.text);
+    assert.strictEqual(memberCreate.status, 403, memberCreate.text);
     const nope = await db.query(`SELECT id FROM clients WHERE username = 'nope-view'`);
     assert.strictEqual(nope.rows.length, 0);
 
@@ -202,9 +202,9 @@ async function main() {
     assert.ok(!resetAudit.rows[0].detail.includes('password_hash'));
 
     const memberEdit = await request(member, 'PATCH', `/api/clients/${viewerId}`, { name: 'Hacked' });
-    assert.strictEqual(memberEdit.status, 404, memberEdit.text);
+    assert.strictEqual(memberEdit.status, 403, memberEdit.text);
     const memberReset = await request(member, 'PATCH', `/api/clients/${viewerId}`, { password: 'password3' });
-    assert.strictEqual(memberReset.status, 404, memberReset.text);
+    assert.strictEqual(memberReset.status, 403, memberReset.text);
 
     await db.query(
       `INSERT INTO "session" (sid, sess, expire)
@@ -263,7 +263,7 @@ async function main() {
     assert.strictEqual(badFlag.status, 400, badFlag.text);
 
     const memberRemoveEarly = await request(member, 'DELETE', `/api/account/members/${shared}`);
-    assert.strictEqual(memberRemoveEarly.status, 404, memberRemoveEarly.text);
+    assert.strictEqual(memberRemoveEarly.status, 403, memberRemoveEarly.text);
     const suspendUser = await request(alpha, 'PATCH', `/api/account/members/${shared}`, { suspended: true });
     assert.strictEqual(suspendUser.status, 400, suspendUser.text);
     const sharedUser = await db.query(`SELECT suspended_at FROM users WHERE id = $1`, [shared]);

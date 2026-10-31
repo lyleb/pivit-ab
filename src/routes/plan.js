@@ -1,6 +1,8 @@
 const express = require('express');
 const { suggest, savePlan, loadReading, readingPayload } = require('../experiment-plan');
 const { buildPlan } = require('../plan');
+const { ownedExperiment } = require('../tenant');
+const { refuseViewOnly } = require('../membership-access');
 
 const router = express.Router({ mergeParams: true });
 
@@ -80,6 +82,9 @@ router.post('/preview', async (req, res) => {
 // PUT /api/experiments/:id/plan
 router.put('/', async (req, res) => {
   try {
+    const existing = await ownedExperiment(req.account.id, req.params.id);
+    if (!existing) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (refuseViewOnly(req, res)) return;
     const result = await savePlan(req.params.id, req.body || {}, undefined, req.account.id);
     if (!result.ok) return res.status(result.status || 400).json({ error: result.error });
     res.json({ plan: result.plan });

@@ -48,7 +48,7 @@
   <ol>
     <li>Look at the badge next to the pivitlab logo.</li>
     <li><strong>Platform admin</strong> can see every agency. The badge says Platform admin. This person has the Users screen, can make an invite code for a new agency, and can open a read-only support view of another agency.</li>
-    <li>An <strong>agency</strong> is one company on pivitlab. People in it are an <strong>Owner</strong> or a <strong>Member</strong>. The badge says Owner or Member. An Owner runs the team. A Member can see the team and the tests, and cannot invite people or change them.</li>
+    <li>An <strong>agency</strong> is one company on pivitlab. People in it are an <strong>Owner</strong> or a <strong>Member</strong>. The badge says Owner or Member. An Owner can create, edit, delete, start, pause, conclude and archive tests, variants and goals, use the editor, change sites, GA4 and dataLayer, clear or restore test traffic, and invite or change the team. A Member can read Home, experiments, results including the funnel, the audit log and Help, and can preview variants. A Member cannot make those changes. The page says: You have view-only access. Ask an Owner to make changes.</li>
     <li>A <strong>Viewer</strong> is a read-only login for results. The badge says Viewer. A Viewer sees only the tests an Owner has assigned to them. They sign in with a username and password, not an email.</li>
   </ol>
   <p class="hint">The names stored in the database stay as they are (accounts, clients, session role client). On screen the names are Platform admin, Agency, Owner, Member and Viewer.</p>
@@ -79,8 +79,8 @@
     <li>Open <strong>Team</strong>.</li>
     <li>Under <strong>Invite someone</strong>, enter their work email and choose Member or Owner.</li>
     <li>Choose <strong>Email the invite</strong>, or <strong>Create a link</strong> if you would rather copy it. The link is shown once.</li>
-    <li>They open the link and press <strong>Join this agency</strong>. Opening the link does not use it up. The link works once and lasts 7 days.</li>
-    <li>Joining adds them to this agency. It does not create a new one. If they already use pivitlab, they are added to this agency.</li>
+    <li>They open the link and press <strong>Join this agency</strong>. You can open this link as often as you like. It’s used up once you join. The link lasts 7 days. pivitlab emails a 6-digit code to the invited address. The code lasts 15 minutes. The join finishes when they enter that code, including when they already use pivitlab.</li>
+    <li>Joining adds them to this agency. It does not create a new one. If they already use pivitlab, they are added to this agency. The code proves they can read that email. pivitlab does not sign them in from the link alone.</li>
     <li><strong>Pending invites</strong> lists the ones still open. <strong>Resend</strong> emails a new link and replaces the previous one. <strong>Revoke</strong> stops it.</li>
   </ol>
   <p>You cannot invite an address that is suspended or deleted. If they are already in the agency, the page says so.</p>
@@ -108,7 +108,7 @@
     <li>The link opens a page where you press <strong>Sign in</strong>. A mail tool that only opens the link does not use it up. You can type the code instead.</li>
     <li>You land on the dashboard. The badge shows Platform admin, Owner or Member.</li>
   </ol>
-  <p>A person creating a new agency uses the invite code first, then the same email. A colleague who was invited presses <strong>Join this agency</strong> and is signed in from that page.</p>
+  <p>A person creating a new agency uses the invite code first, then the same email. A colleague who was invited presses <strong>Join this agency</strong>, enters the 6-digit code emailed to them, and is signed in from that page.</p>
   <p>An Owner or a Member stays signed in for 30 days of use, and never more than 90 days from sign-in. A Platform admin session lasts 12 hours and is not extended when they come back.</p>
   <p>A Viewer:</p>
   <ol>

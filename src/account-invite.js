@@ -1,21 +1,32 @@
 // An Owner invites a Member or another Owner into the agency they already
-// belong to. The link is single-use, expires after 7 days, and can be revoked.
-// Accepting creates a user when the email is new, or adds a membership when
-// the person already uses pivitlab. It does not create an agency or a site.
-// Platform-admin invite codes stay on invite_codes and are not used here.
+// belong to. The link can be opened as often as you like. It is used up once
+// the person joins, expires after 7 days, and can be revoked. Joining sends a
+// 6-digit code to the invited address first. The code uses the same expiry,
+// attempt limit and rate limits as a sign-in code. Accepting creates a user
+// when the email is new, or adds a membership when the person already uses
+// pivitlab. It does not create an agency or a site. Platform-admin invite
+// codes stay on invite_codes and are not used here.
 
 const crypto = require('crypto');
 const db = require('./db');
-const { sha256 } = require('./timing');
+const { sha256, timingSafeStringEqual } = require('./timing');
 const { recordAudit } = require('./audit');
-const { normaliseEmail, requestIp, TERMS_VERSION } = require('./auth-flow');
+const {
+  normaliseEmail,
+  requestIp,
+  TERMS_VERSION,
+  allowLinkRequest,
+  CODE_TRIES,
+  RESEND_COOLDOWN_MS,
+  TOKEN_TTL_MS,
+} = require('./auth-flow');
+const { VIEW_ONLY_MESSAGE } = require('./membership-access');
 const { personClosed, SIGN_IN_CLOSED } = require('./person-state');
 const { hit, LIMITED_MESSAGE } = require('./rate-limit');
 const { sendEmail } = require('./mailer');
 const { appUrl } = require('./app-origin');
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const RESEND_COOLDOWN_MS = 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const EMAIL_LIMIT = 5;
 const ACTOR_LIMIT = 20;
@@ -35,6 +46,10 @@ const NOT_PENDING = 'That invite is no longer pending.';
 const EXPIRED = 'That invite has expired. Create a new one.';
 const COOLDOWN = 'Wait a minute before sending that invite again.';
 const EMAIL_FAILED = 'The email was not sent. Copy the link instead.';
+const JOIN_LINK_COPY = 'You can open this link as often as you like. It\u2019s used up once you join.';
+const CODE_INVALID = 'That code is not valid, or it has expired.';
+const CODE_LOCKED = 'That code has been tried too many times. Ask for a new one.';
+const CODE_SEND_FAILED = "We couldn't send the email. Please try again.";
 
 function oneLine(value, max) {
   return String(value || '').replace(/[\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -61,13 +76,32 @@ function inviteEmailText({ agencyName, role, link }) {
     '',
     `You have been invited to join ${agency} on pivitlab as ${rolePhrase(role)}.`,
     '',
-    'Use this link to join that agency. It works once and expires in 7 days. Joining does not create a new agency.',
+    `Use this link to join that agency. ${JOIN_LINK_COPY} It expires in 7 days. Joining does not create a new agency.`,
     '',
     link,
     '',
-    'Opening the link does not use it up. Press Join this agency on that page.',
+    'Press Join this agency on that page. We\u2019ll email a 6-digit code to this address. The code lasts 15 minutes.',
     '',
     'If you did not expect this, you can ignore this email.',
+    '',
+    'pivitlab',
+  ].join('\n');
+}
+
+function joinCodeEmailText({ agencyName, code, link }) {
+  const agency = oneLine(agencyName, 120) || 'the agency';
+  return [
+    'Hello,',
+    '',
+    `Your code to join ${agency} on pivitlab is ${code}.`,
+    '',
+    'It lasts 15 minutes. You can try it 5 times.',
+    '',
+    `Enter it on the invite page. ${JOIN_LINK_COPY}`,
+    '',
+    link,
+    '',
+    'If you did not ask for this, you can ignore this email.',
     '',
     'pivitlab',
   ].join('\n');
@@ -156,9 +190,8 @@ async function lockAgency(client, accountId, userId) {
     [accountId, actorId]
   );
   const actor = rows[0];
-  if (!actor || actor.role !== 'owner' || actor.removed_at || actor.suspended_at || actor.deleted_at) {
-    return null;
-  }
+  if (!actor || actor.removed_at || actor.suspended_at || actor.deleted_at) return null;
+  if (actor.role !== 'owner') return { viewOnly: true };
   return { email: actor.email, accountName: account.rows[0].name };
 }
 
@@ -220,6 +253,7 @@ async function createAccountInvite({ accountId, actorUserId, email, role, send, 
   const created = await withClient(async (client) => {
     const owner = await lockAgency(client, accountId, actorUserId);
     if (!owner) return notFound();
+    if (owner.viewOnly) return { ok: false, status: 403, error: VIEW_ONLY_MESSAGE };
     const refusal = await refuseTarget(client, accountId, normalised);
     if (refusal) return refusal;
     const pending = await client.query(
@@ -284,7 +318,7 @@ async function createAccountInvite({ accountId, actorUserId, email, role, send, 
 async function listAccountInvites({ accountId, actorUserId }) {
   return withClient(async (client) => {
     const owner = await lockAgency(client, accountId, actorUserId);
-    if (!owner) return notFound();
+    if (!owner || owner.viewOnly) return notFound();
     const { rows } = await client.query(
       `SELECT id, email, role, expires_at, created_at, last_sent_at
        FROM account_invites
@@ -321,6 +355,7 @@ async function revokeAccountInvite({ accountId, actorUserId, inviteId, ip }) {
     if (!owner) return notFound();
     const loaded = await loadOwnInvite(client, accountId, inviteId);
     if (loaded.missing) return notFound();
+    if (owner.viewOnly) return { ok: false, status: 403, error: VIEW_ONLY_MESSAGE };
     const invite = loaded.invite;
     if (invite.used_at || invite.revoked_at) return { ok: false, status: 400, error: NOT_PENDING };
     const { rows } = await client.query(
@@ -357,6 +392,7 @@ async function resendAccountInvite({ accountId, actorUserId, inviteId, ip }) {
     if (!owner) return notFound();
     const loaded = await loadOwnInvite(client, accountId, inviteId);
     if (loaded.missing) return notFound();
+    if (owner.viewOnly) return { ok: false, status: 403, error: VIEW_ONLY_MESSAGE };
     const invite = loaded.invite;
     if (invite.used_at || invite.revoked_at) return { ok: false, status: 400, error: NOT_PENDING };
     if (new Date(invite.expires_at).getTime() <= Date.now()) {
@@ -436,7 +472,153 @@ async function previewAccountInvite(rawToken, req) {
   };
 }
 
-async function acceptAccountInvite(rawToken, req) {
+function codeStillFresh(invite, now = Date.now()) {
+  if (!invite || !invite.code_hash || !invite.code_expires_at) return false;
+  return new Date(invite.code_expires_at).getTime() > now;
+}
+
+function codeSentRecently(invite, now = Date.now()) {
+  if (!codeStillFresh(invite, now)) return false;
+  const sentAt = new Date(invite.code_expires_at).getTime() - TOKEN_TTL_MS;
+  return now - sentAt < RESEND_COOLDOWN_MS;
+}
+
+async function loadInviteByToken(token) {
+  const { rows } = await db.query(
+    `SELECT i.*, a.name AS agency_name
+     FROM account_invites i
+     JOIN accounts a ON a.id = i.account_id
+     WHERE i.token_hash = $1`,
+    [sha256(token)]
+  );
+  return rows[0] || null;
+}
+
+async function sendJoinCode(token, req) {
+  const invite = await loadInviteByToken(token);
+  if (!inviteOpen(invite)) return { ok: false, status: 400, error: INVITE_INVALID };
+  const user = await db.query(
+    `SELECT suspended_at, deleted_at FROM users WHERE email = $1`,
+    [invite.email]
+  );
+  if (personClosed(user.rows[0])) return { ok: false, status: 401, error: SIGN_IN_CLOSED };
+
+  const ip = requestIp(req);
+  const limited = await allowLinkRequest(invite.email, ip);
+  if (!limited.ok) return limitedResult(limited);
+  if (codeSentRecently(invite)) return { ok: true, codeSent: true, email: invite.email };
+
+  const code = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
+  const expiresAt = new Date(Date.now() + TOKEN_TTL_MS).toISOString();
+  await db.query(
+    `UPDATE account_invites
+     SET code_hash = $2, code_attempts = 0, code_expires_at = $3
+     WHERE id = $1 AND used_at IS NULL AND revoked_at IS NULL`,
+    [invite.id, sha256(code), expiresAt]
+  );
+  const agency = oneLine(invite.agency_name, 120) || 'the agency';
+  const link = inviteLink(token);
+  let sent;
+  try {
+    sent = await sendEmail({
+      to: invite.email,
+      subject: `Your pivitlab code to join ${agency}`,
+      text: joinCodeEmailText({ agencyName: agency, code, link }),
+      tag: 'agency-join-code',
+    });
+  } catch (err) {
+    console.error('[email] join code was not sent', err && err.message);
+    sent = { error: true };
+  }
+  if (!sent || sent.error) {
+    await db.query(
+      `UPDATE account_invites SET code_hash = NULL, code_expires_at = NULL WHERE id = $1`,
+      [invite.id]
+    );
+    return { ok: false, status: 503, error: CODE_SEND_FAILED };
+  }
+  return { ok: true, codeSent: true, email: invite.email };
+}
+
+// Membership changes. The invite row is already locked. The code has matched.
+async function grantMembership(client, invite, ip) {
+  const account = await client.query(`SELECT id, name FROM accounts WHERE id = $1`, [invite.account_id]);
+  if (!account.rows[0]) return { ok: false, status: 400, error: INVITE_INVALID };
+
+  const existing = await client.query(
+    `SELECT id, is_superadmin, suspended_at, deleted_at, verified_at
+     FROM users WHERE email = $1 FOR UPDATE`,
+    [invite.email]
+  );
+  let user = existing.rows[0];
+  if (user && personClosed(user)) return { ok: false, status: 401, error: SIGN_IN_CLOSED };
+
+  let createdUser = false;
+  if (!user) {
+    const inserted = await client.query(
+      `INSERT INTO users (email, verified_at, terms_version, terms_accepted_at)
+       VALUES ($1, now(), $2, now())
+       RETURNING id, is_superadmin`,
+      [invite.email, TERMS_VERSION]
+    );
+    user = inserted.rows[0];
+    createdUser = true;
+  } else if (!user.verified_at) {
+    await client.query(`UPDATE users SET verified_at = now() WHERE id = $1`, [user.id]);
+  }
+
+  const membership = await client.query(
+    `SELECT role, removed_at FROM memberships
+     WHERE account_id = $1 AND user_id = $2
+     FOR UPDATE`,
+    [invite.account_id, user.id]
+  );
+  let rejoined = false;
+  if (!membership.rows[0]) {
+    await client.query(
+      `INSERT INTO memberships (account_id, user_id, role) VALUES ($1, $2, $3)`,
+      [invite.account_id, user.id, invite.role]
+    );
+  } else if (membership.rows[0].removed_at) {
+    await client.query(
+      `UPDATE memberships SET role = $3, removed_at = NULL
+       WHERE account_id = $1 AND user_id = $2`,
+      [invite.account_id, user.id, invite.role]
+    );
+    rejoined = true;
+  }
+
+  await client.query(
+    `UPDATE account_invites
+     SET used_at = now(), used_by = $2, code_hash = NULL
+     WHERE id = $1`,
+    [invite.id, user.id]
+  );
+  await recordAudit(client, {
+    accountId: invite.account_id,
+    userId: user.id,
+    actorLabel: invite.email,
+    action: 'account_invite_accepted',
+    targetType: 'account_invite',
+    targetId: invite.id,
+    detail: {
+      email: invite.email,
+      role: invite.role,
+      created_user: createdUser,
+      rejoined,
+    },
+    ip,
+  });
+  return {
+    ok: true,
+    userId: user.id,
+    accountId: invite.account_id,
+    superadmin: user.is_superadmin === true,
+    email: invite.email,
+  };
+}
+
+async function acceptAccountInvite(rawToken, req, rawCode) {
   const ip = requestIp(req);
   const limited = await limitBuckets([
     { bucket: `account-invite-accept:${ip || 'unknown'}`, limit: ACCEPT_LIMIT },
@@ -444,87 +626,61 @@ async function acceptAccountInvite(rawToken, req) {
   if (!limited.ok) return limitedResult(limited);
   const token = String(rawToken || '').trim();
   if (!token) return { ok: false, status: 400, error: INVITE_INVALID };
+  const code = String(rawCode == null ? '' : rawCode).trim();
+  if (!code) return sendJoinCode(token, req);
+  if (!/^\d{6}$/.test(code)) return { ok: false, status: 401, error: CODE_INVALID };
 
-  return withClient(async (client) => {
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
     const found = await client.query(
       `SELECT * FROM account_invites WHERE token_hash = $1 FOR UPDATE`,
       [sha256(token)]
     );
     const invite = found.rows[0];
-    if (!inviteOpen(invite)) return { ok: false, status: 400, error: INVITE_INVALID };
-    const account = await client.query(`SELECT id, name FROM accounts WHERE id = $1`, [invite.account_id]);
-    if (!account.rows[0]) return { ok: false, status: 400, error: INVITE_INVALID };
-
-    const existing = await client.query(
-      `SELECT id, is_superadmin, suspended_at, deleted_at, verified_at
-       FROM users WHERE email = $1 FOR UPDATE`,
+    if (!inviteOpen(invite)) {
+      await client.query('ROLLBACK');
+      return { ok: false, status: 400, error: INVITE_INVALID };
+    }
+    const closed = await client.query(
+      `SELECT suspended_at, deleted_at FROM users WHERE email = $1`,
       [invite.email]
     );
-    let user = existing.rows[0];
-    if (user && personClosed(user)) return { ok: false, status: 401, error: SIGN_IN_CLOSED };
-
-    let createdUser = false;
-    if (!user) {
-      const inserted = await client.query(
-        `INSERT INTO users (email, verified_at, terms_version, terms_accepted_at)
-         VALUES ($1, now(), $2, now())
-         RETURNING id, is_superadmin`,
-        [invite.email, TERMS_VERSION]
-      );
-      user = inserted.rows[0];
-      createdUser = true;
-    } else if (!user.verified_at) {
-      await client.query(`UPDATE users SET verified_at = now() WHERE id = $1`, [user.id]);
+    if (personClosed(closed.rows[0])) {
+      await client.query('ROLLBACK');
+      return { ok: false, status: 401, error: SIGN_IN_CLOSED };
     }
-
-    const membership = await client.query(
-      `SELECT role, removed_at FROM memberships
-       WHERE account_id = $1 AND user_id = $2
-       FOR UPDATE`,
-      [invite.account_id, user.id]
-    );
-    let rejoined = false;
-    if (!membership.rows[0]) {
-      await client.query(
-        `INSERT INTO memberships (account_id, user_id, role) VALUES ($1, $2, $3)`,
-        [invite.account_id, user.id, invite.role]
-      );
-    } else if (membership.rows[0].removed_at) {
-      await client.query(
-        `UPDATE memberships SET role = $3, removed_at = NULL
-         WHERE account_id = $1 AND user_id = $2`,
-        [invite.account_id, user.id, invite.role]
-      );
-      rejoined = true;
+    if (!codeStillFresh(invite) || invite.code_attempts >= CODE_TRIES) {
+      await client.query('ROLLBACK');
+      return {
+        ok: false,
+        status: 401,
+        error: invite.code_attempts >= CODE_TRIES && invite.code_hash ? CODE_LOCKED : CODE_INVALID,
+      };
     }
-
-    await client.query(
-      `UPDATE account_invites SET used_at = now(), used_by = $2 WHERE id = $1`,
-      [invite.id, user.id]
-    );
-    await recordAudit(client, {
-      accountId: invite.account_id,
-      userId: user.id,
-      actorLabel: invite.email,
-      action: 'account_invite_accepted',
-      targetType: 'account_invite',
-      targetId: invite.id,
-      detail: {
-        email: invite.email,
-        role: invite.role,
-        created_user: createdUser,
-        rejoined,
-      },
-      ip,
-    });
-    return {
-      ok: true,
-      userId: user.id,
-      accountId: invite.account_id,
-      superadmin: user.is_superadmin === true,
-      email: invite.email,
-    };
-  });
+    if (!timingSafeStringEqual(sha256(code), invite.code_hash)) {
+      const attempts = invite.code_attempts + 1;
+      await client.query(`UPDATE account_invites SET code_attempts = $2 WHERE id = $1`, [invite.id, attempts]);
+      await client.query('COMMIT');
+      return {
+        ok: false,
+        status: 401,
+        error: attempts >= CODE_TRIES ? CODE_LOCKED : CODE_INVALID,
+      };
+    }
+    const joined = await grantMembership(client, invite, ip);
+    if (!joined.ok) {
+      await client.query('ROLLBACK');
+      return joined;
+    }
+    await client.query('COMMIT');
+    return joined;
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (rollbackErr) { /* already failing */ }
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // Called while a person is being deleted, before their email is anonymised.
@@ -575,7 +731,11 @@ module.exports = {
   EXPIRED,
   COOLDOWN,
   EMAIL_FAILED,
+  JOIN_LINK_COPY,
+  CODE_INVALID,
+  CODE_LOCKED,
   inviteEmailText,
+  joinCodeEmailText,
   inviteLink,
   createAccountInvite,
   listAccountInvites,

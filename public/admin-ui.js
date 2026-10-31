@@ -994,6 +994,18 @@
     return null;
   }
 
+  const VIEW_ONLY_NOTE = 'You have view-only access. Ask an Owner to make changes.';
+
+  // Owners, the emergency password, and a platform admin can change the agency.
+  // A Member cannot. A support view cannot. A Viewer cannot.
+  function canChangeAgency(me) {
+    if (!me || me.role === 'client') return false;
+    if (me.view_as && me.view_as.id) return false;
+    if (me.superadmin === true) return true;
+    if (me.emergency === true) return true;
+    return me.membership === 'owner';
+  }
+
   function canManageTeam(me) {
     if (!me || me.membership !== 'owner') return false;
     if (me.view_as && me.view_as.id) return false;
@@ -1003,11 +1015,7 @@
   // Clear test traffic is for an agency Owner or a platform admin.
   // A support view is read-only, and a Member does not get the button.
   function canClearTestTraffic(me) {
-    if (!me || me.role === 'client') return false;
-    if (me.view_as && me.view_as.id) return false;
-    if (me.superadmin === true) return true;
-    if (me.emergency === true) return true;
-    return me.membership === 'owner';
+    return canChangeAgency(me);
   }
 
   function canOpenTeam(me) {
@@ -1382,6 +1390,8 @@
     usersDeniedMessage,
     usersRoute,
     canManageTeam,
+    canChangeAgency,
+    VIEW_ONLY_NOTE,
     canClearTestTraffic,
     canOpenTeam,
     teamDeniedMessage,

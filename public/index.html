@@ -538,6 +538,7 @@
         </span>
       </div>
       <div id="unverified-banner" class="banner" hidden>We have not seen the snippet on your site yet. You can build a test, and you can start it once the check ticks.</div>
+      <div id="member-view-only" class="banner" hidden>You have view-only access. Ask an Owner to make changes.</div>
       <div class="card" id="first-run" hidden>
         <div class="first-run-head">
           <div>
@@ -643,7 +644,7 @@
           <p class="hint" style="margin:4px 0 0;">Open a test for variants, goals and results. New tests stay draft until you start them.</p>
         </div>
         <div class="page-actions">
-          <button type="button" class="btn-ghost" onclick="openClientsModal()">Viewers</button>
+          <button type="button" class="btn-ghost" id="viewers-btn" onclick="openClientsModal()">Viewers</button>
           <button type="button" class="btn-ghost" data-snippet-toggle>Copy snippet</button>
           <button type="button" id="new-experiment-btn" onclick="startNewExperiment()">New experiment</button>
         </div>
@@ -985,7 +986,7 @@
         </div>
       </section>
       <section class="card" id="team-card" hidden>
-        <p class="hint" style="margin-top:0;">Invite a Member or another Owner to this agency. The link works once, lasts 7 days, and can be revoked. Joining adds them to this agency. It does not create a new agency.</p>
+        <p class="hint" style="margin-top:0;">Invite a Member or another Owner to this agency. You can open this link as often as you like. It’s used up once you join. It lasts 7 days and can be revoked. Joining adds them to this agency. It does not create a new agency. We’ll email a 6-digit code to the invited address when they press Join this agency.</p>
         <h2>Invite someone</h2>
         <p class="hint" style="margin-top:0;">Only an Owner can invite. Email the link, or create a link to copy. pivitlab shows the link once.</p>
         <label for="team-email">Work email</label>
@@ -1334,6 +1335,18 @@ function applySessionChrome() {
   if (usersNav) usersNav.hidden = !UI.canOpenUsers(me);
   const teamNav = document.getElementById('nav-page-team');
   if (teamNav) teamNav.hidden = !UI.canOpenTeam(me);
+  const canChange = UI.canChangeAgency(me);
+  const createNav = document.getElementById('nav-page-create');
+  if (createNav) createNav.hidden = !canChange;
+  const newExperiment = document.getElementById('new-experiment-btn');
+  if (newExperiment) newExperiment.hidden = !canChange;
+  const viewersBtn = document.getElementById('viewers-btn');
+  if (viewersBtn) viewersBtn.hidden = !canChange;
+  const memberNote = document.getElementById('member-view-only');
+  if (memberNote) {
+    memberNote.hidden = canChange || me.membership !== 'member';
+    memberNote.textContent = UI.VIEW_ONLY_NOTE;
+  }
   const emergency = document.getElementById('emergency-banner');
   if (emergency) {
     const text = document.getElementById('emergency-banner-text');
@@ -1963,7 +1976,7 @@ function paintSitesCard(sites) {
   const list = document.getElementById('sites-list');
   const addForm = document.getElementById('sites-add-form');
   if (!list) return;
-  const readOnly = !!(sessionMe && sessionMe.view_as && sessionMe.view_as.id);
+  const readOnly = !agencyCanChange();
   if (addForm) addForm.hidden = readOnly;
   if (!sites.length) {
     list.innerHTML = '<p class="hint">No site yet. Add the website you want to test.</p>';
@@ -2119,7 +2132,7 @@ function paintFirstRun(setup) {
     document.getElementById('first-run-snippet').textContent = 'Choose a site to get the snippet.';
     conflict.hidden = true;
   } else {
-    form.hidden = false;
+    form.hidden = !agencyCanChange();
     host.textContent = 'Add the site you want to test.';
     document.getElementById('first-run-snippet').textContent = 'Add your site to get the snippet.';
     conflict.hidden = true;
@@ -2129,7 +2142,7 @@ function paintFirstRun(setup) {
   checkText.className = line.problem ? 'error-msg' : 'hint';
   if (previewUrl) previewUrl.textContent = UI.previewExampleUrl(domain);
   if (create) {
-    create.hidden = testDone || accountSites.length === 0;
+    create.hidden = !agencyCanChange() || testDone || accountSites.length === 0;
     create.disabled = !site;
   }
   if (testDoneHint) {
@@ -2168,7 +2181,7 @@ async function refreshFirstRun() {
   const checklist = result.data.checklist || {};
   const show = checklist.visible === true;
   card.hidden = !show;
-  if (dismiss) dismiss.hidden = !!(sessionMe && sessionMe.view_as && sessionMe.view_as.id);
+  if (dismiss) dismiss.hidden = !agencyCanChange();
   applyAccountSites(result.data);
   const site = result.data.site;
   if (unverified) {
@@ -2244,6 +2257,10 @@ async function applyRoute() {
     await loadUsers(token);
     return;
   }
+  if (hash === '#create' && !agencyCanChange()) {
+    go('#home');
+    return;
+  }
   const pages = { '#home': 'page-home', '#create': 'page-create', '#preview': 'page-preview', '#status': 'page-status' };
   const page = pages[hash] || 'page-home';
   showPage(page);
@@ -2264,7 +2281,35 @@ async function applyRoute() {
   if (token !== routeToken) return;
 }
 
+function agencyCanChange() {
+  return UI.canChangeAgency(sessionMe);
+}
+
+const MEMBER_WRITE_ACTIONS = new Set([
+  'set-status', 'add-variant', 'save-variant', 'make-edits', 'toggle-variant',
+  'delete-variant', 'add-goal-row', 'save-goals', 'remove-goal', 'add-goal',
+  'save-settings', 'archive-experiment', 'delete-experiment', 'test-traffic',
+  'save-plan', 'reveal-early', 'adopt-plan', 'conclusion-generate', 'conclusion-release',
+]);
+
+function stripMemberControls(root) {
+  if (agencyCanChange()) return;
+  const scope = root && root.querySelectorAll ? root : document;
+  scope.querySelectorAll('[data-action]').forEach((btn) => {
+    if (MEMBER_WRITE_ACTIONS.has(btn.getAttribute('data-action'))) btn.hidden = true;
+  });
+  const addRow = document.getElementById('add-variant-row');
+  if (addRow && scope.contains(addRow)) addRow.hidden = true;
+  ['settings-match', 'settings-element', 'settings-activation', 'settings-activation-value', 'settings-activation-js', 'settings-hosts', 'settings-client', 'settings-status'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el && scope.contains(el)) el.disabled = true;
+  });
+  scope.querySelectorAll('.var-name, [data-var-split]').forEach((el) => { el.disabled = true; });
+  scope.querySelectorAll('[data-planner] input, [data-planner] [data-plan-choice]').forEach((el) => { el.disabled = true; });
+}
+
 function startNewExperiment() {
+  if (!agencyCanChange()) return;
   resetWizard();
   go('#create');
 }
@@ -2620,7 +2665,7 @@ async function loadReviewRequests() {
   card.hidden = false;
   list.innerHTML = result.data.requests.map((row) => `<div class="activity-row">
       <span><strong>${UI.escapeHtml(row.client_name || 'A viewer')}</strong> asked for a review of <button type="button" class="name-btn" data-open="${row.experiment_id}">${UI.escapeHtml(row.experiment_name || 'a test')}</button><span class="hint"> · ${UI.escapeHtml(row.requested_label || '')}</span></span>
-      <button type="button" class="btn-ghost" data-review-seen="${row.id}">Seen</button>
+      ${agencyCanChange() ? `<button type="button" class="btn-ghost" data-review-seen="${row.id}">Seen</button>` : ''}
     </div>`).join('');
 }
 
@@ -2637,7 +2682,7 @@ async function loadOwnerNotices() {
   card.hidden = false;
   list.innerHTML = result.data.notices.map((row) => `<div class="activity-row">
       <span><strong>${UI.escapeHtml(row.title || 'Notice')}</strong> ${UI.escapeHtml(row.body || '')}<span class="hint"> · ${UI.escapeHtml(row.created_label || '')}</span></span>
-      <button type="button" class="btn-ghost" data-notice-read="${row.id}">Dismiss</button>
+      ${agencyCanChange() ? `<button type="button" class="btn-ghost" data-notice-read="${row.id}">Dismiss</button>` : ''}
     </div>`).join('');
 }
 
@@ -3288,6 +3333,7 @@ function renderDetail() {
     });
   }
   refreshDetailPreviewWarning();
+  stripMemberControls(document.getElementById('detail-root'));
 }
 
 function detailPreviewPage() {
@@ -4365,6 +4411,7 @@ function mountPlanner(prefix, expId, payload) {
   fillPlannerNotes(prefix, seed.sentence ? seed : payload.preview);
   bindPlanner(prefix, expId);
   if (!seed.sentence) previewPlanner(prefix, expId);
+  stripMemberControls(host);
 }
 
 function mountDemoPlan(prefix) {
@@ -4499,6 +4546,7 @@ function renderPlanPanel(reading, extras) {
     return;
   }
   panel.innerHTML = '';
+  stripMemberControls(panel);
 }
 
 function renderVerdict(verdict) {
@@ -4563,6 +4611,7 @@ async function loadConclusionCard(expId) {
   }
   card.innerHTML = `<h2>Conclusion PDF</h2>${body}`;
   panel.appendChild(card);
+  stripMemberControls(card);
 }
 
 async function loadOwnerSnapshotNote(expId) {
@@ -4663,6 +4712,7 @@ async function loadResults() {
     : results.reduce((sum, row) => sum + Number(row.visitors || 0), 0);
   if (reading && reading.mode === 'blind') {
     renderPlanPanel(reading);
+    stripMemberControls(document.getElementById('plan-panel'));
     loadOwnerSnapshotNote(expId);
     const gate = document.getElementById('results-gate');
     const live = document.getElementById('results-live');
@@ -4682,6 +4732,7 @@ async function loadResults() {
     currentDetail.suggestedPlan = planResult.ok ? planResult.data.preview : null;
   }
   renderPlanPanel(reading, { sentence: nudgeSentence });
+  stripMemberControls(document.getElementById('plan-panel'));
   if (reading && (reading.mode === 'verdict' || reading.mode === 'data_problem')) {
     const verdictResult = await callApi(withTestQuery(`/api/results/${expId}/verdict`), { headers: authHeaders() });
     if (verdictResult.ok) renderVerdict(verdictResult.data);
@@ -6406,10 +6457,10 @@ async function loadManageVariants() {
       </div>
       <div class="vc-actions">
         <button type="button" class="btn-ghost" data-manage="preview" data-id="${v.id}">Preview</button>
-        <button type="button" class="btn-ghost" data-manage="edit" data-id="${v.id}">Make edits</button>
+        ${agencyCanChange() ? `<button type="button" class="btn-ghost" data-manage="edit" data-id="${v.id}">Make edits</button>` : ''}
         <button type="button" class="btn-ghost" data-manage="open">Open experiment</button>
-        <button type="button" class="btn-ghost" data-manage="toggle" data-id="${v.id}" data-enabled="${v.enabled ? 'false' : 'true'}">${v.enabled ? 'Pause' : 'Resume'}</button>
-        <button type="button" class="btn-danger" data-manage="delete" data-id="${v.id}">Delete</button>
+        ${agencyCanChange() ? `<button type="button" class="btn-ghost" data-manage="toggle" data-id="${v.id}" data-enabled="${v.enabled ? 'false' : 'true'}">${v.enabled ? 'Pause' : 'Resume'}</button>` : ''}
+        ${agencyCanChange() ? `<button type="button" class="btn-danger" data-manage="delete" data-id="${v.id}">Delete</button>` : ''}
       </div>
     `;
     listEl.appendChild(card);
@@ -6461,13 +6512,14 @@ function renderStatusPage() {
   const label = exp.status ? exp.status.charAt(0).toUpperCase() + exp.status.slice(1) : '';
   current.textContent = label;
   const action = UI.statusAction(exp.status);
-  const main = action
+  const main = agencyCanChange() && action
     ? `<button type="button" id="status-main" data-next="${UI.escapeHtml(action.next)}">${UI.escapeHtml(action.label)}</button>`
     : '';
-  const archive = exp.status === 'archived'
+  const archive = !agencyCanChange() || exp.status === 'archived'
     ? ''
     : '<button type="button" class="btn-danger" id="status-archive">Archive</button>';
-  actions.innerHTML = `${main}${archive}<button type="button" class="btn-ghost" id="status-open">Open in Settings</button>`;
+  const note = agencyCanChange() ? '' : `<p class="hint">${UI.escapeHtml(UI.VIEW_ONLY_NOTE)}</p>`;
+  actions.innerHTML = `${note}${main}${archive}<button type="button" class="btn-ghost" id="status-open">Open in Settings</button>`;
 }
 
 async function runStatusAction(status) {
@@ -6696,7 +6748,7 @@ document.getElementById('first-run-copy').addEventListener('click', () => {
 });
 
 document.getElementById('first-run-create').addEventListener('click', () => {
-  if (!chosenSiteId) return;
+  if (!agencyCanChange() || !chosenSiteId) return;
   if (!wizard.expId) {
     wizard.hostsEdited = false;
     wizard.hosts = domainsForChosenSite();

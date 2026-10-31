@@ -45,8 +45,8 @@ pivitlab.com can receive mail. Every outgoing message still sets Reply-To to `EM
 An invite code creates a new agency. It does not add a person to one that already exists. An Owner uses **Team** for that.
 
 1. Open **Team**, under **Invite someone**. Enter their work email and choose Member or Owner.
-2. Choose **Email the invite**, or **Create a link**. The link is shown once, works once, lasts 7 days, and can be revoked. Opening it does not use it up.
-3. They press **Join this agency**. That adds them to this agency. If they already use pivitlab, they are added. It does not create an agency or a site.
+2. Choose **Email the invite**, or **Create a link**. The link is shown once, lasts 7 days, and can be revoked. You can open this link as often as you like. It’s used up once you join. Pressing **Join this agency** emails a 6-digit code to the invited address. The code lasts 15 minutes and uses the same attempt limit as a sign-in code. The join finishes only when that code is entered, including when that address is already on pivitlab.
+3. They press **Join this agency** and enter the emailed code. That adds them to this agency. If they already use pivitlab, the code still has to match before they are added. It does not create an agency or a site.
 4. **Pending invites** lists the ones still open. **Resend** emails a new link and replaces the previous one.
 
 A suspended or deleted address cannot be invited. Someone already in the agency cannot be invited again. A Member can see Team and cannot send invites. See [help.md](help.md).

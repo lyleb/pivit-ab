@@ -8,6 +8,7 @@
 const db = require('./db');
 const { recordAudit, endUserSessions, endAccountUserSessions } = require('./audit');
 const { LAST_ACCOUNT_OWNER, NOT_YOURSELF } = require('./person-state');
+const { VIEW_ONLY_MESSAGE } = require('./membership-access');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -154,14 +155,18 @@ async function removeMembership({ accountId, actorUserId, targetUserId, ip }) {
       [accountId]
     );
     const actor = locked.rows.find((row) => sameId(row.user_id, actorId));
-    if (!actor || actor.role !== 'owner' || actor.removed_at || actor.suspended_at || actor.deleted_at) {
-      await client.query('ROLLBACK');
-      return notFound();
-    }
     const target = locked.rows.find((row) => sameId(row.user_id, targetId));
     if (!target || target.removed_at || target.deleted_at) {
       await client.query('ROLLBACK');
       return notFound();
+    }
+    if (!actor || actor.removed_at || actor.suspended_at || actor.deleted_at) {
+      await client.query('ROLLBACK');
+      return notFound();
+    }
+    if (actor.role !== 'owner') {
+      await client.query('ROLLBACK');
+      return { ok: false, status: 403, error: VIEW_ONLY_MESSAGE };
     }
     if (remainingOwner(target)) {
       const others = locked.rows.filter((row) => remainingOwner(row) && !sameId(row.user_id, targetId));

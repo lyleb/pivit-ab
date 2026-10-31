@@ -41,6 +41,8 @@ assert.strictEqual(activation.canSetJsCondition({ role: 'owner', readOnly: true 
 assert.strictEqual(activation.canSetJsCondition({ role: 'client_viewer' }), false);
 assert.strictEqual(activation.canSetJsCondition(null), false);
 assert.strictEqual(activation.jsConditionChangeError({ role: 'owner' }, 'page_load', null, { type: 'js_condition', value: 'true' }), '');
+assert.ok(activation.jsConditionChangeError({ role: 'member' }, null, null, { type: 'js_condition', value: 'true' }).includes('page JavaScript'));
+assert.strictEqual(activation.jsConditionChangeError({ role: 'member', superadmin: true }, 'page_load', null, { type: 'js_condition', value: 'true' }), '');
 assert.ok(activation.jsConditionChangeError({ role: 'client_viewer' }, null, null, { type: 'js_condition', value: 'true' }).includes('page JavaScript'));
 assert.strictEqual(activation.jsConditionChangeError(
   { role: 'client_viewer' },

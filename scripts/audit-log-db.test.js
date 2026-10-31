@@ -386,7 +386,7 @@ async function main() {
     assert.strictEqual(unchanged.rows[0].role, 'member');
 
     const memberChange = await request(memberServer, 'PATCH', `/api/account/members/${beta.userId}`, { role: 'member' });
-    assert.strictEqual(memberChange.status, 404);
+    assert.strictEqual(memberChange.status, 403);
     const betaOwner = await db.query(
       `SELECT role FROM memberships WHERE account_id = $1 AND user_id = $2`,
       [beta.id, beta.userId]
