@@ -416,6 +416,40 @@
     return { text: INSTALL_WAITING, problem: false, banner: INSTALL_BANNER };
   }
 
+  const GETTING_STARTED_LINKS = {
+    site: '#sites-card',
+    snippet: '#sites-card',
+    test: '#create',
+    preview: '#preview',
+    started: '#status',
+  };
+  const GETTING_STARTED_OWNER = { site: true, snippet: false, test: true, preview: false, started: true };
+
+  // Which Start here steps are ticked, waiting, or hidden for a Member.
+  // Waiting copy is the line under a step that cannot be done yet.
+  function gettingStartedState(checklist, canChange) {
+    const steps = checklist && Array.isArray(checklist.steps) ? checklist.steps : [];
+    const done = {};
+    ['site', 'snippet', 'test', 'preview', 'started'].forEach((id) => {
+      const found = steps.find((step) => step && step.id === id);
+      done[id] = !!(found && found.done);
+    });
+    function waiting(id) {
+      if (done[id]) return '';
+      if ((id === 'snippet' || id === 'test') && !done.site) return 'Available once you have added a site';
+      if ((id === 'preview' || id === 'started') && !done.test) return 'Available once you have created a test';
+      if ((id === 'preview' || id === 'started') && !done.snippet) return 'Available once your snippet has been seen';
+      return '';
+    }
+    return ['site', 'snippet', 'test', 'preview', 'started'].map((id) => ({
+      id,
+      done: done[id],
+      hidden: canChange !== true && GETTING_STARTED_OWNER[id] === true,
+      waiting: waiting(id),
+      href: GETTING_STARTED_LINKS[id],
+    }));
+  }
+
   function clientLoginUrl(origin) {
     return `${origin}/login.html?role=client`;
   }
@@ -1413,6 +1447,7 @@
     DOMAIN_IN_USE_WARNING,
     siteChoiceState,
     installCheckLine,
+    gettingStartedState,
     clientLoginUrl,
     previewExampleUrl,
     shouldShowSignpost,

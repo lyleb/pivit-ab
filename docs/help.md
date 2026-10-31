@@ -11,6 +11,28 @@ Three kinds of people use pivitlab. The badge next to the logo tells you which o
 
 The names stored in the database stay as they are (`accounts`, `clients`, session role `client`). On screen the names are Platform admin, Agency, Owner, Member and Viewer.
 
+## Your first test
+
+Home shows **Start here** until a test has been started. Each step links to the place you do it, and it ticks only when pivitlab has actually seen that step. You can hide the card. The same path is linked from the create wizard.
+
+1. **Add a site and install the snippet.** On Home, add the website. For the Fernhill shop that is `demo.pivitlab.com`. Copy the snippet and paste it before the closing body tag on every page you might test. The snippet includes the site key, so pivitlab can tell the visit is yours.
+2. **Check it's been seen.** Open the site in a browser. Home changes once a page on that domain loads the snippet. You can build a test before this ticks. You cannot start a test until it does.
+3. **Create your first test.** Choose Create experiment. Pick the site, name the test, and set the page. On the Fernhill shop the homepage is `https://demo.pivitlab.com/`. Save the draft. Visitors still see the normal page.
+4. **Change a headline.** On the variant, choose Make edits. Select the heading and choose **Edit text**. Type the new words. No HTML is needed. On the Fernhill shop the heading says “Goods from the hill, made to be used.” Edit text saves a normal text change. Preview shows that saved change, the same way it shows any other change. HTML, CSS and JavaScript stay on Edit element for when you need them.
+5. **Set the goal to a click on a button.** A click goal counts when a visitor clicks an element. On the Fernhill shop the shop link is `a.button` (“Browse the shop”). On the Fernhill checkout at `https://site3-checkout.netlify.app/play`, Pay now is `#pay-now`. That button is only on the payment step, so it is not in the first HTML of the page. When you type a click selector, pivitlab loads the same page preview uses and says whether it matches 0, 1 or many elements. Zero is a warning. Many is a note, because a click on any match counts. Neither stops you saving the goal. A button that appears later can still be the goal.
+6. **Preview it.** Preview opens the page with a signed link. The snippet on that page applies the saved variant, including the text change, and does not count the visit. Desktop, tablet and mobile each load the page again, so JavaScript runs. `?pivit_qa=1` marks this browser as test traffic. It does not, by itself, show a draft. Use Preview for that. `?pivit_qa=0` makes this browser a normal visitor again.
+7. **Start it.** When the snippet has been seen and the preview looks right, open the test and choose Start. Until then the test stays a draft.
+
+### When a preview stays on the original page
+
+If the preview cannot be applied, the page stays as it is and says why. The three usual reasons are:
+
+- **Wrong site.** This page's snippet belongs to a different site from the test, so pivitlab shows the original page. Choose the site that owns this page, then preview again.
+- **Domain not allowed.** This page's domain is not allowed for the test, so pivitlab shows the original page. Add the domain on the test, then preview again. www and the bare domain count as the same. A different host does not.
+- **URL doesn't match.** This page does not match the test's URL rule, so pivitlab shows the original page. Open a page the test is set to run on, or change Match. The page address box says the same thing before you open preview.
+
+The Fernhill single-page shop at `https://site2-spa.netlify.app/` draws its heading in the browser. A check of the first HTML can say 0 for a selector that is on screen after the page has run. You can still save. Preview loads the page the way a visitor does.
+
 ## The Users screen
 
 This screen is for a Platform admin. Stop a support view first. Users is hidden while you are viewing another agency.

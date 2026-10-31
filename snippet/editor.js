@@ -8,9 +8,11 @@
  * scoped, short-lived token instead of a session cookie (see src/edit-token.js
  * for why: normal session cookies are deliberately never sent cross-site).
  *
- * "Edit element" opens a panel with HTML / CSS / JS tabs. Each part becomes its
- * own entry in the Changes list ('replace', 'stylesheet', 'js'), so it can be
- * edited or removed independently later. "Whole page" does not need an element.
+ * "Edit text" writes a text change for the selected element. It replaces that
+ * element's text and does not ask for HTML. "Edit element" still opens a panel
+ * with HTML / CSS / JS tabs. Each part becomes its own entry in the Changes
+ * list ('replace', 'stylesheet', 'js'), so it can be edited or removed
+ * independently later. "Whole page" does not need an element.
  * Its CSS and JavaScript are stored as page_css and page_js. "Insert banner"
  * does not need an element either. It stores one banner change: text, an
  * optional countdown, colours, top or bottom, sticky, and an optional link.
@@ -1732,6 +1734,7 @@
     }
 
     const actions = [
+      ['Edit text', () => openEditTextPanel(el, selector)],
       ['✎ Edit element', () => openEditElementPanel(el, selector)],
       ['Whole page', () => openWholePagePanel(null)],
       ['⬆ Add above', () => openInsertPanel(selector, 'insert_before')],
@@ -2012,6 +2015,39 @@
   }
 
   function openEditElementPanel(el, selector) { openEditSetPanel(el, selector, null); }
+
+  // Plain text only. Stored as a text change, the same kind preview already
+  // applies by setting the element's text. HTML, CSS and JS stay on Edit element.
+  function openEditTextPanel(el, selector) {
+    const existingIdx = allChanges.findIndex((change) => change && change.type === 'text' && change.selector === selector);
+    const current = existingIdx === -1
+      ? (el && typeof el.textContent === 'string' ? el.textContent : '')
+      : String(allChanges[existingIdx].value || '');
+    showEditorPanel({
+      id: 'pivit-edit-text-panel',
+      title: 'Edit text',
+      subtitle: selector,
+      fields: [{
+        key: 'text',
+        label: 'Text',
+        value: current,
+        hint: "Replaces this element's text. Nested markup inside it is replaced by this text. No HTML. It is saved with the other changes and shown in preview.",
+      }],
+      applyLabel: existingIdx === -1 ? 'Apply' : 'Save change',
+      onApply: (values) => {
+        const value = values.text;
+        if (!String(value || '').trim()) return { error: 'Enter the text you want visitors to see.' };
+        if (existingIdx === -1) {
+          if (el && value === el.textContent) return { error: 'Nothing changed yet.' };
+          recordAndApply({ selector, type: 'text', value });
+          return;
+        }
+        if (value === String(allChanges[existingIdx].value || '')) return { error: 'Nothing changed yet.' };
+        allChanges[existingIdx] = { ...allChanges[existingIdx], type: 'text', selector, value };
+        finishExistingEdit();
+      },
+    });
+  }
 
   // The first whole-page entry of this type, unless the Changes-list click
   // pinned a specific one. Element CSS and JS are a different type, so they

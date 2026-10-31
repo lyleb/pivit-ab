@@ -367,6 +367,7 @@ assert.ok(dashboard.includes('id="wizard-site-mismatch"'));
 assert.ok(dashboard.includes('id="settings-site-mismatch"'));
 assert.ok(dashboard.includes("next.textContent = 'Save as draft'"));
 assert.ok(!dashboard.includes("next.textContent = 'Save plan'"));
-assert.ok(dashboard.includes('>Save plan</button>'));
+assert.ok(dashboard.includes('>Save sample-size plan</button>'));
+assert.ok(!dashboard.includes('>Save plan</button>'));
 
 console.log('admin-ui tests passed');
