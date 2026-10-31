@@ -1,5 +1,8 @@
 const express = require('express');
+const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const { ownedExperiment } = require('../tenant');
+const { refuseViewOnly } = require('../membership-access');
 const {
   MISSING,
   conclusionStatus,
@@ -38,6 +41,9 @@ ownerRouter.get('/:id/conclusion', ownerOnly, async (req, res) => {
 
 ownerRouter.post('/:id/conclusion', ownerOnly, async (req, res) => {
   try {
+    const existing = await ownedExperiment(req.account.id, req.params.id);
+    if (!existing) return res.status(404).json({ error: MISSING });
+    if (refuseViewOnly(req, res)) return;
     const result = await draftConclusion(actor(req));
     if (result.error === 'missing') return res.status(404).json({ error: MISSING });
     if (result.error === 'unavailable') return res.status(400).json({ error: result.message });
@@ -52,6 +58,9 @@ ownerRouter.post('/:id/conclusion', ownerOnly, async (req, res) => {
 
 ownerRouter.post('/:id/conclusion/release', ownerOnly, async (req, res) => {
   try {
+    const existing = await ownedExperiment(req.account.id, req.params.id);
+    if (!existing) return res.status(404).json({ error: MISSING });
+    if (refuseViewOnly(req, res)) return;
     const result = await releaseConclusion(actor(req));
     if (result.error === 'missing') return res.status(404).json({ error: MISSING });
     res.set('Cache-Control', 'no-store');
@@ -98,6 +107,12 @@ noticesRouter.get('/', async (req, res) => {
 
 noticesRouter.post('/:id/read', async (req, res) => {
   try {
+    const existing = await db.query(
+      `SELECT id FROM owner_notices WHERE id = $1 AND account_id = $2`,
+      [req.params.id, req.account.id]
+    );
+    if (!existing.rows[0]) return res.status(404).json({ error: 'no notice found with that id' });
+    if (refuseViewOnly(req, res)) return;
     const row = await markNoticeRead(req.account.id, req.params.id);
     if (!row) return res.status(404).json({ error: 'no notice found with that id' });
     res.json({ ok: true, id: row.id });

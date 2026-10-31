@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const { refuseViewOnly } = require('../membership-access');
 const { publicServerError } = require('../public-error');
 const { markDomainConflict } = require('../auth-flow');
 const { newSiteKey } = require('../db/tenancy');
@@ -126,6 +127,7 @@ setupRouter.get('/', requireAuth(['owner']), async (req, res) => {
 
 setupRouter.post('/dismiss', requireAuth(['owner']), async (req, res) => {
   try {
+    if (refuseViewOnly(req, res)) return;
     await db.query(
       `UPDATE accounts
        SET checklist_dismissed_at = COALESCE(checklist_dismissed_at, now())
@@ -147,6 +149,7 @@ setupRouter.post('/site', requireAuth(['owner']), async (req, res) => {
       [siteId, req.account.id]
     );
     if (!owned.rows[0]) return res.status(404).json({ error: 'no site found with that id' });
+    if (refuseViewOnly(req, res)) return;
     await db.query(
       `UPDATE accounts SET active_site_id = $2 WHERE id = $1`,
       [req.account.id, siteId]
@@ -178,6 +181,7 @@ sitesRouter.get('/', requireAuth(['owner']), async (req, res) => {
 
 sitesRouter.post('/', requireAuth(['owner']), async (req, res) => {
   try {
+    if (refuseViewOnly(req, res)) return;
     const host = websiteHost(req.body);
     if (!host) return res.status(400).json({ error: 'Enter your website, such as example.co.uk.' });
     const guard = await guardSiteDomains(sql, {
@@ -221,6 +225,7 @@ sitesRouter.patch('/:id', requireAuth(['owner']), async (req, res) => {
     if (!host) return res.status(400).json({ error: 'Enter your website, such as example.co.uk.' });
     const existing = await loadOwnedSite(req.account.id, req.params.id);
     if (!existing) return res.status(404).json({ error: 'no site found with that id' });
+    if (refuseViewOnly(req, res)) return;
     const guard = await guardSiteDomains(sql, {
       accountId: req.account.id,
       hosts: [host],
@@ -283,6 +288,7 @@ sitesRouter.patch('/:id/datalayer', requireAuth(['owner']), async (req, res) => 
   try {
     const existing = await loadOwnedSite(req.account.id, req.params.id);
     if (!existing) return res.status(404).json({ error: 'no site found with that id' });
+    if (refuseViewOnly(req, res)) return;
     const parsed = parseDatalayerEventsUpdate(req.body);
     if (!parsed.ok) return res.status(parsed.status).json({ error: parsed.error });
     const updated = await db.query(
@@ -319,6 +325,7 @@ sitesRouter.patch('/:id/ga4', requireAuth(['owner']), async (req, res) => {
   try {
     const existing = await loadOwnedSite(req.account.id, req.params.id);
     if (!existing) return res.status(404).json({ error: 'no site found with that id' });
+    if (refuseViewOnly(req, res)) return;
     const paid = await accountPaidPlan(db, req.account.id);
     const parsed = parseGa4Update(req.body, existing, paid);
     if (!parsed.ok) return res.status(parsed.status).json({ error: parsed.error });

@@ -1,5 +1,7 @@
 const express = require('express');
 const { assertAgencyOwner } = require('../team');
+const { ownedExperiment } = require('../tenant');
+const { refuseViewOnly } = require('../membership-access');
 const {
   parseCriteria,
   parseDirection,
@@ -21,6 +23,16 @@ async function clearActor(account) {
   const owner = await assertAgencyOwner(account.id, account.userId);
   if (!owner.ok) return { ok: false, status: owner.status || 404, error: owner.error || 'not found' };
   return { ok: true, userId: owner.userId, actor: owner.email || 'owner' };
+}
+
+async function ownedThenWriter(req, res) {
+  const row = await ownedExperiment(req.account.id, req.params.id);
+  if (!row) {
+    res.status(404).json({ error: 'no experiment found with that id' });
+    return false;
+  }
+  if (refuseViewOnly(req, res)) return false;
+  return true;
 }
 
 function actorIp(req) {
@@ -63,6 +75,7 @@ router.post('/remove', async (req, res) => {
     return res.status(400).json({ error: 'Use clear test traffic for every pivit_qa, is_test and v_pt visitor.' });
   }
   try {
+    if (!(await ownedThenWriter(req, res))) return;
     sendResult(res, await applyTestTraffic({
       experimentId: req.params.id,
       criteria,
@@ -86,6 +99,7 @@ router.post('/restore', async (req, res) => {
   const criteria = parseCriteria(req.body);
   if (!criteria.ok) return res.status(400).json({ error: criteria.error });
   try {
+    if (!(await ownedThenWriter(req, res))) return;
     let actorName = 'owner';
     let userId = null;
     if (criteria.mode === 'all') {
@@ -117,6 +131,7 @@ router.post('/clear', async (req, res) => {
     return res.status(400).json({ error: 'Confirm clearing test traffic before it is applied.' });
   }
   try {
+    if (!(await ownedThenWriter(req, res))) return;
     const actor = await clearActor(req.account);
     if (!actor.ok) return res.status(actor.status || 404).json({ error: actor.error || 'not found' });
     sendResult(res, await applyTestTraffic({

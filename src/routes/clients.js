@@ -6,6 +6,7 @@ const { requireAuth } = require('../middleware/auth');
 const { publicServerError } = require('../public-error');
 const { parseAccessBody, setViewerAccess } = require('../person-state');
 const { assertAgencyOwner, recordViewerAudit } = require('../team');
+const { refuseViewOnly } = require('../membership-access');
 const router = express.Router();
 
 router.use(requireAuth(['owner'])); // dashboard session. Membership Owner is checked on changes.
@@ -43,6 +44,7 @@ router.get('/', async (req, res) => {
 // POST /api/clients { name, username, password }
 router.post('/', async (req, res) => {
   try {
+    if (refuseViewOnly(req, res)) return;
     const actor = await ownerOr404(req, res);
     if (!actor) return;
     const { name, username, password } = req.body;
@@ -79,6 +81,12 @@ router.patch('/:id/access', async (req, res) => {
   try {
     const flags = parseAccessBody(req.body);
     if (!flags.ok) return res.status(flags.status).json({ error: flags.error });
+    const ownedViewer = await db.query(
+      `SELECT id FROM clients WHERE id = $1 AND account_id = $2 AND deleted_at IS NULL`,
+      [req.params.id, req.account.id]
+    );
+    if (!ownedViewer.rows[0]) return res.status(404).json({ error: 'not found' });
+    if (refuseViewOnly(req, res)) return;
     if (!req.account.userId) return res.status(404).json({ error: 'not found' });
     const result = await setViewerAccess({
       actorUserId: req.account.userId,
@@ -105,13 +113,7 @@ router.patch('/:id/access', async (req, res) => {
 // PATCH /api/clients/:id — rename, change username, and/or reset password (all optional)
 router.patch('/:id', async (req, res) => {
   try {
-    const actor = await ownerOr404(req, res);
-    if (!actor) return;
     const { id } = req.params;
-    const { name, username, password } = req.body;
-    if (!name && !username && !password) return res.status(400).json({ error: 'nothing to update' });
-    if (password && password.length < 8) return res.status(400).json({ error: 'password must be at least 8 characters' });
-
     const { rows: existingRows } = await db.query(
       `SELECT * FROM clients
        WHERE id = $1 AND account_id = $2
@@ -120,6 +122,13 @@ router.patch('/:id', async (req, res) => {
       [id, req.account.id]
     );
     if (existingRows.length === 0) return res.status(404).json({ error: 'no viewer found with that id' });
+    if (refuseViewOnly(req, res)) return;
+    const actor = await ownerOr404(req, res);
+    if (!actor) return;
+    const { name, username, password } = req.body;
+    if (!name && !username && !password) return res.status(400).json({ error: 'nothing to update' });
+    if (password && password.length < 8) return res.status(400).json({ error: 'password must be at least 8 characters' });
+
     const existing = existingRows[0];
 
     const newName = name || existing.name;
@@ -175,6 +184,15 @@ router.patch('/:id', async (req, res) => {
 // DELETE /api/clients/:id — their experiments stay, just unassigned (ON DELETE SET NULL)
 router.delete('/:id', async (req, res) => {
   try {
+    const present = await db.query(
+      `SELECT id FROM clients
+       WHERE id = $1 AND account_id = $2
+         AND archived_at IS NULL
+         AND deleted_at IS NULL`,
+      [req.params.id, req.account.id]
+    );
+    if (!present.rows[0]) return res.status(404).json({ error: 'no viewer found with that id' });
+    if (refuseViewOnly(req, res)) return;
     const actor = await ownerOr404(req, res);
     if (!actor) return;
     const { rows } = await db.query(

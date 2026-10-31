@@ -539,17 +539,18 @@ async function main() {
     assert.ok(!peopleMember.text.includes('alpha-client'));
     assertClean(peopleMember, 'member B team');
     const memberRemove = await request(serverMember, 'DELETE', `/api/account/members/${beta.userId}`);
-    assert.strictEqual(memberRemove.status, 404, memberRemove.text);
+    assert.strictEqual(memberRemove.status, 403, memberRemove.text);
+    assert.ok(!/forbidden/i.test(memberRemove.text));
     const memberAccess = await request(serverMember, 'PATCH', `/api/clients/${bClient.rows[0].id}/access`, {
       suspended: true,
     });
-    assert.strictEqual(memberAccess.status, 404, memberAccess.text);
+    assert.strictEqual(memberAccess.status, 403, memberAccess.text);
     const memberCreateViewer = await request(serverMember, 'POST', '/api/clients', {
       name: 'Sneak viewer',
       username: 'sneak-viewer',
       password: 'password1',
     });
-    assert.strictEqual(memberCreateViewer.status, 404, memberCreateViewer.text);
+    assert.strictEqual(memberCreateViewer.status, 403, memberCreateViewer.text);
     const betaViewer = await db.query(`SELECT suspended_at FROM clients WHERE id = $1`, [bClient.rows[0].id]);
     assert.strictEqual(betaViewer.rows[0].suspended_at, null);
     const alphaViewer = await db.query(
@@ -583,7 +584,7 @@ async function main() {
       role: 'owner',
       send: true,
     });
-    assert.strictEqual(memberCreate.status, 404, memberCreate.text);
+    assert.strictEqual(memberCreate.status, 403, memberCreate.text);
     const clientInvite = await request(serverClientB, 'GET', '/api/account/members/invites');
     assert.strictEqual(clientInvite.status, 401, clientInvite.text);
     const stillInvite = await db.query(
@@ -1011,7 +1012,8 @@ async function main() {
       [bRunning.id, bRunning.variantId]
     );
     const memberOwn = await request(serverMember, 'POST', `/api/experiments/${bRunning.id}/test-traffic/clear`, { confirm: true });
-    assert.strictEqual(memberOwn.status, 404);
+    assert.strictEqual(memberOwn.status, 403);
+    assert.strictEqual(memberOwn.json.error, 'You have view-only access. Ask an Owner to make changes.');
     const betaStill = await db.query(
       `SELECT excluded_at FROM events WHERE experiment_id = $1 AND visitor_id = 'v_pt_beta'`,
       [bRunning.id]

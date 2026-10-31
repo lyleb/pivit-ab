@@ -16,11 +16,13 @@ const { normaliseElementSelector } = require('./element-selector');
 const ACTIVATION_TYPES = ['page_load', 'element', 'js_condition', 'manual'];
 const JS_CONDITION_MAX = 500;
 
-// The same people who can save page JavaScript. A signed-in Owner or Member
-// has session role owner. The legacy owner password does too. A Viewer does
-// not. View as is read-only and is refused before a write.
+// The same people who can save page JavaScript. That is an Owner, including
+// the legacy owner password. A Member is view-only. A Viewer is not an Owner.
+// A platform admin can. View as is read-only and is refused before a write.
 function canSetJsCondition(account) {
-  return !!(account && account.role === 'owner' && account.readOnly !== true);
+  if (!account || account.readOnly === true) return false;
+  if (account.superadmin === true) return true;
+  return account.role === 'owner';
 }
 
 const JS_CONDITION_DENIED = 'Only someone who can write page JavaScript can set or change a JavaScript condition.';

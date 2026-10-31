@@ -297,13 +297,15 @@ async function main() {
       activation_type: 'js_condition',
       activation_value: "document.getElementById('step-payment')",
     });
-    assert.strictEqual(memberSet.status, 200);
-    assert.strictEqual(memberSet.json.activation_type, 'js_condition');
-    const memberSame = await request(memberServer, 'PATCH', `/api/experiments/${manual.json.id}/activation`, {
-      activation_type: 'js_condition',
-      activation_value: "document.getElementById('step-payment')",
-    });
-    assert.strictEqual(memberSame.status, 200);
+    assert.strictEqual(memberSet.status, 403);
+    assert.ok(memberSet.json.error.includes('view-only'));
+    const memberUnchanged = await db.query(
+      `SELECT activation_type FROM experiments WHERE id = $1`,
+      [manual.json.id]
+    );
+    assert.strictEqual(memberUnchanged.rows[0].activation_type, 'manual');
+    const viewerStill = await request(memberServer, 'GET', `/api/experiments/${manual.json.id}`);
+    assert.strictEqual(viewerStill.status, 200);
     memberServer.close();
 
     console.log('activation db tests passed');

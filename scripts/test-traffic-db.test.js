@@ -331,12 +331,13 @@ async function main() {
     });
     try {
       const memberClear = await request(memberServer, 'POST', `/api/experiments/${experimentId}/test-traffic/clear`, { confirm: true });
-      assert.strictEqual(memberClear.status, 404);
+      assert.strictEqual(memberClear.status, 403);
+      assert.ok(memberClear.json.error.includes('view-only'));
       const memberUndo = await request(memberServer, 'POST', `/api/experiments/${experimentId}/test-traffic/restore`, {
         mode: 'all',
         confirm: true,
       });
-      assert.strictEqual(memberUndo.status, 404);
+      assert.strictEqual(memberUndo.status, 403);
     } finally {
       await new Promise((resolve) => memberServer.close(resolve));
     }

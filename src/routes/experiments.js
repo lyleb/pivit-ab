@@ -38,6 +38,7 @@ const { noteSnippetSeen, noteInstallCheck, noteQaPreview, installCheckPayload } 
 const { publicGa4ForScope } = require('../ga4');
 const { publicDatalayerEvents } = require('../datalayer-events');
 const { normaliseStatusChange } = require('../experiment-status');
+const { refuseViewOnly } = require('../membership-access');
 const {
   archivedBody,
   archivedEditMessage,
@@ -289,6 +290,9 @@ router.post('/:id/reveal', async (req, res) => {
     return res.status(400).json({ error: 'Confirm the early look before it is shown.' });
   }
   try {
+    const owned = await ownedExperiment(req.account.id, req.params.id);
+    if (!owned) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (refuseViewOnly(req, res)) return;
     const result = await recordReveal({
       experimentId: req.params.id,
       actor: 'owner',
@@ -559,6 +563,7 @@ router.post('/', async (req, res) => {
     );
     if (ownedClient.rows.length === 0) return res.status(404).json({ error: 'no viewer found with that id' });
   }
+  if (refuseViewOnly(req, res)) return;
 
   let client;
   try {
@@ -620,6 +625,9 @@ router.patch('/:id/client', async (req, res) => {
       );
       if (ownedClient.rows.length === 0) return res.status(404).json({ error: 'no viewer found with that id' });
     }
+    const existing = await ownedExperiment(req.account.id, id);
+    if (!existing) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (refuseViewOnly(req, res)) return;
     const { rows } = await db.query(
       `UPDATE experiments SET client_id = $1 WHERE id = $2 AND account_id = $3 RETURNING *`,
       [client_id || null, id, req.account.id]
@@ -644,6 +652,9 @@ router.post('/:id/variants', async (req, res) => {
       const problem = validateChanges(changes);
       if (problem) return res.status(400).json({ error: problem });
     }
+    const existing = await ownedExperiment(req.account.id, id);
+    if (!existing) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (refuseViewOnly(req, res)) return;
 
     await client.query('BEGIN');
     const locked = await client.query(
@@ -708,6 +719,9 @@ router.patch('/:id/variants/:variantId', async (req, res) => {
       const problem = validateChanges(changes);
       if (problem) return res.status(400).json({ error: problem });
     }
+    const existingVariant = await ownedExperiment(req.account.id, id);
+    if (!existingVariant) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (refuseViewOnly(req, res)) return;
 
     // `changes` is only written when the request actually includes it. The
     // dashboard form edits name/split — what a variant *does* is authored in
@@ -781,6 +795,9 @@ router.put('/:id/goals', async (req, res) => {
     const goals = req.body && req.body.goals;
     const problem = validateGoals(goals);
     if (problem) return res.status(400).json({ error: problem });
+    const existingGoals = await ownedExperiment(req.account.id, req.params.id);
+    if (!existingGoals) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (refuseViewOnly(req, res)) return;
 
     await client.query('BEGIN');
     const saved = await persistGoals(client.query.bind(client), {
@@ -803,7 +820,7 @@ router.put('/:id/goals', async (req, res) => {
 });
 
 // POST /api/experiments/:id/variants/:variantId/preview-link  { page_url }
-// Owner-only. Mints a signed preview URL the snippet will accept on the
+// Owners and Members. Mints a signed preview URL the snippet will accept on the
 // customer's origin, where the session cookie is not sent.
 router.post('/:id/variants/:variantId/preview-link', async (req, res) => {
   try {
@@ -860,6 +877,7 @@ router.post('/:id/variants/:variantId/edit-link', async (req, res) => {
       [req.params.variantId, req.params.id, req.account.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'no variant found with that id on that experiment' });
+    if (refuseViewOnly(req, res)) return;
     if (rows[0].status === 'archived') {
       return res.status(409).json(archivedBody(req, {
         id: rows[0].experiment_id,
@@ -890,6 +908,7 @@ router.patch('/:id/variants/:variantId/enabled', async (req, res) => {
 
     const owned = await ownedExperiment(req.account.id, id);
     if (!owned) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (refuseViewOnly(req, res)) return;
     const { rows } = await db.query(
       `UPDATE variants SET enabled = $1 WHERE id = $2 AND experiment_id = $3 RETURNING *`,
       [enabled, variantId, id]
@@ -912,6 +931,7 @@ router.delete('/:id/variants/:variantId', async (req, res) => {
     const { id, variantId } = req.params;
     const owned = await ownedExperiment(req.account.id, id);
     if (!owned) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (refuseViewOnly(req, res)) return;
     const { rows } = await db.query(
       `DELETE FROM variants WHERE id = $1 AND experiment_id = $2 RETURNING id`,
       [variantId, id]
@@ -934,6 +954,7 @@ router.delete('/:id', async (req, res) => {
     const { id } = req.params;
     const expRows = [await ownedExperiment(req.account.id, id)].filter(Boolean);
     if (expRows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (refuseViewOnly(req, res)) return;
     if (expRows[0].status !== 'archived') {
       return res.status(400).json({ error: 'only archived experiments can be deleted — archive it first, and export the CSV if you want to keep the data' });
     }
@@ -956,6 +977,7 @@ router.patch('/:id/activation', async (req, res) => {
   try {
     const experiment = await ownedExperiment(req.account.id, req.params.id);
     if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (refuseViewOnly(req, res)) return;
     if (!req.body || !Object.prototype.hasOwnProperty.call(req.body, 'activation_type')) {
       return res.status(400).json({ error: 'activation_type is required' });
     }
@@ -992,6 +1014,7 @@ router.patch('/:id/element-selector', async (req, res) => {
   try {
     const experiment = await ownedExperiment(req.account.id, req.params.id);
     if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (refuseViewOnly(req, res)) return;
     if (!req.body || !Object.prototype.hasOwnProperty.call(req.body, 'element_selector')) {
       return res.status(400).json({ error: 'element_selector is required' });
     }
@@ -1019,6 +1042,7 @@ router.patch('/:id/url-match', async (req, res) => {
   try {
     const experiment = await ownedExperiment(req.account.id, req.params.id);
     if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (refuseViewOnly(req, res)) return;
     if (!req.body || req.body.url_match_type == null || req.body.url_match_type === '') {
       return res.status(400).json({ error: 'url_match_type is required' });
     }
@@ -1048,6 +1072,9 @@ router.patch('/:id/hosts', async (req, res) => {
     }
     const parsed = parseHostList(req.body.allowed_hosts);
     if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+    const existingHosts = await ownedExperiment(req.account.id, id);
+    if (!existingHosts) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (refuseViewOnly(req, res)) return;
 
     const client = await db.pool.connect();
     try {
@@ -1090,6 +1117,7 @@ router.patch('/:id/status', async (req, res) => {
 
     const existing = await ownedExperiment(req.account.id, id);
     if (!existing) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (refuseViewOnly(req, res)) return;
     const typeError = typeChangeError(existing, req.body);
     if (typeError) return res.status(400).json({ error: typeError });
     const change = normaliseStatusChange(existing.status, req.body);
