@@ -1165,7 +1165,7 @@
     return n === 1 ? '1 element matches' : `${n} elements match`;
   }
 
-  // After a pick: confirm a shared-class selector, or keep the positional one.
+  // After a pick: confirm a shared-class selector, or keep the one element.
   // The count and highlight follow whatever is in the field, including hand edits.
   function showScopePanel(el, x, y) {
     closeActionPopup();
@@ -1196,7 +1196,12 @@
     const intro = document.createElement('div');
     styleReset(intro);
     Object.assign(intro.style, { fontSize: '12px', color: '#6b6f83', marginTop: '6px', lineHeight: '1.45' });
-    intro.textContent = 'The picked element has a positional selector, so a change would hit only that one spot. Similar elements — every NEW badge in a set, for example — usually share a class. Edit the selector if the count looks wrong.';
+    const selectorIsPositional = window.PivitRuntime
+      && typeof window.PivitRuntime.isPositionalSelector === 'function'
+      && window.PivitRuntime.isPositionalSelector(suggested);
+    intro.textContent = selectorIsPositional
+      ? 'This picks the element by its position on the page, so it may break if the page layout changes. Similar elements — every NEW badge in a set, for example — usually share a class. Edit the selector if the count looks wrong.'
+      : 'Choose whether this change applies to every similar element, or only the one you picked. Edit the selector if the count looks wrong.';
     scopePanelEl.appendChild(intro);
 
     const label = document.createElement('div');
@@ -1290,6 +1295,12 @@
     justBtn.style.width = '100%';
     justBtn.style.color = COLORS.ink;
     justBtn.style.whiteSpace = 'normal';
+    const uniqueIsPositional = window.PivitRuntime
+      && typeof window.PivitRuntime.isPositionalSelector === 'function'
+      && window.PivitRuntime.isPositionalSelector(unique);
+    if (uniqueIsPositional && !selectorIsPositional) {
+      justBtn.title = 'This picks the element by its position on the page, so it may break if the page layout changes.';
+    }
 
     const cancelBtn = makeButton('Cancel', '#f0f0f7', () => closeScopePanel());
     cancelBtn.style.width = '100%';

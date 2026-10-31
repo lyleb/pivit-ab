@@ -17,7 +17,7 @@ const { planProgress, describeReading, listSignal } = require('../reading');
 const { visibleEventSql } = require('../metrics');
 const { utcDay, windowStartDay } = require('../host-hits');
 const { createEditToken } = require('../edit-token');
-const { authorisePreview, buildPublicExperimentList, createPreviewToken, previewUrl, editUrl, cacheControlForExperimentsQuery, pageUrlError } = require('../preview-access');
+const { authorisePreview, buildPublicExperimentList, createPreviewToken, previewUrl, editUrl, cacheControlForExperimentsQuery, pageUrlError, classifyPreviewRefusal } = require('../preview-access');
 const {
   checkHost,
   pageHostFromRequest,
@@ -95,6 +95,51 @@ function keepPageMatches(rows, url) {
     return matchPageUrl(row.url_match, url, type);
   });
 }
+
+function previewPageMatches(row, url) {
+  if (!row) return false;
+  const type = row.url_match_type || 'contains';
+  if (type === 'exact' || type === 'starts_with' || type === 'regex') {
+    return matchPageUrl(row.url_match, url, type);
+  }
+  const pattern = String(row.url_match || '').toLowerCase();
+  if (!pattern) return false;
+  return String(url || '').toLowerCase().includes(pattern);
+}
+
+// A signed preview that was not served. Looks the variant up without the
+// site or URL filters so the response can say which check failed.
+async function explainPreviewRefusal(previewAuth, scope, url, req) {
+  const { rows } = await db.query(
+    `SELECT e.id, e.url_match, e.url_match_type, e.allowed_hosts, e.account_id, e.site_id
+     FROM variants v
+     JOIN experiments e ON e.id = v.experiment_id
+     WHERE v.id = $1`,
+    [previewAuth.variantId]
+  );
+  const row = rows[0] || null;
+  const sameAccount = !!(
+    row
+    && scope
+    && row.account_id === scope.accountId
+    && (!previewAuth.accountId || previewAuth.accountId === row.account_id)
+  );
+  const siteMatches = !!(
+    row
+    && scope
+    && (!scope.siteId || (row.site_id && row.site_id === scope.siteId))
+  );
+  const decision = row
+    ? checkHost(row.allowed_hosts, pageHostFromRequest(req), hostScopingMode())
+    : { serve: false };
+  return classifyPreviewRefusal({
+    found: !!row,
+    sameAccount,
+    siteMatches,
+    urlMatches: previewPageMatches(row, url),
+    hostServes: decision.serve === true,
+  });
+}
 const unscopedLogged = new Set();
 
 function applyHostScope(rows, req) {
@@ -138,7 +183,19 @@ router.get('/', async (req, res) => {
 
   try {
     const scope = await openPublicScope(req);
-    if (!scope) return res.json({ experiments: [] });
+    if (!scope) {
+      if (!previewAuth.ok) return res.json({ experiments: [] });
+      return res.json({
+        experiments: [],
+        preview_refused: classifyPreviewRefusal({
+          found: false,
+          sameAccount: false,
+          siteMatches: false,
+          urlMatches: false,
+          hostServes: false,
+        }),
+      });
+    }
     const ga4 = await publicGa4ForScope(db, scope);
     const datalayerEvents = await publicDatalayerEvents(db, scope);
     const sendPublic = (body) => {
@@ -192,13 +249,20 @@ router.get('/', async (req, res) => {
       }
     }
 
+    let previewRefused = null;
+    if (previewAuth.ok && !previewExperiment && !previewExpired) {
+      previewRefused = await explainPreviewRefusal(previewAuth, scope, url, req);
+    }
+
     const experimentIds = visible.map((exp) => exp.id);
     if (previewExperiment && !experimentIds.includes(previewExperiment.id)) {
       experimentIds.push(previewExperiment.id);
     }
     if (experimentIds.length === 0) {
       if (previewExpired) return sendPublic({ experiments: [], preview_expired: previewExpired });
-      return sendPublic({ experiments: [] });
+      const empty = { experiments: [] };
+      if (previewRefused) empty.preview_refused = previewRefused;
+      return sendPublic(empty);
     }
 
     const { rows: variants } = await db.query(
@@ -219,7 +283,9 @@ router.get('/', async (req, res) => {
       return sendPublic({ experiments: payload.experiments, preview_expired: previewExpired });
     }
     if (payload.preview) return sendPublic({ experiments: payload.experiments, preview: payload.preview });
-    sendPublic({ experiments: payload.experiments });
+    const body = { experiments: payload.experiments };
+    if (previewRefused) body.preview_refused = previewRefused;
+    sendPublic(body);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });

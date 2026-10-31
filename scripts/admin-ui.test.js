@@ -54,6 +54,10 @@ assert.ok(planner.includes('pivitlab reads the result once, at the planned sampl
 assert.ok(!planner.includes('Pivitlab'));
 assert.ok(!planner.includes('PivitLab'));
 assert.ok(planner.includes('id="wizard-site-examples"'));
+assert.ok(planner.includes('Assumed baseline conversion rate'));
+assert.ok(planner.includes('not the relative change'));
+assert.ok(planner.includes('not the baseline conversion rate'));
+assert.ok(!planner.includes('MDE'));
 assert.ok(!planner.includes("You'll need about"));
 
 const adminPage = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
@@ -320,5 +324,49 @@ assert.strictEqual(ui.shouldShowSignpost(true, '0'), true);
 assert.strictEqual(ui.shouldShowSignpost(true, '1'), false);
 assert.strictEqual(ui.shouldShowSignpost(false, null), false);
 assert.strictEqual(ui.shouldShowSignpost(false, '1'), false);
+
+const fernhill = [
+  { id: 'site2', domains: ['site2-spa.netlify.app'] },
+  { id: 'site3', domains: ['site3-checkout.netlify.app'] },
+];
+assert.strictEqual(ui.wizardSiteValue(fernhill, ''), '');
+assert.strictEqual(ui.wizardSiteValue(fernhill, 'site3'), 'site3');
+assert.strictEqual(ui.wizardSiteValue([{ id: 'only' }], ''), 'only');
+assert.strictEqual(ui.wizardSiteValue(fernhill, 'missing'), '');
+const mismatch = ui.domainMismatchMessage(
+  'https://site2-spa.netlify.app/shop',
+  ['site3-checkout.netlify.app']
+);
+assert.ok(mismatch.includes('site2-spa.netlify.app'));
+assert.ok(mismatch.includes('site3-checkout.netlify.app'));
+assert.ok(mismatch.includes('Choose the site'));
+const lockedMismatch = ui.domainMismatchMessage(
+  'https://site2-spa.netlify.app/',
+  ['site3-checkout.netlify.app'],
+  { locked: true }
+);
+assert.ok(lockedMismatch.includes('Create it again'));
+assert.ok(!lockedMismatch.includes('Choose the site that owns'));
+assert.strictEqual(ui.domainMismatchMessage('https://www.site3-checkout.netlify.app/play', ['site3-checkout.netlify.app']), '');
+assert.strictEqual(ui.domainMismatchMessage('/play', ['site3-checkout.netlify.app']), '');
+assert.strictEqual(ui.wizardContinueDecision({ step: 1, busy: true }, 1000).ok, false);
+assert.strictEqual(ui.wizardContinueDecision({ step: 1, busy: false, advancedAt: 1000 }, 1200).reason, 'guard');
+const forward = ui.wizardContinueDecision({ step: 1, busy: false, advancedAt: 0 }, 5000);
+assert.strictEqual(forward.ok, true);
+assert.strictEqual(forward.step, 2);
+assert.strictEqual(forward.step - forward.from, 1);
+assert.strictEqual(ui.wizardContinueDecision({ step: 2, busy: false }, 0).step, 3);
+assert.strictEqual(ui.wizardContinueDecision({ step: 4, busy: false }, 0).step, 5);
+assert.strictEqual(ui.wizardContinueDecision({ step: 5, busy: false }, 0).reason, 'save');
+assert.strictEqual(ui.wizardContinueDecision({ step: 5, busy: false }, 0).step, 5);
+const dashboard = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+assert.strictEqual(dashboard.split("getElementById('wizard-next').addEventListener").length - 1, 1);
+assert.ok(dashboard.includes('stopImmediatePropagation'));
+assert.ok(dashboard.includes('wizardContinueDecision'));
+assert.ok(dashboard.includes('id="wizard-site-mismatch"'));
+assert.ok(dashboard.includes('id="settings-site-mismatch"'));
+assert.ok(dashboard.includes("next.textContent = 'Save as draft'"));
+assert.ok(!dashboard.includes("next.textContent = 'Save plan'"));
+assert.ok(dashboard.includes('>Save plan</button>'));
 
 console.log('admin-ui tests passed');

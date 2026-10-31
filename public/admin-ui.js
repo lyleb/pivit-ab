@@ -67,7 +67,7 @@
     const id = escapeHtml(prefix);
     return `<div class="planner" data-planner="${id}">
       <h2>How big a change are you looking for?</h2>
-      <p class="hint">You can leave the suggestion. pivitlab turns it into the visitors you need, and saves a plan either way.</p>
+      <p class="hint">You can leave the suggestion. pivitlab turns it into the visitors you need, and saves a plan either way. The percentage on a button is the relative change to detect. The baseline conversion rate is separate, and you can change it under Advanced.</p>
       <div class="choice-grid">
       <div class="choice-row" role="radiogroup" aria-label="Size of change">
         <button type="button" class="choice" data-plan-choice="small" aria-pressed="false"><span class="choice-label">Small change</span><span class="choice-hint">about 5% relative</span></button>
@@ -102,9 +102,11 @@
       <details>
         <summary>Advanced</summary>
         <div class="accordion-body">
-          <label for="${id}-baseline">Baseline conversion rate (%)</label>
+          <label for="${id}-baseline">Assumed baseline conversion rate (%)</label>
+          <p class="hint">How many visitors convert today. pivitlab assumes 3% until there is past data, and you can change it. This is not the relative change selected above.</p>
           <input id="${id}-baseline" type="number" min="0.1" max="99" step="0.1" value="3">
           <label for="${id}-relative">Relative change to detect (%)</label>
+          <p class="hint">The size of change this plan is built to detect. Medium is about 10% relative. It is not the baseline conversion rate.</p>
           <input id="${id}-relative" type="number" min="1" max="200" step="0.5" value="10">
           <label for="${id}-weekly">Visitors you expect in a week</label>
           <input id="${id}-weekly" type="number" min="0" step="1">
@@ -1297,6 +1299,67 @@
     return `<div class="goal-funnel"><h2>Funnel</h2>${notes.map((line) => `<p class="hint">${escapeHtml(line)}</p>`).join('')}${cards}</div>`;
   }
 
+  // The create wizard does not inherit the remembered site. One site is used
+  // as it is. Several sites stay on "Choose a site" until chosenId is one of them.
+  function wizardSiteValue(sites, chosenId) {
+    const list = Array.isArray(sites) ? sites : [];
+    if (list.length === 1 && list[0] && list[0].id) return String(list[0].id);
+    if (chosenId && list.some((site) => site && site.id === chosenId)) return String(chosenId);
+    return '';
+  }
+
+  function normalisedDomainHost(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : ('https://' + text.replace(/^\/\//, ''));
+    try {
+      let host = new URL(withScheme).hostname.toLowerCase().replace(/\.$/, '');
+      if (host.startsWith('www.')) host = host.slice(4);
+      if (!host || host === 'localhost' || host.endsWith('.localhost')) return '';
+      if (/^\d+(\.\d+){3}$/.test(host)) return '';
+      // A path such as /play is not a site. new URL('https:///play') would
+      // otherwise treat "play" as a hostname.
+      if (!host.includes('.')) return '';
+      return host;
+    } catch (err) {
+      return '';
+    }
+  }
+
+  function domainMismatchMessage(pageUrl, domains, options) {
+    const host = normalisedDomainHost(pageUrl);
+    if (!host) return '';
+    const list = [];
+    const source = Array.isArray(domains) ? domains : String(domains || '').split(/[\s,]+/);
+    source.forEach((item) => {
+      const normalised = normalisedDomainHost(item);
+      if (normalised && list.indexOf(normalised) === -1) list.push(normalised);
+    });
+    if (!list.length || list.indexOf(host) !== -1) return '';
+    const base = 'This page is on ' + host + ', which is not one of this site\'s domains (' + list.join(', ') + '). The test and its preview only run where this site\'s snippet is installed.';
+    if (options && options.locked) {
+      return base + ' This test is already saved on the other site. Create it again on the site that owns this page.';
+    }
+    return base + ' Choose the site that owns this page.';
+  }
+
+  const WIZARD_CONTINUE_GUARD_MS = 600;
+
+  // Continue moves one step. A second click while the first is running, or
+  // in the short quiet period after it, does not move again.
+  function wizardContinueDecision(state, now) {
+    const step = Number(state && state.step);
+    const at = Number(now);
+    const last = Number(state && state.advancedAt) || 0;
+    if (!state || state.busy === true) return { ok: false, reason: 'busy' };
+    if (Number.isFinite(at) && last > 0 && at >= last && at - last < WIZARD_CONTINUE_GUARD_MS) {
+      return { ok: false, reason: 'guard' };
+    }
+    if (!Number.isInteger(step) || step < 1 || step > 5) return { ok: false, reason: 'step' };
+    if (step === 5) return { ok: true, reason: 'save', from: 5, step: 5 };
+    return { ok: true, reason: 'advance', from: step, step: step + 1 };
+  }
+
   function ga4AgencySitesText(count) {
     const n = Math.max(0, Math.round(Number(count) || 0));
     if (n === 1) return '1 site switched on';
@@ -1415,5 +1478,9 @@
     manualActivationSnippet,
     ga4UptakeText,
     ga4AgencySitesText,
+    wizardSiteValue,
+    domainMismatchMessage,
+    WIZARD_CONTINUE_GUARD_MS,
+    wizardContinueDecision,
   };
 });
