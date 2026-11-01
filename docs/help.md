@@ -6,7 +6,7 @@ Three kinds of people use pivitlab. The badge next to the logo tells you which o
 
 1. Look at the badge next to the pivitlab logo.
 2. **Platform admin** can see every agency. The badge says Platform admin. This person has the Users screen, can make an invite code for a new agency, and can open a read-only support view of another agency.
-3. An **agency** is one company on pivitlab. People in it are an **Owner** or a **Member**. The badge says Owner or Member. An Owner can create, edit, delete, start, pause, conclude and archive tests, variants and goals, use the editor, change sites, GA4 and dataLayer, clear or restore test traffic, and invite or change the team. A Member can read Home, experiments, results including the funnel, the audit log and Help, and can preview variants. A Member cannot make those changes. The page says: You have view-only access. Ask an Owner to make changes.
+3. An **agency** is one company on pivitlab. People in it are an **Owner** or a **Member**. The badge says Owner or Member. An Owner can create, edit, delete, start, pause, conclude and archive tests, variants and goals, use the editor, change sites, change Integrations for GA4 and dataLayer, clear or restore test traffic, and invite or change the team. A Member can read Home, Integrations, experiments, results including the funnel, the audit log and Help, and can preview variants. A Member cannot make those changes. The page says: You have view-only access. Ask an Owner to make changes.
 4. A **Viewer** is a read-only login for results. The badge says Viewer. A Viewer sees only the tests an Owner has assigned to them. They sign in with a username and password, not an email.
 
 The names stored in the database stay as they are (`accounts`, `clients`, session role `client`). On screen the names are Platform admin, Agency, Owner, Member and Viewer.
@@ -260,7 +260,9 @@ If the page already uses `window.pivit` for something else, pivitlab leaves that
 
 ### From the data layer
 
-This is off for each site until you switch it on. On Home, open the site and switch on **Count dataLayer events**.
+This is off for each site until you switch it on. Open **Integrations** and switch on **Count dataLayer events** for that site. Home only shows whether it is on or off, with a link back to Integrations.
+
+Each experiment has its own **Count dataLayer events** tickbox, in the create wizard and later in Settings. It starts ticked when the site has the switch on, including experiments you already saved, so they keep counting. Untick it to leave that test out. `pivit.track` still counts. If the site switch is off, the tickbox is greyed out and links to Integrations.
 
 pivitlab then counts a push that looks like this, including one that is already on the page when the snippet loads:
 
@@ -292,9 +294,11 @@ Visits with `?pivit_qa=1` stay out of the funnel unless you include test traffic
 
 ## Send to GA4
 
-On Home, each site has **Send to GA4** and a box for that site's GA4 measurement ID. The ID starts with G-. This is included on paid plans. pivitlab has no priced plans yet. Paid plan is the switch that lets an agency use Send to GA4. A Platform admin sets it on Home, on the Send to GA4 card. That card also says how many sites have Send to GA4 switched on.
+Open **Integrations**. That page explains Send to GA4 once, links here for the steps, and lists each site. Each site has **Send to GA4** and a box for that site's GA4 measurement ID. The ID starts with G-. This is included on paid plans. pivitlab has no priced plans yet. Paid plan is the switch that lets an agency use Send to GA4. A Platform admin sets it on Home, on the Send to GA4 card. That card also says how many sites have Send to GA4 switched on. Home itself only shows a one-line status for the site, with a link to Integrations.
 
-When Send to GA4 is switched on, the snippet sends that site's GA4 an event called `experience_impression`. The test name and id, and the variant name and id, are in the event. They are also joined in a parameter called `exp_variant_string`, which is the same shape VWO and Optimizely use. In GA4, register exp_variant_string as a custom dimension, then use it in a report or an exploration to compare variants.
+Each experiment has its own **Send to GA4** tickbox, in the create wizard and later in Settings. It starts ticked when the site has Send to GA4 on, so every experiment you already saved keeps sending. Untick it to leave that test out. If the site has Send to GA4 off, or the agency is not on a paid plan, the tickbox is greyed out and links to Integrations.
+
+When Send to GA4 is switched on for the site and ticked for the experiment, the snippet sends that site's GA4 an event called `experience_impression`. The test name and id, and the variant name and id, are in the event. They are also joined in a parameter called `exp_variant_string`, which is the same shape VWO and Optimizely use. In GA4, register exp_variant_string as a custom dimension, then use it in a report or an exploration to compare variants.
 
 pivitlab uses the gtag or dataLayer already on the page. It does not load Google Analytics, and it does not set Google cookies. If the page has neither, nothing is sent. If the page uses Google Tag Manager, pivitlab pushes one object onto dataLayer and does not also call gtag, so the visit is not counted twice. A page that uses gtag.js and not Tag Manager still receives the event through gtag. If Google Consent Mode is in use, the event is sent only when analytics storage is allowed. A preview, or a visit with ?pivit_qa=1, is not sent. Each test is sent once for a page view. A single-page app sends it again when the address changes, and not twice for the same address.
 
@@ -304,8 +308,8 @@ The downloadable container file adds a Data Layer Variable for each of those fie
 
 #### GA4 through Tag Manager
 
-1. On Home, open the site. Enter the measurement ID, the one that starts with G-, and choose Save GA4. Switch on Send to GA4 once a Platform admin has marked the agency as paid.
-2. Open How Send to GA4 works, then choose Download Tag Manager container.
+1. Open Integrations. Enter the measurement ID for the site, the one that starts with G-, and choose Save. Switch on Send to GA4 once a Platform admin has marked the agency as paid.
+2. On that site's row, choose Download Tag Manager container. How Send to GA4 works, above the list, explains the event.
 3. In Tag Manager, open Admin, then Import container.
 4. Choose the file, then choose the workspace you want to import into.
 5. Choose Merge. Then choose Rename conflicting tags, triggers and variables. Do not choose Overwrite. Overwrite would replace the whole container.
@@ -317,7 +321,7 @@ The downloadable container file adds a Data Layer Variable for each of those fie
 
 #### GA4 directly with gtag.js
 
-If the site loads gtag.js and does not use Tag Manager, you do not add a tag. pivitlab calls gtag with experience_impression and the same fields. Save the measurement ID and switch Send to GA4 on.
+If the site loads gtag.js and does not use Tag Manager, you do not add a tag. pivitlab calls gtag with experience_impression and the same fields. On Integrations, save the measurement ID and switch Send to GA4 on. Tick Send to GA4 on the experiment too.
 
 #### In GA4, for both paths
 
@@ -329,6 +333,6 @@ If the site loads gtag.js and does not use Tag Manager, you do not add a tag. pi
 
 #### If it does not work
 
-- The event is missing. The test may not be running, or the page address does not match the test's URL rule. Paid plan or Send to GA4 may be off. Analytics consent may not be granted. A visit with ?pivit_qa=1 is not sent.
+- The event is missing. The test may not be running, or the page address does not match the test's URL rule. Paid plan or Send to GA4 may be off, or the experiment's Send to GA4 tickbox may be unticked. Analytics consent may not be granted. A visit with ?pivit_qa=1 is not sent.
 - The values are undefined. The Data Layer Variable names must match exactly: exp_variant_string, experiment_id, experiment_name, variant_id, variant_name.
 - The visit is counted twice. Do not add both a gtag event and a Tag Manager tag for experience_impression. pivitlab sends only one of them.

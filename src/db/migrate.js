@@ -29,6 +29,7 @@ const { applyStepsNote } = require('./steps-note');
 const { applyDatalayerEvents } = require('./datalayer-events');
 const { applyElementActivationSelector } = require('./element-activation-selector');
 const { applyJoinCodes } = require('./join-codes');
+const { applyExperimentIntegrations } = require('./experiment-integrations');
 
 const LOCK_KEY = 814021;
 
@@ -95,6 +96,9 @@ const VERSIONS = [
   // The join code on an agency invite. Empty until the person asks for one.
   // Stays out of schema.sql.
   { version: '023', name: 'join-codes', run: applyJoinCodes },
+  // Per-experiment Send to GA4 and Count dataLayer events. Both default on,
+  // so existing tests keep sending and counting. Stays out of schema.sql.
+  { version: '024', name: 'experiment-integrations', run: applyExperimentIntegrations },
 ];
 
 async function ensureMigrationsTable(queryable) {

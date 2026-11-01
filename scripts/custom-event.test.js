@@ -111,6 +111,34 @@ const fromAssigned = runtime.customGoalsFromExperiments([
   },
 ], { 'exp-play': 'variant-b', 'exp-other': 'variant-c' }, 'v9');
 assert.deepStrictEqual(fromAssigned.map((goal) => goal.goalId), ['paid', 'thanks']);
+assert.strictEqual(fromAssigned[0].datalayer, true);
+
+const flagged = runtime.customGoalsFromExperiments([
+  {
+    id: 'exp-off',
+    datalayer_events: false,
+    goals: [{ type: 'custom', id: 'paid', event: 'payment_complete' }],
+    variants: [{ id: 'v-off', goals: [] }],
+  },
+  {
+    id: 'exp-on',
+    datalayer_events: true,
+    goals: [{ type: 'custom', id: 'paid', event: 'payment_complete' }],
+    variants: [{ id: 'v-on', goals: [] }],
+  },
+], { 'exp-off': 'v-off', 'exp-on': 'v-on' }, 'visitor');
+assert.strictEqual(flagged[0].datalayer, false);
+assert.strictEqual(flagged[1].datalayer, true);
+const layerEntry = { name: 'payment_complete', props: null, source: 'dataLayer' };
+const trackEntry = { name: 'payment_complete', props: null, source: '' };
+assert.strictEqual(runtime.customEventMatches(flagged[0], layerEntry), false);
+assert.strictEqual(runtime.customEventMatches(flagged[1], layerEntry), true);
+assert.strictEqual(runtime.customEventMatches(flagged[0], trackEntry), true);
+assert.strictEqual(runtime.customEventMatches(fromAssigned[0], {
+  name: 'checkout_step',
+  props: null,
+  source: 'dataLayer',
+}), true);
 
 const store = memoryStore();
 const memory = Object.create(null);

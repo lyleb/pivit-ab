@@ -37,6 +37,8 @@ const { refreshDemoPlan } = require('../demo-sample');
 const { noteSnippetSeen, noteInstallCheck, noteQaPreview, installCheckPayload } = require('../site-verify');
 const { publicGa4ForScope } = require('../ga4');
 const { publicDatalayerEvents } = require('../datalayer-events');
+const { parseCreateIntegrationFlags, parseExperimentIntegrations } = require('../experiment-integrations');
+const { recordAudit } = require('../audit');
 const { normaliseStatusChange } = require('../experiment-status');
 const { refuseViewOnly } = require('../membership-access');
 const {
@@ -201,13 +203,18 @@ router.get('/', async (req, res) => {
     const ga4 = await publicGa4ForScope(db, scope);
     const datalayerEvents = await publicDatalayerEvents(db, scope);
     const sendPublic = (body) => {
-      if (ga4 && ga4.measurement_id) body.ga4 = { measurement_id: ga4.measurement_id };
+      const list = body && Array.isArray(body.experiments) ? body.experiments : [];
+      // The measurement id stays { measurement_id } so a cached older snippet
+      // still understands it. It is left off when every test on this response
+      // has Send to GA4 unticked, so that older snippet sends nothing either.
+      const anyGa4 = list.some((row) => row && row.ga4_enabled !== false);
+      if (ga4 && ga4.measurement_id && anyGa4) body.ga4 = { measurement_id: ga4.measurement_id };
       if (datalayerEvents) body.datalayer_events = true;
       return res.json(body);
     };
 
     const { rows: experiments } = await db.query(
-      `SELECT id, name, url_match, url_match_type, element_selector, activation_type, activation_value, test_type, allowed_hosts, goals FROM experiments
+      `SELECT id, name, url_match, url_match_type, element_selector, activation_type, activation_value, test_type, allowed_hosts, goals, ga4_enabled, datalayer_events FROM experiments
        WHERE ${sqlPageMatch(1)} AND status = 'running'
          AND (${publicScopeSql(2, 3)})`,
       [url, scope.accountId, scope.siteId]
@@ -221,7 +228,7 @@ router.get('/', async (req, res) => {
     let previewExpired = null;
     if (previewAuth.ok) {
       const { rows: previewRows } = await db.query(
-        `SELECT e.id, e.name, e.url_match, e.url_match_type, e.element_selector, e.activation_type, e.activation_value, e.test_type, e.allowed_hosts, e.status, e.goals, e.account_id, e.site_id,
+        `SELECT e.id, e.name, e.url_match, e.url_match_type, e.element_selector, e.activation_type, e.activation_value, e.test_type, e.allowed_hosts, e.status, e.goals, e.account_id, e.site_id, e.ga4_enabled, e.datalayer_events,
                 v.id AS variant_id, v.name AS variant_name
          FROM variants v
          JOIN experiments e ON e.id = v.experiment_id
@@ -310,7 +317,7 @@ router.get('/by-ids', async (req, res) => {
     const scope = await openPublicScope(req);
     if (!scope) return res.json({ experiments: [] });
     const { rows: experiments } = await db.query(
-      `SELECT id, name, allowed_hosts, goals, test_type FROM experiments
+      `SELECT id, name, allowed_hosts, goals, test_type, ga4_enabled, datalayer_events FROM experiments
        WHERE id = ANY($1::uuid[])
          AND (${publicScopeSql(2, 3)})
          AND ($4::boolean OR test_type <> 'demo')`,
@@ -329,6 +336,9 @@ router.get('/by-ids', async (req, res) => {
       id: exp.id,
       name: exp.name,
       goals: Array.isArray(exp.goals) ? exp.goals : [],
+      // Missing on an older payload means on. A cached snippet ignores these.
+      ga4_enabled: exp.ga4_enabled !== false,
+      datalayer_events: exp.datalayer_events !== false,
       variants: variants.filter((v) => v.experiment_id === exp.id),
     }));
 
@@ -632,6 +642,8 @@ router.post('/', async (req, res) => {
     if (ownedClient.rows.length === 0) return res.status(404).json({ error: 'no viewer found with that id' });
   }
   if (refuseViewOnly(req, res)) return;
+  const createdFlags = parseCreateIntegrationFlags(req.body);
+  if (!createdFlags.ok) return res.status(createdFlags.status).json({ error: createdFlags.error });
 
   let client;
   try {
@@ -649,9 +661,9 @@ router.post('/', async (req, res) => {
 
     const planJson = testType.type === 'demo' ? JSON.stringify(demoPlan({ variantCount: 2 })) : null;
     const { rows: expRows } = await client.query(
-      `INSERT INTO experiments (name, url_match, url_match_type, element_selector, client_id, allowed_hosts, goals, goals_scope, goals_migrated, account_id, site_id, needs_site, test_type, plan, activation_type, activation_value)
-       VALUES ($1, $2, $3, $4, $5, $6::text[], '[]'::jsonb, 'shared', true, $7, $8, $9, $10, $11::jsonb, $12, $13) RETURNING *`,
-      [name, url_match, pageMatch.type, activation.type === 'element' ? null : element.selector, client_id || null, hosts, accountId, placed.siteId, placed.needsSite, testType.type, planJson, activation.type, activation.value]
+      `INSERT INTO experiments (name, url_match, url_match_type, element_selector, client_id, allowed_hosts, goals, goals_scope, goals_migrated, account_id, site_id, needs_site, test_type, plan, activation_type, activation_value, ga4_enabled, datalayer_events)
+       VALUES ($1, $2, $3, $4, $5, $6::text[], '[]'::jsonb, 'shared', true, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $15) RETURNING *`,
+      [name, url_match, pageMatch.type, activation.type === 'element' ? null : element.selector, client_id || null, hosts, accountId, placed.siteId, placed.needsSite, testType.type, planJson, activation.type, activation.value, createdFlags.ga4_enabled, createdFlags.datalayer_events]
     );
     const experiment = expRows[0];
 
@@ -1172,6 +1184,60 @@ router.patch('/:id/hosts', async (req, res) => {
     } finally {
       client.release();
     }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
+// PATCH /api/experiments/:id/integrations  { ga4_enabled, datalayer_events }
+// Owner-only. Either field can be sent on its own. The site switches still
+// have to be on before the snippet sends or counts. A Member is refused.
+router.patch('/:id/integrations', async (req, res) => {
+  try {
+    const experiment = await ownedExperiment(req.account.id, req.params.id);
+    if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (refuseViewOnly(req, res)) return;
+    const parsed = parseExperimentIntegrations(req.body);
+    if (!parsed.ok) return res.status(parsed.status).json({ error: parsed.error });
+    const ga4Enabled = Object.prototype.hasOwnProperty.call(parsed, 'ga4_enabled')
+      ? parsed.ga4_enabled
+      : experiment.ga4_enabled !== false;
+    const datalayerEvents = Object.prototype.hasOwnProperty.call(parsed, 'datalayer_events')
+      ? parsed.datalayer_events
+      : experiment.datalayer_events !== false;
+    const { rows } = await db.query(
+      `UPDATE experiments
+       SET ga4_enabled = $1,
+           datalayer_events = $2
+       WHERE id = $3 AND account_id = $4
+       RETURNING id, name, ga4_enabled, datalayer_events`,
+      [ga4Enabled, datalayerEvents, experiment.id, req.account.id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
+    const beforeGa4 = experiment.ga4_enabled !== false;
+    const beforeLayer = experiment.datalayer_events !== false;
+    if (beforeGa4 !== (rows[0].ga4_enabled === true) || beforeLayer !== (rows[0].datalayer_events === true)) {
+      await recordAudit(db, {
+        accountId: req.account.id,
+        userId: req.account.userId,
+        actorLabel: 'owner',
+        action: 'experiment_integrations',
+        targetType: 'experiment',
+        targetId: experiment.id,
+        detail: {
+          name: rows[0].name,
+          ga4_enabled: rows[0].ga4_enabled === true,
+          datalayer_events: rows[0].datalayer_events === true,
+        },
+        ip: req.ip,
+      });
+    }
+    res.json({
+      id: rows[0].id,
+      ga4_enabled: rows[0].ga4_enabled === true,
+      datalayer_events: rows[0].datalayer_events === true,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal error', detail: err.message });

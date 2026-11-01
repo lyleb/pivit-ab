@@ -49,7 +49,7 @@
   <ol>
     <li>Look at the badge next to the pivitlab logo.</li>
     <li><strong>Platform admin</strong> can see every agency. The badge says Platform admin. This person has the Users screen, can make an invite code for a new agency, and can open a read-only support view of another agency.</li>
-    <li>An <strong>agency</strong> is one company on pivitlab. People in it are an <strong>Owner</strong> or a <strong>Member</strong>. The badge says Owner or Member. An Owner can create, edit, delete, start, pause, conclude and archive tests, variants and goals, use the editor, change sites, GA4 and dataLayer, clear or restore test traffic, and invite or change the team. A Member can read Home, experiments, results including the funnel, the audit log and Help, and can preview variants. A Member cannot make those changes. The page says: You have view-only access. Ask an Owner to make changes.</li>
+    <li>An <strong>agency</strong> is one company on pivitlab. People in it are an <strong>Owner</strong> or a <strong>Member</strong>. The badge says Owner or Member. An Owner can create, edit, delete, start, pause, conclude and archive tests, variants and goals, use the editor, change sites, change Integrations for GA4 and dataLayer, clear or restore test traffic, and invite or change the team. A Member can read Home, Integrations, experiments, results including the funnel, the audit log and Help, and can preview variants. A Member cannot make those changes. The page says: You have view-only access. Ask an Owner to make changes.</li>
     <li>A <strong>Viewer</strong> is a read-only login for results. The badge says Viewer. A Viewer sees only the tests an Owner has assigned to them. They sign in with a username and password, not an email.</li>
   </ol>
   <p class="hint">The names stored in the database stay as they are (accounts, clients, session role client). On screen the names are Platform admin, Agency, Owner, Member and Viewer.</p>
@@ -228,7 +228,8 @@ window.pivit.push(['track', 'checkout_step', { step_name: 'confirmation' }]);</c
   <pre><code>pivit.track('checkout_step', { step_name: 'confirmation' });</code></pre>
   <p>If the page already uses <code>window.pivit</code> for something else, pivitlab leaves that object in place and adds <code>track</code>.</p>
   <h3>From the data layer</h3>
-  <p>This is off for each site until you switch it on. On Home, open the site and switch on <strong>Count dataLayer events</strong>.</p>
+  <p>This is off for each site until you switch it on. Open <strong>Integrations</strong> and switch on <strong>Count dataLayer events</strong> for that site. Home only shows whether it is on or off, with a link back to Integrations.</p>
+  <p>Each experiment has its own <strong>Count dataLayer events</strong> tickbox, in the create wizard and later in Settings. It starts ticked when the site has the switch on, including experiments you already saved, so they keep counting. Untick it to leave that test out. <code>pivit.track</code> still counts. If the site switch is off, the tickbox is greyed out and links to Integrations.</p>
   <p>pivitlab then counts a push that looks like this, including one that is already on the page when the snippet loads:</p>
   <pre><code>window.dataLayer = window.dataLayer || [];
 window.dataLayer.push({ event: 'payment_complete' });</code></pre>
@@ -245,15 +246,16 @@ window.dataLayer.push({ event: 'checkout_step', step_name: 'confirmation' });</c
   <p>Visits with <code>?pivit_qa=1</code> stay out of the funnel unless you include test traffic. The test-traffic panel counts only test traffic, and opening it is not an early look.</p>
 
   <h2 id="ga4">Send to GA4</h2>
-  <p>On Home, each site has <strong>Send to GA4</strong> and a box for that site's GA4 measurement ID. The ID starts with G-. This is included on paid plans. pivitlab has no priced plans yet. Paid plan is the switch that lets an agency use Send to GA4. A Platform admin sets it on Home, on the Send to GA4 card. That card also says how many sites have Send to GA4 switched on.</p>
-  <p>When Send to GA4 is switched on, the snippet sends that site's GA4 an event called <code>experience_impression</code>. The test name and id, and the variant name and id, are in the event. They are also joined in a parameter called <code>exp_variant_string</code>, which is the same shape VWO and Optimizely use. In GA4, register exp_variant_string as a custom dimension, then use it in a report or an exploration to compare variants.</p>
+  <p>Open <strong>Integrations</strong>. That page explains Send to GA4 once, links here for the steps, and lists each site. Each site has <strong>Send to GA4</strong> and a box for that site's GA4 measurement ID. The ID starts with G-. This is included on paid plans. pivitlab has no priced plans yet. Paid plan is the switch that lets an agency use Send to GA4. A Platform admin sets it on Home, on the Send to GA4 card. That card also says how many sites have Send to GA4 switched on. Home itself only shows a one-line status for the site, with a link to Integrations.</p>
+  <p>Each experiment has its own <strong>Send to GA4</strong> tickbox, in the create wizard and later in Settings. It starts ticked when the site has Send to GA4 on, so every experiment you already saved keeps sending. Untick it to leave that test out. If the site has Send to GA4 off, or the agency is not on a paid plan, the tickbox is greyed out and links to Integrations.</p>
+  <p>When Send to GA4 is switched on for the site and ticked for the experiment, the snippet sends that site's GA4 an event called <code>experience_impression</code>. The test name and id, and the variant name and id, are in the event. They are also joined in a parameter called <code>exp_variant_string</code>, which is the same shape VWO and Optimizely use. In GA4, register exp_variant_string as a custom dimension, then use it in a report or an exploration to compare variants.</p>
   <p>pivitlab uses the gtag or dataLayer already on the page. It does not load Google Analytics, and it does not set Google cookies. If the page has neither, nothing is sent. If the page uses Google Tag Manager, pivitlab pushes one object onto dataLayer and does not also call gtag, so the visit is not counted twice. A page that uses gtag.js and not Tag Manager still receives the event through gtag. If Google Consent Mode is in use, the event is sent only when analytics storage is allowed. A preview, or a visit with ?pivit_qa=1, is not sent. Each test is sent once for a page view. A single-page app sends it again when the address changes, and not twice for the same address.</p>
   <p>The downloadable container file adds a Data Layer Variable for each of those fields, at Version 2, a Custom Event trigger named experience_impression, and a GA4 Event tag named pivitlab - experience_impression. It does not add a Google tag. A gtag call would hide the fields from a Data Layer Variable, and sending both would count the visit twice.</p>
   <h3 id="ga4-setup">Set it up</h3>
   <h3>GA4 through Tag Manager</h3>
   <ol>
-    <li>On Home, open the site. Enter the measurement ID, the one that starts with G-, and choose Save GA4. Switch on Send to GA4 once a Platform admin has marked the agency as paid.</li>
-    <li>Open How Send to GA4 works, then choose Download Tag Manager container.</li>
+    <li>Open Integrations. Enter the measurement ID for the site, the one that starts with G-, and choose Save. Switch on Send to GA4 once a Platform admin has marked the agency as paid.</li>
+    <li>On that site's row, choose Download Tag Manager container. How Send to GA4 works, above the list, explains the event.</li>
     <li>In Tag Manager, open Admin, then Import container.</li>
     <li>Choose the file, then choose the workspace you want to import into.</li>
     <li>Choose Merge. Then choose Rename conflicting tags, triggers and variables. Do not choose Overwrite. Overwrite would replace the whole container.</li>
@@ -264,7 +266,7 @@ window.dataLayer.push({ event: 'checkout_step', step_name: 'confirmation' });</c
     <li>Publish the workspace.</li>
   </ol>
   <h3>GA4 directly with gtag.js</h3>
-  <p>If the site loads gtag.js and does not use Tag Manager, you do not add a tag. pivitlab calls gtag with experience_impression and the same fields. Save the measurement ID and switch Send to GA4 on.</p>
+  <p>If the site loads gtag.js and does not use Tag Manager, you do not add a tag. pivitlab calls gtag with experience_impression and the same fields. On Integrations, save the measurement ID and switch Send to GA4 on. Tick Send to GA4 on the experiment too.</p>
   <h3>In GA4, for both paths</h3>
   <ol>
     <li>In GA4, open Admin, then Custom definitions.</li>
@@ -275,7 +277,7 @@ window.dataLayer.push({ event: 'checkout_step', step_name: 'confirmation' });</c
   </ol>
   <h3>If it does not work</h3>
   <ul>
-    <li>The event is missing. The test may not be running, or the page address does not match the test's URL rule. Paid plan or Send to GA4 may be off. Analytics consent may not be granted. A visit with ?pivit_qa=1 is not sent.</li>
+    <li>The event is missing. The test may not be running, or the page address does not match the test's URL rule. Paid plan or Send to GA4 may be off, or the experiment's Send to GA4 tickbox may be unticked. Analytics consent may not be granted. A visit with ?pivit_qa=1 is not sent.</li>
     <li>The values are undefined. The Data Layer Variable names must match exactly: exp_variant_string, experiment_id, experiment_name, variant_id, variant_name.</li>
     <li>The visit is counted twice. Do not add both a gtag event and a Tag Manager tag for experience_impression. pivitlab sends only one of them.</li>
   </ul>

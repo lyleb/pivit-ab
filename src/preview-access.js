@@ -109,6 +109,15 @@ function publicActivation(exp) {
   return { activation_type: 'page_load', activation_value: '' };
 }
 
+// Older snippets ignore both fields. A missing column stays on, which is
+// how a payload from before these ticks behaved.
+function publicIntegrationFlags(exp) {
+  return {
+    ga4_enabled: !exp || exp.ga4_enabled !== false,
+    datalayer_events: !exp || exp.datalayer_events !== false,
+  };
+}
+
 function publicVariant(variant) {
   const row = {
     id: variant.id,
@@ -140,6 +149,7 @@ function buildPublicExperimentList({ running, variants, previewExperiment, previ
 
   const experiments = (running || []).map((exp) => {
     const activation = publicActivation(exp);
+    const flags = publicIntegrationFlags(exp);
     const row = {
       id: exp.id,
       name: exp.name,
@@ -154,6 +164,9 @@ function buildPublicExperimentList({ running, variants, previewExperiment, previ
       // Empty for a test whose goals still differ per variant. The snippet
       // then uses each variant's own list. Older snippets ignore this field.
       goals: Array.isArray(exp.goals) ? exp.goals : [],
+      // On unless this test's tick is off. Older snippets ignore both.
+      ga4_enabled: flags.ga4_enabled,
+      datalayer_events: flags.datalayer_events,
       variants: (byExperiment.get(exp.id) || [])
         .filter((variant) => variant.enabled !== false)
         .map(publicVariant),
@@ -180,6 +193,8 @@ function buildPublicExperimentList({ running, variants, previewExperiment, previ
           activation_type: publicActivation(previewExperiment).activation_type,
           activation_value: publicActivation(previewExperiment).activation_value,
           goals: Array.isArray(previewExperiment.goals) ? previewExperiment.goals : [],
+          ga4_enabled: publicIntegrationFlags(previewExperiment).ga4_enabled,
+          datalayer_events: publicIntegrationFlags(previewExperiment).datalayer_events,
           variants: [],
         };
         if (previewExperiment.test_type === 'demo') exp.test_type = 'demo';

@@ -75,6 +75,21 @@ const both = plan({
 assert.strictEqual(both.events.length, 2);
 assert.deepStrictEqual(both.events.map((item) => item.params.variant_id), ['var-1', 'var-9']);
 
+// A missing ga4_enabled still sends, so a cached older payload is unchanged.
+// false skips that test only. The other test on the same page still sends.
+const mixed = plan({
+  experiments: [
+    Object.assign({}, home, { ga4_enabled: false }),
+    Object.assign({}, nav, { ga4_enabled: true }),
+  ],
+  assignments: { 'exp-1': 'var-1', 'exp-2': 'var-9' },
+});
+assert.strictEqual(mixed.events.length, 1);
+assert.strictEqual(mixed.events[0].params.experiment_id, 'exp-2');
+assert.strictEqual(plan({
+  experiments: [Object.assign({}, home, { ga4_enabled: false })],
+}).events.length, 0);
+
 assert.strictEqual(plan({ assignments: {} }).events.length, 0);
 assert.strictEqual(plan({ assignments: { 'exp-1': 'missing' } }).events.length, 0);
 assert.strictEqual(plan({ ga4: null }).reason, 'disabled');
@@ -432,6 +447,12 @@ assert.ok(dashboard.includes('One event per page view, through the tag already o
 assert.ok(dashboard.includes('/ga4/container.json'));
 assert.ok(dashboard.includes('help.html#ga4-setup'));
 assert.ok(dashboard.includes('Merge, not Overwrite'));
+assert.ok(dashboard.includes('id="nav-page-integrations"'));
+assert.ok(dashboard.includes('id="page-integrations"'));
+assert.ok(dashboard.includes('Manage in Integrations'));
+assert.ok(dashboard.includes('id="wizard-ga4"'));
+assert.ok(dashboard.includes('id="settings-ga4"'));
+assert.ok(dashboard.includes('id="integrations-list"'));
 assert.ok(dashboard.includes('Paid plan'));
 assert.ok(dashboard.includes('class="brand-logo"'));
 assert.ok(dashboard.includes('aria-label="pivitlab"'));
