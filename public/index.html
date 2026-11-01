@@ -520,6 +520,7 @@
     </div>
     <nav class="sidebar-nav">
       <button type="button" class="nav-item active" id="nav-page-home" data-go="#home">Home</button>
+      <button type="button" class="nav-item" id="nav-page-integrations" data-go="#integrations">Integrations</button>
       <button type="button" class="nav-item" id="nav-page-create" data-go="#create">Create experiment</button>
       <button type="button" class="nav-item" id="nav-page-preview" data-go="#preview">Preview &amp; manage</button>
       <button type="button" class="nav-item" id="nav-page-status" data-go="#status">Start &amp; pause</button>
@@ -734,6 +735,37 @@
       </div>
     </div>
 
+    <div id="page-integrations" class="page">
+      <div class="page-head">
+        <div>
+          <h1>Integrations</h1>
+          <p class="hint" style="margin:4px 0 0;">Set up Send to GA4 and dataLayer events once for each site. Each experiment can turn them off.</p>
+        </div>
+      </div>
+      <p id="integrations-readonly" class="banner" hidden>You have view-only access. Ask an Owner to make changes.</p>
+      <div class="card">
+        <h2>Send to GA4</h2>
+        <div class="site-ga4">
+          <details class="ga4-more">
+            <summary>
+              <span>How Send to GA4 works</span>
+              <span class="hint">One event per page view, through the tag already on the site.</span>
+            </summary>
+            <div class="accordion-body">
+              <p class="hint" id="integrations-ga4-help"></p>
+            </div>
+          </details>
+        </div>
+        <p><a href="/help.html#ga4-setup">Step-by-step setup</a> · <a href="/help.html#custom-event">How to send a custom event</a></p>
+        <p class="hint">Import a Tag Manager container with Merge, not Overwrite.</p>
+      </div>
+      <div class="card">
+        <h2>Sites</h2>
+        <p class="hint" style="margin-top:0;">Save the measurement ID, then switch Send to GA4 on. Count dataLayer events stays off until you switch it on.</p>
+        <div id="integrations-list"></div>
+      </div>
+    </div>
+
     <div id="page-detail" class="page">
       <div id="detail-root"></div>
     </div>
@@ -810,7 +842,11 @@
           <p class="hint">Sites this experiment may run on. Separate extra domains with a comma or a new line. www and the bare domain count as the same.</p>
           <label for="wizard-client">Viewer (optional)</label>
           <select id="wizard-client"><option value="">None — internal only</option></select>
-          <p id="wizard-lock-hint" class="hint" hidden>Name, URL and test type are fixed once the draft exists. A demo test cannot be switched to live. Match, the element rule, when the test starts, the viewer and site domains can still be changed. Match, the element rule and when the test starts can also be changed later in Settings.</p>
+          <label class="check" for="wizard-ga4"><input type="checkbox" id="wizard-ga4"> Send to GA4</label>
+          <p class="hint" id="wizard-ga4-hint" hidden></p>
+          <label class="check" for="wizard-datalayer"><input type="checkbox" id="wizard-datalayer"> Count dataLayer events</label>
+          <p class="hint" id="wizard-datalayer-hint" hidden></p>
+          <p id="wizard-lock-hint" class="hint" hidden>Name, URL and test type are fixed once the draft exists. A demo test cannot be switched to live. Match, the element rule, when the test starts, the viewer, site domains, and these two tickboxes can still be changed. They can also be changed later in Settings.</p>
         </div>
 
         <div id="wizard-step-2" class="wizard-step" hidden>
@@ -1296,6 +1332,10 @@ const wizard = {
   busy: false,
   siteChosen: false,
   siteId: '',
+  ga4Enabled: null,
+  datalayerEvents: null,
+  ga4Touched: false,
+  datalayerTouched: false,
   advancedAt: 0,
 };
 
@@ -1378,6 +1418,11 @@ function applySessionChrome() {
   if (memberNote) {
     memberNote.hidden = canChange || me.membership !== 'member';
     memberNote.textContent = UI.VIEW_ONLY_NOTE;
+  }
+  const integrationsNote = document.getElementById('integrations-readonly');
+  if (integrationsNote) {
+    integrationsNote.hidden = canChange || me.membership !== 'member';
+    integrationsNote.textContent = UI.VIEW_ONLY_NOTE;
   }
   const emergency = document.getElementById('emergency-banner');
   if (emergency) {
@@ -1992,6 +2037,7 @@ function applyAccountSites(setup) {
   snippetSiteKey = choice.site && typeof choice.site.public_key === 'string' ? choice.site.public_key : '';
   paintSitePickers();
   paintSitesCard(sites);
+  paintIntegrations(sites);
   applyDisplayedOrigins();
   fillInstallSnippets();
 }
@@ -2027,6 +2073,115 @@ function paintSitePickers() {
   if (needed) needed.hidden = !(show && !chosenSiteId);
 }
 
+function integrationStatusHtml(site) {
+  const sending = site.ga4_available === true && site.ga4_enabled === true;
+  const id = site.ga4_measurement_id ? ` (${site.ga4_measurement_id})` : '';
+  const ga4 = (sending ? 'GA4: on' : 'GA4: off') + id;
+  const layer = site.datalayer_events === true ? 'on' : 'off';
+  return `<p class="hint integration-status">${UI.escapeHtml(ga4)} · dataLayer events: ${layer} · <a href="#integrations">Manage in Integrations</a></p>`;
+}
+
+function siteById(siteId) {
+  if (!siteId) return null;
+  return accountSites.find((site) => site.id === siteId) || null;
+}
+
+function siteGa4On(site) {
+  return !!(site && site.ga4_available === true && site.ga4_enabled === true);
+}
+
+function integrationOffHint(kind, site) {
+  const link = '<a href="#integrations">Integrations</a>';
+  if (kind === 'ga4' && (!site || site.ga4_available !== true)) {
+    return `Send to GA4 is on paid plans. This agency does not have it yet. See ${link}.`;
+  }
+  if (kind === 'ga4') return `Send to GA4 is off for this site. Switch it on in ${link}.`;
+  return `Count dataLayer events is off for this site. Switch it on in ${link}.`;
+}
+
+function paintWizardIntegrations() {
+  const site = siteById(wizardResolvedSiteId() || chosenSiteId);
+  const persisted = !!wizard.expId;
+  paintIntegrationBox(
+    'wizard-ga4',
+    'wizard-ga4-hint',
+    'ga4',
+    site,
+    wizard.ga4Touched || persisted ? wizard.ga4Enabled : null,
+    persisted
+  );
+  paintIntegrationBox(
+    'wizard-datalayer',
+    'wizard-datalayer-hint',
+    'datalayer',
+    site,
+    wizard.datalayerTouched || persisted ? wizard.datalayerEvents : null,
+    persisted
+  );
+}
+
+function paintDetailIntegrations() {
+  if (!currentDetail) return;
+  const site = siteById(currentDetail.site_id);
+  paintIntegrationBox('settings-ga4', 'settings-ga4-hint', 'ga4', site, currentDetail.ga4_enabled, true);
+  paintIntegrationBox('settings-datalayer', 'settings-datalayer-hint', 'datalayer', site, currentDetail.datalayer_events, true);
+}
+
+function paintIntegrationBox(inputId, hintId, kind, site, stored, persisted) {
+  const box = document.getElementById(inputId);
+  const hint = document.getElementById(hintId);
+  if (!box) return;
+  const siteOn = kind === 'ga4' ? siteGa4On(site) : !!(site && site.datalayer_events === true);
+  const known = typeof stored === 'boolean';
+  if (persisted) box.checked = stored !== false;
+  else if (!siteOn) box.checked = false;
+  else box.checked = known ? stored === true : true;
+  box.disabled = !siteOn || !agencyCanChange();
+  if (hint) {
+    hint.hidden = siteOn;
+    hint.innerHTML = siteOn ? '' : integrationOffHint(kind, site);
+  }
+}
+
+function paintIntegrations(sites) {
+  const help = document.getElementById('integrations-ga4-help');
+  if (help) help.textContent = UI.GA4_HELP;
+  const list = document.getElementById('integrations-list');
+  if (!list) return;
+  const rows = sites || [];
+  if (!rows.length) {
+    list.innerHTML = '<p class="hint">No site yet. Add one on Home, then come back here.</p>';
+    return;
+  }
+  const readOnly = !agencyCanChange();
+  list.innerHTML = rows.map((site) => {
+    const paid = site.ga4_available === true;
+    const ga4On = site.ga4_enabled === true;
+    const toggleDisabled = readOnly || (!paid && !ga4On);
+    const id = UI.escapeHtml(site.id);
+    const label = UI.escapeHtml(domainLabel(site) || site.name || 'Site');
+    return `<div class="site-row" data-site-id="${id}">
+      <div style="flex:1;min-width:0;">
+        <strong>${label}</strong>
+        <form class="site-ga4" data-ga4-form="${id}">
+          <label for="ga4-id-${id}">GA4 measurement ID</label>
+          <input id="ga4-id-${id}" data-ga4-id value="${UI.escapeHtml(site.ga4_measurement_id || '')}" placeholder="G-XXXXXXXXXX" spellcheck="false" autocapitalize="off" autocomplete="off"${readOnly ? ' disabled' : ''}>
+          ${readOnly ? '' : '<button type="submit">Save</button>'}
+          <label class="check"><input type="checkbox" data-ga4-enabled${ga4On ? ' checked' : ''}${toggleDisabled ? ' disabled' : ''}> Send to GA4</label>
+          ${paid ? '' : `<p class="hint">${UI.escapeHtml(UI.GA4_UNPAID_NOTE)}</p>`}
+          <p><a href="/api/sites/${id}/ga4/container.json">Download Tag Manager container</a></p>
+          <p class="hint">Import the file with Merge, not Overwrite.</p>
+          <p class="error-msg" data-ga4-error></p>
+        </form>
+        <form class="site-ga4" data-datalayer-form="${id}">
+          <label class="check"><input type="checkbox" data-datalayer-events${site.datalayer_events === true ? ' checked' : ''}${readOnly ? ' disabled' : ''}> Count dataLayer events</label>
+          <p class="error-msg" data-datalayer-error></p>
+        </form>
+      </div>
+    </div>`;
+  }).join('');
+}
+
 function paintSitesCard(sites) {
   const list = document.getElementById('sites-list');
   const addForm = document.getElementById('sites-add-form');
@@ -2043,34 +2198,7 @@ function paintSitesCard(sites) {
     const warning = site.conflict
       ? `<p class="banner" role="status">${UI.escapeHtml(UI.DOMAIN_IN_USE_WARNING)}</p>`
       : '';
-    const paid = site.ga4_available === true;
-    const ga4On = site.ga4_enabled === true;
-    const toggleDisabled = readOnly || (!paid && !ga4On);
-    const ga4 = `
-      <form class="site-ga4" data-ga4-form="${UI.escapeHtml(site.id)}">
-        <label class="check"><input type="checkbox" data-ga4-enabled${ga4On ? ' checked' : ''}${toggleDisabled ? ' disabled' : ''}> Send to GA4</label>
-        <label for="ga4-id-${UI.escapeHtml(site.id)}">GA4 measurement ID</label>
-        <input id="ga4-id-${UI.escapeHtml(site.id)}" data-ga4-id value="${UI.escapeHtml(site.ga4_measurement_id || '')}" placeholder="G-XXXXXXXXXX" spellcheck="false" autocapitalize="off" autocomplete="off"${readOnly ? ' disabled' : ''}>
-        ${readOnly ? '' : '<button type="submit">Save GA4</button>'}
-        <details class="ga4-more">
-          <summary>
-            <span>How Send to GA4 works</span>
-            <span class="hint">One event per page view, through the tag already on the site.</span>
-          </summary>
-          <div class="accordion-body">
-            <p class="hint">${UI.escapeHtml(UI.GA4_HELP)}</p>
-            <p><a href="/api/sites/${UI.escapeHtml(site.id)}/ga4/container.json">Download Tag Manager container</a></p>
-            <p class="hint">Import the file with Merge, not Overwrite. <a href="/help.html#ga4-setup">Step-by-step setup</a></p>
-          </div>
-        </details>
-        ${paid ? '' : `<p class="hint">${UI.escapeHtml(UI.GA4_UNPAID_NOTE)}</p>`}
-        <p class="error-msg" data-ga4-error></p>
-      </form>
-      <form class="site-ga4" data-datalayer-form="${UI.escapeHtml(site.id)}">
-        <label class="check"><input type="checkbox" data-datalayer-events${site.datalayer_events === true ? ' checked' : ''}${readOnly ? ' disabled' : ''}> Count dataLayer events</label>
-        <p class="hint">Off until you switch it on. A dataLayer push of { event: 'payment_complete' } then counts for a custom event goal with that name. experience_impression is not counted. <a href="/help.html#custom-event">How to send the event</a></p>
-        <p class="error-msg" data-datalayer-error></p>
-      </form>`;
+    const ga4 = integrationStatusHtml(site);
     const edit = readOnly ? '' : `
       <button type="button" class="btn-ghost" data-site-edit-toggle="${UI.escapeHtml(site.id)}">Edit</button>`;
     const form = readOnly ? '' : `
@@ -2265,13 +2393,13 @@ function go(hash) {
 }
 
 function showPage(id) {
-  ['page-home', 'page-detail', 'page-create', 'page-preview', 'page-status', 'page-audit', 'page-team', 'page-users'].forEach((pageId) => {
+  ['page-home', 'page-integrations', 'page-detail', 'page-create', 'page-preview', 'page-status', 'page-audit', 'page-team', 'page-users'].forEach((pageId) => {
     document.getElementById(pageId).classList.toggle('active', pageId === id);
   });
 }
 
 function setNav(activeId) {
-  ['page-home', 'page-create', 'page-preview', 'page-status', 'page-audit', 'page-team', 'page-users'].forEach((id) => {
+  ['page-home', 'page-integrations', 'page-create', 'page-preview', 'page-status', 'page-audit', 'page-team', 'page-users'].forEach((id) => {
     const el = document.getElementById('nav-' + id);
     if (el) el.classList.toggle('active', id === activeId);
   });
@@ -2312,6 +2440,15 @@ async function applyRoute() {
     setNav('page-users');
     setTitle('pivitlab — Users');
     await loadUsers(token);
+    return;
+  }
+  if (hash === '#integrations') {
+    showPage('page-integrations');
+    setNav('page-integrations');
+    setTitle('pivitlab — Integrations');
+    await ensureAccountSites();
+    if (token !== routeToken) return;
+    paintIntegrations(accountSites);
     return;
   }
   if (hash === '#create' && !agencyCanChange()) {
@@ -2357,7 +2494,7 @@ function stripMemberControls(root) {
   });
   const addRow = document.getElementById('add-variant-row');
   if (addRow && scope.contains(addRow)) addRow.hidden = true;
-  ['settings-match', 'settings-element', 'settings-activation', 'settings-activation-value', 'settings-activation-js', 'settings-hosts', 'settings-client', 'settings-status'].forEach((id) => {
+  ['settings-match', 'settings-element', 'settings-activation', 'settings-activation-value', 'settings-activation-js', 'settings-hosts', 'settings-client', 'settings-status', 'settings-ga4', 'settings-datalayer'].forEach((id) => {
     const el = document.getElementById(id);
     if (el && scope.contains(el)) el.disabled = true;
   });
@@ -3064,6 +3201,8 @@ async function openExperiment(id, tab, { token, force } = {}) {
   currentDetail.status = UI.displayedStatus(currentDetail.status, statusConfirms.get(id), readStartedAt);
   currentDetail.client_name = clientNameById(currentDetail.client_id);
   currentTab = tab || 'overview';
+  await ensureAccountSites();
+  if (requestToken !== routeToken || gen !== viewGen) return;
   renderDetail();
   showDetailTab(currentTab);
   setTitle(`pivitlab — ${currentDetail.name}`);
@@ -3350,6 +3489,10 @@ function renderDetail() {
         <label for="settings-client">Viewer</label>
         <select id="settings-client"></select>
         <p class="hint">Only this viewer can see the experiment on their results page.</p>
+        <label class="check" for="settings-ga4"><input type="checkbox" id="settings-ga4"> Send to GA4</label>
+        <p class="hint" id="settings-ga4-hint" hidden></p>
+        <label class="check" for="settings-datalayer"><input type="checkbox" id="settings-datalayer"> Count dataLayer events</label>
+        <p class="hint" id="settings-datalayer-hint" hidden></p>
         <label for="settings-status">Status</label>
         <select id="settings-status">
           ${statusOptions}
@@ -3398,6 +3541,7 @@ function renderDetail() {
     });
   }
   refreshDetailPreviewWarning();
+  paintDetailIntegrations();
   stripMemberControls(document.getElementById('detail-root'));
 }
 
@@ -4254,6 +4398,21 @@ async function saveDetailSettings() {
     currentDetail.element_selector = activationResult.data.element_selector;
   }
   if (currentDetail.activation_type === 'element' && elementField) elementField.value = '';
+  const ga4Box = document.getElementById('settings-ga4');
+  const layerBox = document.getElementById('settings-datalayer');
+  const flags = {};
+  if (ga4Box && !ga4Box.disabled) flags.ga4_enabled = ga4Box.checked === true;
+  if (layerBox && !layerBox.disabled) flags.datalayer_events = layerBox.checked === true;
+  if (Object.keys(flags).length) {
+    const flagsResult = await callApi(`/api/experiments/${currentDetail.id}/integrations`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify(flags),
+    });
+    if (!flagsResult.ok) { msg.className = 'error-msg'; msg.textContent = flagsResult.message; return; }
+    if (typeof flagsResult.data.ga4_enabled === 'boolean') currentDetail.ga4_enabled = flagsResult.data.ga4_enabled;
+    if (typeof flagsResult.data.datalayer_events === 'boolean') currentDetail.datalayer_events = flagsResult.data.datalayer_events;
+  }
   const hostsResult = await callApi(`/api/experiments/${currentDetail.id}/hosts`, {
     method: 'PATCH',
     headers: authHeaders(),
@@ -5322,6 +5481,10 @@ function resetWizard() {
   wizard.busy = false;
   wizard.siteChosen = false;
   wizard.siteId = '';
+  wizard.ga4Enabled = null;
+  wizard.datalayerEvents = null;
+  wizard.ga4Touched = false;
+  wizard.datalayerTouched = false;
   wizard.advancedAt = 0;
   try { sessionStorage.removeItem('pivit_wizard'); } catch (e) {}
   const list = document.getElementById('wizard-goals-list');
@@ -5358,6 +5521,10 @@ function readWizardBasics() {
   wizard.activationValue = activation.activation_value;
   wizard.hosts = document.getElementById('wizard-hosts').value.trim();
   wizard.clientId = document.getElementById('wizard-client').value;
+  const ga4Box = document.getElementById('wizard-ga4');
+  const layerBox = document.getElementById('wizard-datalayer');
+  if (ga4Box) wizard.ga4Enabled = ga4Box.disabled && !wizard.expId ? false : ga4Box.checked === true;
+  if (layerBox) wizard.datalayerEvents = layerBox.disabled && !wizard.expId ? false : layerBox.checked === true;
   updateWizardTypeHint();
   saveWizard();
   refreshWizardDomainWarning();
@@ -5492,6 +5659,7 @@ async function renderWizard() {
   }
   paintGoalSiteLine();
   paintSitePickers();
+  paintWizardIntegrations();
   if (wizard.step === 4) {
     document.querySelectorAll('[data-wizard-check]').forEach((box) => {
       box.checked = !!wizard.checks[box.dataset.wizardCheck];
@@ -5595,6 +5763,8 @@ async function persistWizardBasics() {
         allowed_hosts: wizard.hosts,
         test_type: wizard.testType === 'demo' ? 'demo' : 'live',
         site_id: siteForWizard || chosenSiteId || null,
+        ga4_enabled: wizard.ga4Enabled === true,
+        datalayer_events: wizard.datalayerEvents === true,
       }),
     });
     if (!result.ok) { wizardMsg(apiErrorText(result)); return false; }
@@ -5615,6 +5785,10 @@ async function persistWizardBasics() {
     else if (result.data.element_selector != null) wizard.elementSelector = result.data.element_selector || '';
     if (result.data.activation_type) wizard.activationType = result.data.activation_type;
     wizard.activationValue = result.data.activation_value || '';
+    if (typeof result.data.ga4_enabled === 'boolean') wizard.ga4Enabled = result.data.ga4_enabled;
+    if (typeof result.data.datalayer_events === 'boolean') wizard.datalayerEvents = result.data.datalayer_events;
+    wizard.ga4Touched = true;
+    wizard.datalayerTouched = true;
     saveWizard();
     loadExperimentList();
     return true;
@@ -5650,6 +5824,20 @@ async function persistWizardBasics() {
   });
   if (!hostsResult.ok) { wizardMsg(hostsResult.message); return false; }
   rememberSavedHosts(hostsResult.data);
+  const flagBody = {};
+  const ga4BoxNow = document.getElementById('wizard-ga4');
+  const layerBoxNow = document.getElementById('wizard-datalayer');
+  if (ga4BoxNow && !ga4BoxNow.disabled) flagBody.ga4_enabled = wizard.ga4Enabled === true;
+  if (layerBoxNow && !layerBoxNow.disabled) flagBody.datalayer_events = wizard.datalayerEvents === true;
+  if (Object.keys(flagBody).length) {
+    const flagsResult = await callApi(`/api/experiments/${wizard.expId}/integrations`, {
+      method: 'PATCH', headers: authHeaders(),
+      body: JSON.stringify(flagBody),
+    });
+    if (!flagsResult.ok) { wizardMsg(flagsResult.message); return false; }
+    if (typeof flagsResult.data.ga4_enabled === 'boolean') wizard.ga4Enabled = flagsResult.data.ga4_enabled;
+    if (typeof flagsResult.data.datalayer_events === 'boolean') wizard.datalayerEvents = flagsResult.data.datalayer_events;
+  }
   saveWizard();
   loadExperimentList();
   return true;
@@ -5750,6 +5938,8 @@ function renderWizardSummary() {
     <dt>Element</dt>${element}
     <dt>Starts</dt><dd>${UI.escapeHtml(UI.activationStartText(wizard.activationType, wizard.activationValue))}${wizard.activationType === 'manual' && wizard.expId ? ' · test key ' + UI.escapeHtml(wizard.expId) : ''}</dd>
     <dt>Viewer</dt><dd>${UI.escapeHtml(client)}</dd>
+    <dt>Send to GA4</dt><dd>${wizard.ga4Enabled === true ? 'On for this test' : 'Off for this test'}</dd>
+    <dt>dataLayer events</dt><dd>${wizard.datalayerEvents === true ? 'On for this test' : 'Off for this test'}</dd>
     <dt>Variants</dt><dd>${UI.escapeHtml(variants)}</dd>
     <dt>Goals</dt><dd>${goalLine}</dd>
     <dt>Status after save</dt><dd><span class="badge draft">Draft</span> — start when you’re ready to collect traffic</dd>
@@ -7133,6 +7323,7 @@ document.getElementById('add-site-form').addEventListener('submit', async (event
         saveWizard();
         refreshWizardDomainWarning();
         paintGoalSiteLine();
+        paintWizardIntegrations();
         return;
       }
       wizard.siteChosen = true;
@@ -7152,6 +7343,7 @@ document.getElementById('add-site-form').addEventListener('submit', async (event
       saveWizard();
       refreshWizardDomainWarning();
       paintGoalSiteLine();
+      paintWizardIntegrations();
       return;
     }
     if (!select.value) {
@@ -7191,7 +7383,28 @@ document.getElementById('sites-add-form').addEventListener('submit', async (even
   await refreshFirstRun();
 });
 
-document.getElementById('sites-list').addEventListener('change', async (event) => {
+function rememberWizardIntegration(event) {
+  if (!event.target) return;
+  if (event.target.id === 'wizard-ga4') {
+    wizard.ga4Touched = true;
+    wizard.ga4Enabled = event.target.checked === true;
+    saveWizard();
+  }
+  if (event.target.id === 'wizard-datalayer') {
+    wizard.datalayerTouched = true;
+    wizard.datalayerEvents = event.target.checked === true;
+    saveWizard();
+  }
+}
+document.getElementById('wizard-card').addEventListener('change', rememberWizardIntegration);
+
+document.getElementById('integrations-list').addEventListener('change', async (event) => {
+  const ga4Toggle = event.target.closest('[data-ga4-enabled]');
+  if (ga4Toggle && !ga4Toggle.disabled) {
+    const form = ga4Toggle.closest('[data-ga4-form]');
+    if (form) await saveSiteGa4(form, true);
+    return;
+  }
   const toggle = event.target.closest('[data-datalayer-events]');
   if (!toggle || toggle.disabled) return;
   const form = toggle.closest('[data-datalayer-form]');
@@ -7220,31 +7433,37 @@ document.getElementById('sites-list').addEventListener('click', (event) => {
   if (form) form.hidden = !form.hidden;
 });
 
-document.getElementById('sites-list').addEventListener('submit', async (event) => {
-  const ga4Form = event.target.closest('[data-ga4-form]');
-  if (ga4Form) {
-    event.preventDefault();
-    const siteId = ga4Form.getAttribute('data-ga4-form');
-    const errorEl = ga4Form.querySelector('[data-ga4-error]');
-    const idInput = ga4Form.querySelector('[data-ga4-id]');
-    const toggle = ga4Form.querySelector('[data-ga4-enabled]');
-    if (errorEl) errorEl.textContent = '';
-    const result = await callApi('/api/sites/' + encodeURIComponent(siteId) + '/ga4', {
-      method: 'PATCH',
-      headers: authHeaders(),
-      body: JSON.stringify({
-        measurement_id: idInput ? idInput.value : '',
-        enabled: !!(toggle && toggle.checked),
-      }),
-    });
-    if (!result.ok) {
-      if (errorEl) errorEl.textContent = apiErrorText(result);
-      return;
-    }
-    await refreshFirstRun();
-    await loadGa4Admin();
+async function saveSiteGa4(ga4Form, revertToggle) {
+  const siteId = ga4Form.getAttribute('data-ga4-form');
+  const errorEl = ga4Form.querySelector('[data-ga4-error]');
+  const idInput = ga4Form.querySelector('[data-ga4-id]');
+  const toggle = ga4Form.querySelector('[data-ga4-enabled]');
+  if (errorEl) errorEl.textContent = '';
+  const result = await callApi('/api/sites/' + encodeURIComponent(siteId) + '/ga4', {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({
+      measurement_id: idInput ? idInput.value : '',
+      enabled: !!(toggle && toggle.checked),
+    }),
+  });
+  if (!result.ok) {
+    if (revertToggle && toggle) toggle.checked = !toggle.checked;
+    if (errorEl) errorEl.textContent = apiErrorText(result);
     return;
   }
+  await refreshFirstRun();
+  await loadGa4Admin();
+}
+
+document.getElementById('integrations-list').addEventListener('submit', async (event) => {
+  const ga4Form = event.target.closest('[data-ga4-form]');
+  if (!ga4Form) return;
+  event.preventDefault();
+  await saveSiteGa4(ga4Form, false);
+});
+
+document.getElementById('sites-list').addEventListener('submit', async (event) => {
   const form = event.target.closest('[data-site-edit]');
   if (!form) return;
   event.preventDefault();

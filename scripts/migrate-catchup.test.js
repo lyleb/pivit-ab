@@ -94,7 +94,7 @@ async function main() {
     assert.strictEqual(await columnInfo(db), null);
 
     const applied = await migrate();
-    assert.deepStrictEqual(applied, ['003', '004', '005', '006', '007', '008', '009', '010', '011', '012', '013', '014', '015', '016', '017', '018', '019', '020', '021', '022', '023']);
+    assert.deepStrictEqual(applied, ['003', '004', '005', '006', '007', '008', '009', '010', '011', '012', '013', '014', '015', '016', '017', '018', '019', '020', '021', '022', '023', '024']);
     const index = await db.query(
       `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_rate_limits_window_start'`
     );
@@ -122,9 +122,15 @@ async function main() {
       [experimentId]
     );
     assert.strictEqual(kept.rows[0].url_match_type, 'exact');
+    const ticks = await db.query(
+      `SELECT ga4_enabled, datalayer_events FROM experiments WHERE id = $1`,
+      [experimentId]
+    );
+    assert.strictEqual(ticks.rows[0].ga4_enabled, true);
+    assert.strictEqual(ticks.rows[0].datalayer_events, true);
 
     const versions = await db.query(`SELECT version FROM schema_migrations ORDER BY version`);
-    assert.deepStrictEqual(versions.rows.map((row) => row.version), ['000', '001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012', '013', '014', '015', '016', '017', '018', '019', '020', '021', '022', '023']);
+    assert.deepStrictEqual(versions.rows.map((row) => row.version), ['000', '001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012', '013', '014', '015', '016', '017', '018', '019', '020', '021', '022', '023', '024']);
 
     const paid = await db.query(`SELECT bool_and(paid_plan = false) AS all_unpaid FROM accounts`);
     assert.strictEqual(paid.rows[0].all_unpaid, true);

@@ -117,7 +117,9 @@
  *
  * Send to GA4: when the API includes a ga4 measurement id, an assignment
  * sends one experience_impression through the gtag or dataLayer already on
- * the page. The parameter exp_variant_string is the test name and id, then
+ * the page, unless that test's ga4_enabled is false. A missing flag still
+ * sends, so a cached older response is unchanged. The parameter
+ * exp_variant_string is the test name and id, then
  * the variant name and id, which is the shape VWO and Optimizely use. The
  * same page view is sent once. A single-page app sends it again when the
  * address changes. Preview and pivit_qa / v_pt visits are not sent. This
@@ -164,7 +166,9 @@
  * conversion as test traffic.
  *
  * When the experiments response includes datalayer_events, the same goals
- * also count a dataLayer.push({ event: 'payment_complete' }). The same
+ * also count a dataLayer.push({ event: 'payment_complete' }), and only for
+ * a test whose datalayer_events tick is not false. A payload from before
+ * that field counts, which is how a cached response still behaves. The same
  * conditions are read from that object, so checkout_step with
  * step_name confirmation counts and checkout_step with step_name basket
  * does not. Entries already on dataLayer are scanned, and later pushes
@@ -246,6 +250,7 @@
   api.propsFromQueueItem = propsFromQueueItem;
   api.dataLayerEntryEventName = dataLayerEntryEventName;
   api.customPropertiesMatch = customPropertiesMatch;
+  api.customEventMatches = customEventMatches;
   api.installPivitTracker = installPivitTracker;
   api.hookDataLayer = hookDataLayer;
   api.watchDataLayer = watchDataLayer;
@@ -335,8 +340,7 @@
       let matched = false;
       for (let k = 0; k < customEvents.length; k++) {
         const entry = customEvents[k];
-        if (entry.name !== goal.event) continue;
-        if (!customPropertiesMatch(goal.when, entry.props)) continue;
+        if (!customEventMatches(goal, entry)) continue;
         matched = true;
         break;
       }
@@ -345,10 +349,14 @@
       sendEvent(goal.experimentId, goal.variantId, goal.visitorId, 'convert', goal.goalId);
     }
   }
-  noteCustomEvent = function (name, props) {
+  noteCustomEvent = function (name, props, source) {
     const clean = normaliseCustomEventName(name);
     if (!clean) return;
-    customEvents.push({ name: clean, props: plainCustomProps(props) });
+    customEvents.push({
+      name: clean,
+      props: plainCustomProps(props),
+      source: source === 'dataLayer' ? 'dataLayer' : '',
+    });
     if (customEvents.length > 50) customEvents.shift();
     flushCustom(clean);
   };
@@ -712,11 +720,12 @@
   // single beacon per visitor per goal.
   let pageClickTracker = null;
   let pageElementWatcher = null;
-  function wireConversionTracking(experimentId, variantId, visitorId, goals) {
+  function wireConversionTracking(experimentId, variantId, visitorId, goals, datalayer) {
     const context = {
       experimentId: experimentId,
       variantId: variantId,
       visitorId: visitorId,
+      datalayer: datalayer !== false,
     };
     const list = clickGoalsFrom(goals, context);
     if (list.length) {
@@ -1804,7 +1813,7 @@
         enrolledThisView: enrolledThisView,
       });
       watchWaiting(first.waiting, window.location.href, enrolledThisView, false);
-      if (data && data.datalayer_events === true) watchDataLayer(window, noteCustomEvent);
+      if (data && data.datalayer_events === true) watchDataLayer(window, noteDataLayerEvent);
 
       watchAnalyticsConsent(window, reportGa4FromConsent);
 
@@ -1822,7 +1831,7 @@
             if (!hasTrackingConsent()) return;
             rememberPublicGa4(next);
             watchAnalyticsConsent(window, reportGa4FromConsent);
-            if (next && next.datalayer_events === true) watchDataLayer(window, noteCustomEvent);
+            if (next && next.datalayer_events === true) watchDataLayer(window, noteDataLayerEvent);
             const delivered = deliverNavigation({
               experiments: (next && next.experiments) || [],
               href: href,
@@ -1865,7 +1874,7 @@
               if (!hasTrackingConsent()) return;
               rememberPublicGa4(next);
               watchAnalyticsConsent(window, reportGa4FromConsent);
-              if (next && next.datalayer_events === true) watchDataLayer(window, noteCustomEvent);
+              if (next && next.datalayer_events === true) watchDataLayer(window, noteDataLayerEvent);
               reportExperienceImpressions((next && next.experiments) || [], href);
             })
             .catch(function () { /* a later address change can still report */ });
@@ -2017,6 +2026,15 @@
     }
     return false;
   }
+  // A dataLayer push counts only when the test's tick is on. pivit.track
+  // has no source, so it still counts when the dataLayer tick is off.
+  // A goal saved before the tick existed has no datalayer field and counts.
+  function customEventMatches(goal, entry) {
+    if (!goal || !entry) return false;
+    if (entry.name !== goal.event) return false;
+    if (entry.source === 'dataLayer' && goal.datalayer === false) return false;
+    return customPropertiesMatch(goal.when, entry.props);
+  }
   function customPropertiesMatch(when, props) {
     const conditions = customWhenFromGoal(when);
     if (conditions === null) return false;
@@ -2054,6 +2072,7 @@
         goalId: goal.id || eventName,
         event: eventName,
         when: when,
+        datalayer: ctx.datalayer !== false,
       });
     }
     return out;
@@ -2070,6 +2089,7 @@
         experimentId: experiment.id,
         variantId: variantId,
         visitorId: visitorId,
+        datalayer: !experiment || experiment.datalayer_events !== false,
       });
       for (let i = 0; i < list.length; i++) out.push(list[i]);
     });
@@ -2174,6 +2194,9 @@
       return { hooked: false, scanned: scanned };
     }
     return { hooked: true, scanned: scanned };
+  }
+  function noteDataLayerEvent(name, props) {
+    noteCustomEvent(name, props, 'dataLayer');
   }
   function watchDataLayer(win, onEvent) {
     if (!win) return { hooked: false, scanned: 0 };
@@ -2828,6 +2851,7 @@
     for (let i = 0; i < experiments.length; i++) {
       const experiment = experiments[i];
       if (!experiment || experiment.id == null || experiment.id === '') continue;
+      if (experiment.ga4_enabled === false) continue;
       const assigned = assignments[experiment.id];
       if (assigned == null || assigned === '') continue;
       const variants = experiment.variants || [];
@@ -3089,7 +3113,7 @@
       else sendEvent(experiment.id, variant.id, visitorId, 'view', null, changeApplied);
       views.push(experiment.id);
       if (typeof opts.wire === 'function') opts.wire(experiment.id, variant.id, visitorId, goalList);
-      else wireConversionTracking(experiment.id, variant.id, visitorId, goalList);
+      else wireConversionTracking(experiment.id, variant.id, visitorId, goalList, experiment.datalayer_events !== false);
       if (typeof opts.report === 'function') opts.report(experiment, href);
       else reportExperienceImpressions([experiment], href);
       return { reason: 'applied', variant: variant };

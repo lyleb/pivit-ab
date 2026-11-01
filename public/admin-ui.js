@@ -258,7 +258,7 @@
   }
 
   const ELEMENT_GOAL_HELP = 'A CSS selector. Once someone is in the test, pivitlab counts a conversion the first time this element is on the page. The address does not have to change. For example, #step-confirmation on a checkout.';
-  const CUSTOM_GOAL_HELP = 'The event name your site sends, such as payment_complete. pivitlab counts pivit.track(\'payment_complete\'), including a call queued before the snippet loads with window.pivit = window.pivit || []. Only when… can require up to 3 properties, such as step_name = confirmation. Every one has to match. pivit.track(\'checkout_step\', { step_name: \'confirmation\' }) sends those properties. A dataLayer push counts only when Count dataLayer events is switched on for the site. Each visitor counts once. Help has the code to paste.';
+  const CUSTOM_GOAL_HELP = 'The event name your site sends, such as payment_complete. pivitlab counts pivit.track(\'payment_complete\'), including a call queued before the snippet loads with window.pivit = window.pivit || []. Only when… can require up to 3 properties, such as step_name = confirmation. Every one has to match. pivit.track(\'checkout_step\', { step_name: \'confirmation\' }) sends those properties. A dataLayer push counts only when Count dataLayer events is switched on for the site and ticked for this test. Each visitor counts once. Help has the code to paste.';
 
   function goalKind(type) {
     if (type === 'url') return 'Visited a URL';
@@ -543,6 +543,7 @@
     'viewer.deleted': 'Deleted a Viewer',
     ga4_settings: 'Updated Send to GA4',
     datalayer_events: 'Updated dataLayer events',
+    experiment_integrations: 'Updated test integrations',
     paid_plan: 'Changed the paid plan',
   };
 
@@ -583,6 +584,12 @@
     }
     if (entry && entry.action === 'datalayer_events') {
       return detail.datalayer_events === true ? 'On' : 'Off';
+    }
+    if (entry && entry.action === 'experiment_integrations') {
+      const name = detail.name ? `${detail.name}. ` : '';
+      const ga4 = detail.ga4_enabled === true ? 'Send to GA4 on' : 'Send to GA4 off';
+      const layer = detail.datalayer_events === true ? 'dataLayer events on' : 'dataLayer events off';
+      return `${name}${ga4}. ${layer}`;
     }
     if (entry && String(entry.action || '').indexOf('viewer.') === 0) {
       const name = detail.name ? String(detail.name) : '';

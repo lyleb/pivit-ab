@@ -258,6 +258,14 @@ assert.ok(ui.CUSTOM_GOAL_HELP.includes('payment_complete'));
 assert.ok(ui.CUSTOM_GOAL_HELP.includes('window.pivit = window.pivit || []'));
 assert.ok(!ui.CUSTOM_GOAL_HELP.includes('Pivitlab'));
 assert.strictEqual(ui.auditActionLabel('datalayer_events'), 'Updated dataLayer events');
+assert.strictEqual(ui.auditActionLabel('experiment_integrations'), 'Updated test integrations');
+assert.strictEqual(
+  ui.auditDetailText({
+    action: 'experiment_integrations',
+    detail: { name: 'Home hero', ga4_enabled: false, datalayer_events: true },
+  }),
+  'Home hero. Send to GA4 off. dataLayer events on'
+);
 assert.strictEqual(ui.goalResultLabel({ type: 'click', label: 'Buy button', detail: '.buy' }), 'Buy button · Click .buy');
 assert.strictEqual(ui.goalResultLabel({ type: 'url', label: 'Thanks', detail: '/thanks' }), 'Thanks · Visited a URL /thanks');
 assert.ok(ui.ELEMENT_GOAL_HELP.includes('pivitlab'));
