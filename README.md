@@ -80,7 +80,7 @@ The easiest way is the visual editor: **🎯 Make Edits → Select element → S
 
 1. Click the bookmark
 2. Click the element you want to target
-3. Its selector is copied to your clipboard (and shown in a prompt as a fallback if clipboard access is blocked)
+3. The selector is copied, and shown on the page. If it uses the element's position, the page says so
 4. Paste it into the goal's Selector field on the dashboard
 
 This is a standalone tool (`snippet/picker-bookmarklet.js`) — it's not part of the tracking snippet and doesn't get deployed to the sites you test.
@@ -89,7 +89,7 @@ This is a standalone tool (`snippet/picker-bookmarklet.js`) — it's not part of
 
 The dashboard has a "Goals" section alongside "Changes" when adding a variant, with two goal types:
 
-- **Click on element** — fires when the visitor clicks anything matching the selector. Works on any element, not just `<button>` — a `div`, `span`, link, whatever you point it at.
+- **Click on element** — fires when the visitor clicks anything matching the selector. A button or a link is the usual goal. The dashboard warns if the selector matches a heading or other text, because people rarely click those. You can still save it.
 - **Visited a URL** — fires when the visitor later loads any page whose URL contains the text you give (e.g. `/thank-you`). This works even though that page is completely different from the one the experiment's changes run on — the snippet checks every page load against every experiment you've ever been assigned to, not just the one currently "running" there. Each goal only ever counts once per visitor.
 
 Any goal firing sends a `convert` event back to the API (distinct from the automatic `view` event). The results table counts these under "conversions" and calculates the rate as conversions ÷ visitors.

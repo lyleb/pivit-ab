@@ -36,17 +36,38 @@ assert.strictEqual(countSelectorMatches(html, 'h1:hover').supported, false);
 assert.strictEqual(countSelectorMatches(html, '').valid, false);
 
 const none = describeSelectorCount(countSelectorMatches(html, '.missing'));
-assert.strictEqual(none.tone, 'warn');
+assert.strictEqual(none.tone, 'later');
 assert.strictEqual(none.count, 0);
-assert.ok(none.message.includes('0 elements'));
-assert.ok(none.message.includes('later'));
+assert.ok(none.message.includes("isn't on the page yet"));
+assert.ok(!none.message.includes('probably wrong'));
 const one = describeSelectorCount(countSelectorMatches(html, 'h1'));
-assert.strictEqual(one.tone, 'ok');
+assert.strictEqual(one.tone, 'warn');
 assert.strictEqual(one.count, 1);
+assert.ok(one.message.includes('heading'));
+assert.ok(one.message.includes('button or a link'));
+const shopLink = describeSelectorCount(countSelectorMatches(html, 'a.button'));
+assert.strictEqual(shopLink.tone, 'ok');
+assert.strictEqual(shopLink.count, 1);
 const many = describeSelectorCount(countSelectorMatches(html, 'button'));
 assert.strictEqual(many.tone, 'note');
 assert.strictEqual(many.count, 2);
 assert.ok(many.message.includes('any of them'));
+const text = describeSelectorCount(countSelectorMatches(html, 'p'));
+assert.strictEqual(text.tone, 'warn');
+assert.ok(text.message.includes('text'));
+const placed = describeSelectorCount(countSelectorMatches(html, 'div:nth-of-type(3) > span:nth-of-type(2)'));
+assert.strictEqual(placed.tone, 'warn');
+assert.strictEqual(placed.count, 0);
+assert.ok(placed.message.includes('probably wrong'));
+assert.ok(placed.message.includes('position'));
+const generated = describeSelectorCount(countSelectorMatches(html, '.css-9abc12'));
+assert.strictEqual(generated.tone, 'warn');
+assert.ok(generated.message.includes('generates'));
+const placedButton = describeSelectorCount(countSelectorMatches(html, 'button:nth-of-type(1)'));
+assert.strictEqual(placedButton.count, 1);
+assert.strictEqual(placedButton.tone, 'warn');
+assert.ok(placedButton.message.includes('position'));
+assert.ok(placedButton.message.includes('1 element'));
 const bad = describeSelectorCount(countSelectorMatches(html, '['));
 assert.strictEqual(bad.tone, 'warn');
 assert.ok(bad.message.includes("isn't a valid CSS selector"));
@@ -80,7 +101,8 @@ const publicLookup = async () => [{ address: '93.184.216.34' }];
     },
   });
   assert.strictEqual(shop.count, 1);
-  assert.strictEqual(shop.tone, 'ok');
+  assert.strictEqual(shop.tone, 'warn');
+  assert.ok(shop.message.includes('heading'));
 
   const late = await checkClickSelector({
     pageUrl: 'https://site3-checkout.netlify.app/play',
@@ -90,7 +112,8 @@ const publicLookup = async () => [{ address: '93.184.216.34' }];
     fetchImpl: async () => response(200, '<html><body><div id="play"></div></body></html>', { 'content-type': 'text/html' }),
   });
   assert.strictEqual(late.count, 0);
-  assert.strictEqual(late.tone, 'warn');
+  assert.strictEqual(late.tone, 'later');
+  assert.ok(late.message.includes("isn't on the page yet"));
 
   const wrong = await checkClickSelector({
     pageUrl: 'https://evil.example/secret',
