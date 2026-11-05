@@ -14,8 +14,9 @@
  * list ('replace', 'stylesheet', 'js'), so it can be edited or removed
  * independently later. If the HTML tab only changes the text of the same
  * element, that part is saved as a text change instead of a replace. The
- * selector prefers an id, a unique class chain, or a data attribute, and
- * uses a positional path only when nothing else matches this element alone.
+ * selector prefers an id, a data attribute, a name, a unique class combination
+ * or a semantic attribute, and uses a short positional path only when nothing
+ * else matches this element alone.
  * "Whole page" does not need an element.
  * Its CSS and JavaScript are stored as page_css and page_js. "Insert banner"
  * does not need an element either. It stores one banner change: text, an
@@ -100,6 +101,12 @@
   const Z = 2147483647; // max safe z-index — stays above whatever the host page uses
   const COLORS = { indigo: '#5635FB', indigoDark: '#4527d6', mint: '#02DEB5', ink: '#131723', danger: '#d64545', border: '#e6e7f0' };
   const SELECTOR_MISSING = "This selector isn't on the current page.";
+  const POSITION_WARNING = 'This picks the element by its position on the page, so it may break if the page layout changes. pivitlab looks for it for up to 10 seconds.';
+  const WRONG_WARNING = 'This selector matches nothing, and it follows a position on the page. It is probably wrong. Pick the element again.';
+  const LATER_WARNING = "This element isn't on the page yet. It may appear on a later step, or after the page draws itself.";
+  const HEADING_GOAL_WARNING = "This is a heading. People don't usually click headings, so this goal may never be reached. Pick a button or a link.";
+  const TEXT_GOAL_WARNING = 'This is text, not a button or a link. Pick the thing people click.';
+  const FIT_GOAL_WARNING = "This isn't a button or a link. A click on it may never be counted. Pick the thing people click.";
   let experimentId = '';
 
   let allChanges = [];       // the full working set — both already-saved and new-this-session
@@ -253,6 +260,25 @@
   function getSelector(el) {
     if (window.PivitRuntime && typeof window.PivitRuntime.uniqueSelector === 'function') {
       return window.PivitRuntime.uniqueSelector(el, document);
+    }
+    if (!el || !el.tagName) return '';
+    const tag = el.tagName.toLowerCase();
+    function one(selector) {
+      try {
+        const list = document.querySelectorAll(selector);
+        return list.length === 1 && list[0] === el;
+      } catch (err) { return false; }
+    }
+    function attrSel(name) {
+      const value = el.getAttribute && el.getAttribute(name);
+      if (!value) return '';
+      return tag + '[' + name + '="' + String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]';
+    }
+    if (el.id && String(el.id).indexOf(':') === -1 && one('#' + cssEscape(el.id))) return '#' + cssEscape(el.id);
+    const stableAttrs = ['data-testid', 'data-test', 'data-cy', 'data-id', 'name', 'aria-label'];
+    for (let i = 0; i < stableAttrs.length; i++) {
+      const candidate = attrSel(stableAttrs[i]);
+      if (candidate && one(candidate)) return candidate;
     }
     if (el.id) return '#' + cssEscape(el.id);
     const path = [];
@@ -1207,9 +1233,7 @@
     const selectorIsPositional = window.PivitRuntime
       && typeof window.PivitRuntime.isPositionalSelector === 'function'
       && window.PivitRuntime.isPositionalSelector(suggested);
-    intro.textContent = selectorIsPositional
-      ? 'This picks the element by its position on the page, so it may break if the page layout changes. Similar elements — every NEW badge in a set, for example — usually share a class. Edit the selector if the count looks wrong.'
-      : 'Choose whether this change applies to every similar element, or only the one you picked. Edit the selector if the count looks wrong.';
+    intro.textContent = 'Choose whether this change applies to every similar element, or only the one you picked.';
     scopePanelEl.appendChild(intro);
 
     const label = document.createElement('div');
@@ -1241,14 +1265,16 @@
     note.id = 'pivit-similar-note';
     scopePanelEl.appendChild(note);
 
-    const hint = document.createElement('div');
-    styleReset(hint);
-    Object.assign(hint.style, { fontSize: '11px', color: '#6b6f83', marginTop: '8px', lineHeight: '1.4' });
-    hint.textContent = 'Generated and state classes are left out when a stable class remains. Classes that only appear on this element are left out when another class matches more than one. The highlight and the count update as you type.';
-    scopePanelEl.appendChild(hint);
-
     function refresh() {
       const found = matchesFor(input.value.trim());
+      const fieldPositional = window.PivitRuntime
+        && typeof window.PivitRuntime.isPositionalSelector === 'function'
+        && window.PivitRuntime.isPositionalSelector(input.value.trim());
+      note.style.padding = '0';
+      note.style.borderRadius = '0';
+      note.style.background = 'transparent';
+      note.style.fontWeight = '400';
+      note.style.fontSize = '12px';
       if (!found.valid) {
         clearSimilarHits();
         count.textContent = 'Not a valid selector';
@@ -1264,11 +1290,33 @@
       count.style.color = COLORS.indigo;
       applyAllBtn.disabled = false;
       applyAllBtn.style.opacity = '1';
-      if (found.nodes.length === 0) {
-        note.textContent = SELECTOR_MISSING + ' You can still use it if those elements load later.';
-        note.style.color = '#8a5a00';
-      }
-      else if (found.nodes.length > 200) {
+      const justWarn = scopePanelEl.querySelector('#pivit-positional-warning');
+      if (justWarn) justWarn.hidden = fieldPositional;
+      if (fieldPositional && found.nodes.length === 0) {
+        note.textContent = WRONG_WARNING;
+        note.style.color = '#6a4b12';
+        note.style.background = '#fff4e5';
+        note.style.padding = '12px 14px';
+        note.style.borderRadius = '8px';
+        note.style.fontWeight = '650';
+        note.style.fontSize = '15px';
+      } else if (fieldPositional) {
+        note.textContent = POSITION_WARNING;
+        note.style.color = '#6a4b12';
+        note.style.background = '#fff4e5';
+        note.style.padding = '12px 14px';
+        note.style.borderRadius = '8px';
+        note.style.fontWeight = '650';
+        note.style.fontSize = '15px';
+      } else if (found.nodes.length === 0) {
+        note.textContent = LATER_WARNING;
+        note.style.color = '#24324a';
+        note.style.background = '#eef3fb';
+        note.style.padding = '12px 14px';
+        note.style.borderRadius = '8px';
+        note.style.fontWeight = '650';
+        note.style.fontSize = '15px';
+      } else if (found.nodes.length > 200) {
         note.textContent = 'Highlighting the first 200. Narrow the selector if some of them should stay as they are.';
         note.style.color = '#6b6f83';
       } else if (found.nodes.length > 25) {
@@ -1306,8 +1354,16 @@
     const uniqueIsPositional = window.PivitRuntime
       && typeof window.PivitRuntime.isPositionalSelector === 'function'
       && window.PivitRuntime.isPositionalSelector(unique);
+    let justNote = null;
     if (uniqueIsPositional && !selectorIsPositional) {
-      justBtn.title = 'This picks the element by its position on the page, so it may break if the page layout changes.';
+      justNote = document.createElement('div');
+      styleReset(justNote);
+      justNote.id = 'pivit-positional-warning';
+      Object.assign(justNote.style, {
+        fontSize: '15px', fontWeight: '650', lineHeight: '1.45', color: '#6a4b12',
+        background: '#fff4e5', borderRadius: '8px', padding: '12px 14px',
+      });
+      justNote.textContent = POSITION_WARNING;
     }
 
     const cancelBtn = makeButton('Cancel', '#f0f0f7', () => closeScopePanel());
@@ -1316,6 +1372,7 @@
 
     row.appendChild(applyAllBtn);
     row.appendChild(justBtn);
+    if (justNote) row.appendChild(justNote);
     row.appendChild(cancelBtn);
     scopePanelEl.appendChild(row);
 
@@ -1729,13 +1786,22 @@
     cap.textContent = selector;
     actionPopup.appendChild(cap);
 
-    if (selectorMissing(selector)) {
+    const popupPositional = window.PivitRuntime
+      && typeof window.PivitRuntime.isPositionalSelector === 'function'
+      && window.PivitRuntime.isPositionalSelector(selector);
+    if (selectorMissing(selector) || popupPositional) {
       const warn = document.createElement('div');
       styleReset(warn);
+      warn.setAttribute('role', selectorMissing(selector) ? 'status' : 'alert');
       Object.assign(warn.style, {
-        color: '#8a5a00', fontSize: '12px', lineHeight: '1.4', padding: '0 8px 8px',
+        color: selectorMissing(selector) ? '#24324a' : '#6a4b12',
+        background: selectorMissing(selector) ? '#eef3fb' : '#fff4e5',
+        fontSize: '14px', fontWeight: '650', lineHeight: '1.45',
+        padding: '10px 12px', margin: '0 4px 8px', borderRadius: '8px',
       });
-      warn.textContent = SELECTOR_MISSING;
+      warn.textContent = selectorMissing(selector)
+        ? (popupPositional ? WRONG_WARNING : LATER_WARNING)
+        : POSITION_WARNING;
       actionPopup.appendChild(warn);
     }
 
@@ -1827,6 +1893,19 @@
       Object.assign(sub.style, { fontSize: '11px', color: '#6b6f83', marginTop: '2px', wordBreak: 'break-all', fontFamily: 'Menlo, monospace' });
       sub.textContent = opts.subtitle;
       panelEl.appendChild(sub);
+    }
+
+    if (opts.warning) {
+      const warn = document.createElement('div');
+      styleReset(warn);
+      warn.id = 'pivit-goal-warning';
+      warn.setAttribute('role', 'alert');
+      Object.assign(warn.style, {
+        marginTop: '12px', padding: '14px 16px', borderRadius: '10px',
+        background: '#fff4e5', color: '#6a4b12', fontSize: '16px', fontWeight: '650', lineHeight: '1.45',
+      });
+      warn.textContent = opts.warning;
+      panelEl.appendChild(warn);
     }
 
     const areas = {}, hints = {}, tabBtns = {};
@@ -2154,6 +2233,33 @@
     return goalsScope === 'divergent';
   }
 
+  function isClickableElement(el) {
+    if (!el || !el.tagName) return false;
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'a' || tag === 'button' || tag === 'summary' || tag === 'label' || tag === 'select' || tag === 'textarea') return true;
+    if (tag === 'input') {
+      const type = String((el.getAttribute && el.getAttribute('type')) || 'text').toLowerCase();
+      return type !== 'hidden';
+    }
+    const role = String((el.getAttribute && el.getAttribute('role')) || '').toLowerCase();
+    return role === 'button' || role === 'link' || role === 'tab' || role === 'menuitem'
+      || role === 'checkbox' || role === 'radio' || role === 'switch' || role === 'option';
+  }
+
+  function clickGoalWarning(el, selector) {
+    if (!isClickableElement(el)) {
+      const tag = el && el.tagName ? el.tagName.toLowerCase() : '';
+      if (/^h[1-6]$/.test(tag)) return HEADING_GOAL_WARNING;
+      if (tag === 'p' || tag === 'span' || tag === 'em' || tag === 'strong' || tag === 'small' || tag === 'li') return TEXT_GOAL_WARNING;
+      if (tag === 'img') return 'This is an image. If people click it, pick the link or button around it.';
+      return FIT_GOAL_WARNING;
+    }
+    if (window.PivitRuntime && typeof window.PivitRuntime.isPositionalSelector === 'function' && window.PivitRuntime.isPositionalSelector(selector)) {
+      return POSITION_WARNING;
+    }
+    return '';
+  }
+
   function openGoalPanel(pickedEl, chosenSelector, scope) {
     // If the pick landed on the text/icon inside a button or link, the goal belongs on the
     // button or link itself — that's what visitors actually click.
@@ -2165,9 +2271,11 @@
         : getSelector(clickable);
     }
     const existing = allGoals.find((g) => (g.type || 'click') === 'click' && g.selector === selector);
+    const warning = clickGoalWarning(clickable, selector);
     showEditorPanel({
       title: 'Set as click goal',
       subtitle: selector,
+      warning: warning,
       fields: [{
         key: 'label', label: 'Goal name', line: true, value: suggestGoalLabel(clickable),
         hint: 'A click on this element counts as a conversion for every variant, including Control. The name is what you see in results. Repeat clicks from the same visitor are counted once. ' +
@@ -2192,9 +2300,13 @@
   function openElementGoalPanel(pickedEl, chosenSelector) {
     const selector = chosenSelector || getSelector(pickedEl);
     const existing = allGoals.find((g) => g.type === 'element' && g.selector === selector);
+    const positional = window.PivitRuntime
+      && typeof window.PivitRuntime.isPositionalSelector === 'function'
+      && window.PivitRuntime.isPositionalSelector(selector);
     showEditorPanel({
       title: 'When this element appears',
       subtitle: selector,
+      warning: positional ? POSITION_WARNING : '',
       fields: [{
         key: 'label', label: 'Goal name', line: true, value: suggestGoalLabel(pickedEl, 'appears'),
         hint: 'When this element appears on the page, it counts as a conversion for every variant, including Control. The address does not have to change. Each visitor is counted once. The name is what you see in results. ' +

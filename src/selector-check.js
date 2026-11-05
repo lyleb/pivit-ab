@@ -88,16 +88,26 @@ function describeSelectorCount(result) {
     };
   }
   const count = Number(source.count) || 0;
+  const summary = source.summary || { interactive: count, heading: 0, textish: 0, tags: [] };
   if (count <= 0) {
+    return zeroMatch(source.selector);
+  }
+  if (summary.interactive === 0) {
+    return poorClickFit(count, summary);
+  }
+  if (summary.interactive < count) {
     return {
       loaded: true,
       valid: true,
       supported: true,
-      count: 0,
+      count,
       tone: 'warn',
-      message: 'This selector matches 0 elements on the page. You can still save the goal. The element may appear later, for example a button on a later step.',
+      kind: 'fit',
+      message: "Some of these aren't buttons or links. A click on the others still counts. Narrow the selector if you can.",
     };
   }
+  const fragile = fragileMatch(count, source.selector);
+  if (fragile) return fragile;
   if (count === 1) {
     return {
       loaded: true,
@@ -105,6 +115,7 @@ function describeSelectorCount(result) {
       supported: true,
       count: 1,
       tone: 'ok',
+      kind: 'ok',
       message: 'This selector matches 1 element on the page.',
     };
   }
@@ -114,7 +125,96 @@ function describeSelectorCount(result) {
     supported: true,
     count,
     tone: 'note',
+    kind: 'many',
     message: `This selector matches ${count} elements on the page. A click on any of them counts.`,
+  };
+}
+
+function selectorLooksPositional(selector) {
+  return /:(?:nth-child|nth-of-type|nth-last-child|nth-last-of-type|first-child|last-child|first-of-type|last-of-type|only-child|only-of-type)\b/.test(selector || '');
+}
+
+function selectorLooksGenerated(selector) {
+  return /(?:^|[\s>+~.#])(?:css-|sc-)[A-Za-z0-9_-]+/.test(selector || '');
+}
+
+function zeroMatch(selector) {
+  const base = {
+    loaded: true, valid: true, supported: true, count: 0, kind: 'wrong', tone: 'warn',
+  };
+  const text = String(selector || '');
+  const deep = (text.match(/>/g) || []).length >= 4;
+  if (selectorLooksPositional(text) || deep) {
+    return {
+      ...base,
+      message: 'This selector matches nothing, and it follows a position on the page. It is probably wrong. Pick the element again.',
+    };
+  }
+  if (selectorLooksGenerated(text)) {
+    return {
+      ...base,
+      message: 'This selector matches nothing, and it uses a class the site generates. It is probably wrong. Pick the element again.',
+    };
+  }
+  return {
+    ...base,
+    tone: 'later',
+    kind: 'later',
+    message: "This element isn't on the page yet. It may appear on a later step, or after the page draws itself. You can still save the goal. Open preview to check.",
+  };
+}
+
+const TEXTISH_TAGS = new Set(['p', 'span', 'em', 'strong', 'small', 'li', 'blockquote', 'figcaption', 'td', 'th']);
+const INTERACTIVE_TAGS = new Set(['a', 'button', 'select', 'textarea', 'summary', 'label']);
+const INTERACTIVE_ROLES = new Set(['button', 'link', 'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'checkbox', 'radio', 'switch', 'option']);
+
+function fragileMatch(count, selector) {
+  const text = String(selector || '');
+  const deep = (text.match(/>/g) || []).length >= 4;
+  const base = {
+    loaded: true, valid: true, supported: true, count, tone: 'warn',
+  };
+  if (selectorLooksPositional(text) || deep) {
+    const lead = count === 1 ? 'This matches 1 element' : `This matches ${count} elements`;
+    const extra = count > 1 ? ' A click on any of them counts.' : '';
+    return {
+      ...base,
+      kind: 'positional',
+      message: `${lead}, but it follows a position on the page, so a layout change can break it.${extra} Pick the element again if you can.`,
+    };
+  }
+  if (selectorLooksGenerated(text)) {
+    return {
+      ...base,
+      kind: 'generated',
+      message: count === 1
+        ? 'This matches 1 element, but it uses a class the site generates, so it may stop matching. Pick the element again if you can.'
+        : `This matches ${count} elements, but it uses a class the site generates, so it may stop matching. A click on any of them counts.`,
+    };
+  }
+  return null;
+}
+
+function poorClickFit(count, summary) {
+  const tags = summary.tags || [];
+  const heading = summary.heading === count || (tags.length === 1 && /^h[1-6]$/.test(tags[0]));
+  const text = summary.textish === count && tags.every((tag) => TEXTISH_TAGS.has(tag));
+  let message = "This isn't a button or a link. A click on it may never be counted. Pick the thing people click.";
+  if (heading) {
+    message = "This matches a heading. People don't usually click headings, so this goal may never be reached. Pick a button or a link.";
+  } else if (text) {
+    message = "This matches text, not a button or a link. Pick the thing people click.";
+  } else if (tags.length === 1 && tags[0] === 'img') {
+    message = 'This matches an image. If people click it, pick the link or button around it.';
+  }
+  return {
+    loaded: true,
+    valid: true,
+    supported: true,
+    count,
+    tone: 'warn',
+    kind: heading ? 'heading' : (text ? 'text' : 'fit'),
+    message,
   };
 }
 
@@ -308,6 +408,33 @@ function parseHtml(html) {
   return root;
 }
 
+function isInteractiveElement(el) {
+  if (!el) return false;
+  if (el.tag === 'input') {
+    const type = String((el.attrs && el.attrs.type) || 'text').toLowerCase();
+    return type !== 'hidden';
+  }
+  if (INTERACTIVE_TAGS.has(el.tag)) return true;
+  const role = String((el.attrs && el.attrs.role) || '').toLowerCase();
+  if (INTERACTIVE_ROLES.has(role)) return true;
+  if (el.attrs && (el.attrs.onclick || String(el.attrs.contenteditable || '').toLowerCase() === 'true')) return true;
+  return false;
+}
+
+function summariseMatches(elements) {
+  const tags = [];
+  let interactive = 0;
+  let heading = 0;
+  let textish = 0;
+  elements.forEach((el) => {
+    if (tags.length < 4 && tags.indexOf(el.tag) === -1) tags.push(el.tag);
+    if (isInteractiveElement(el)) interactive += 1;
+    else if (/^h[1-6]$/.test(el.tag)) heading += 1;
+    else if (TEXTISH_TAGS.has(el.tag)) textish += 1;
+  });
+  return { tags, interactive, heading, textish };
+}
+
 function compoundMatches(el, compound) {
   if (!el || el.tag === '#document') return false;
   if (compound.tag && compound.tag !== '*' && el.tag !== compound.tag) return false;
@@ -379,7 +506,15 @@ function countSelectorMatches(html, selector) {
   parsed.forEach((parts) => {
     queryParts(root, parts).forEach((el) => found.add(el));
   });
-  return { loaded: true, valid: true, supported: true, count: found.size };
+  const matches = Array.from(found);
+  return {
+    loaded: true,
+    valid: true,
+    supported: true,
+    count: matches.length,
+    selector: text,
+    summary: summariseMatches(matches),
+  };
 }
 
 async function defaultLookup(hostname) {

@@ -252,7 +252,7 @@
   .g-when-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
   .g-when-row input { margin: 0; flex: 1; min-width: 0; }
   .g-when-eq { color: var(--text-muted); }
-  .add-row .g-when { flex: 1 0 100%; }
+  .add-row .g-when, .add-row .g-selector-check { flex: 1 0 100%; }
   .picker-link {
     display: inline-block; padding: 8px 12px; background: #fff; color: #131723;
     border-radius: 8px; text-decoration: none; font-weight: 700; cursor: grab; font-size: 0.85em;
@@ -299,6 +299,25 @@
   }
   details .accordion-body { padding: 14px; }
   .warn-text { color: var(--warn); font-weight: 650; white-space: pre-line; }
+  .g-selector-check.selector-warn,
+  .g-selector-check.selector-later {
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin: 4px 0 0;
+    font-size: 1rem;
+    line-height: 1.45;
+    font-weight: 650;
+  }
+  .g-selector-check.selector-warn {
+    border: 1px solid #8a6a2f;
+    background: var(--warn-bg);
+    color: var(--warn);
+  }
+  .g-selector-check.selector-later {
+    border: 1px solid #3d4f73;
+    background: #1c2436;
+    color: var(--ink);
+  }
   .preview-url-warning {
     border: 1px solid #8a6a2f;
     background: var(--warn-bg);
@@ -3909,6 +3928,7 @@ function renderDivergentGoals() {
         <input class="g-value" type="text" placeholder="#cta-button" style="margin:0; flex:1;">
         <input class="g-id" type="text" placeholder="name" style="margin:0; width:140px;">
         <button type="button" data-action="add-goal" data-id="${v.id}">Add goal</button>
+        <p class="g-selector-check hint" role="status" hidden></p>
         <div class="g-when" hidden>
           <label>Only when…</label>
           <div class="g-when-rows"></div>
@@ -4269,7 +4289,37 @@ document.getElementById('page-detail').addEventListener('change', (e) => {
       help.hidden = true;
     }
   }
+  scheduleDraftSelectorCheck(draft);
 });
+
+document.getElementById('page-detail').addEventListener('input', (e) => {
+  if (!e.target.classList || !e.target.classList.contains('g-value')) return;
+  const draft = e.target.closest('[data-goal-draft]');
+  if (!draft) return;
+  scheduleDraftSelectorCheck(draft);
+});
+
+function scheduleDraftSelectorCheck(draft) {
+  if (!draft) return;
+  if (draft._selectorTimer) clearTimeout(draft._selectorTimer);
+  const typeEl = draft.querySelector('.g-type');
+  const out = draft.querySelector('.g-selector-check');
+  if (!typeEl || !out) return;
+  if (typeEl.value !== 'click') {
+    out.hidden = true;
+    out.textContent = '';
+    return;
+  }
+  const selector = (draft.querySelector('.g-value').value || '').trim();
+  if (!selector) {
+    out.hidden = true;
+    out.textContent = '';
+    return;
+  }
+  const generation = String(Number(draft.dataset.checkGen || 0) + 1);
+  draft.dataset.checkGen = generation;
+  draft._selectorTimer = setTimeout(() => { runSelectorCheck(draft, 'detail-goals-list', generation); }, 400);
+}
 
 function noDomainBadge(exp) {
   const hosts = exp && exp.allowed_hosts;
@@ -6464,7 +6514,7 @@ function addGoalRow(prefill, listId) {
       <label>Name</label>
       <input class="g-name" placeholder="Thank-you page">
     </div>
-    <p class="g-selector-check hint full-width" hidden></p>
+    <p class="g-selector-check hint full-width" role="status" hidden></p>
     <p class="hint g-element-help full-width" hidden></p>
     <div class="g-when full-width" hidden>
       <label>Only when…</label>
@@ -6610,7 +6660,9 @@ function paintSelectorCheck(row, payload) {
   const tone = payload && payload.tone;
   out.hidden = false;
   out.textContent = (payload && payload.message) || '';
-  out.className = 'g-selector-check full-width ' + (tone === 'warn' ? 'warn-text' : (tone === 'ok' ? 'ok-msg' : 'hint'));
+  const toneClass = tone === 'warn' ? 'selector-warn' : (tone === 'later' ? 'selector-later' : (tone === 'ok' ? 'ok-msg' : 'hint'));
+  out.className = 'g-selector-check full-width ' + toneClass;
+  out.setAttribute('role', tone === 'warn' ? 'alert' : 'status');
 }
 
 async function runSelectorCheck(row, listId, generation) {

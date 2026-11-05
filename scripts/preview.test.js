@@ -213,8 +213,10 @@ assert.ok(runtime.previewRefusalLine({ message: 'This page does not match.' }).i
 assert.ok(runtime.previewRefusalLine(null).includes('original page'));
 assert.strictEqual(
   runtime.previewMissMessage('section.hero h1'),
-  "Change not applied: the element wasn't found on this page (section.hero h1)."
+  "Change not applied: section.hero h1 didn't appear. It may only show on a later step. Open that step, or pick the element again."
 );
+assert.ok(runtime.previewMissMessage('div.item:nth-of-type(2)').includes('probably wrong'));
+assert.ok(runtime.previewMissMessage('div.item:nth-of-type(2)').includes('position'));
 assert.ok(runtime.previewMissMessage(['section.hero h1', 'a.cta']).includes('section.hero h1'));
 assert.ok(runtime.previewMissMessage(['section.hero h1', 'a.cta']).includes('a.cta'));
 assert.ok(snippet.includes('pivit-preview-missed'));

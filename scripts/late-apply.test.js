@@ -135,7 +135,7 @@ async function flush() {
   assert.ok(missed);
   assert.strictEqual(
     missed.textContent,
-    "Change not applied: the element wasn't found on this page (section.hero h1)."
+    "Change not applied: section.hero h1 didn't appear. It may only show on a later step. Open that step, or pick the element again."
   );
   assert.strictEqual(missed.getAttribute('role'), 'status');
 

@@ -196,11 +196,14 @@
  *
  * Selectors and applying changes live on PivitRuntime (also exported for tests).
  * The visual editor uses the same helpers, so a selector saved from the editor
- * is what visitors get. A positional selector (nth-child / nth-of-type and the
- * other structural pseudos) is watched until it matches once, for up to ten
- * seconds, then left alone so a later insert does not move the change. Other
- * selectors stay watched after the first match, so a later render is updated
- * once. The page is not held blank for that wait.
+ * is what visitors get. The bookmarklet uses them too when this snippet is on
+ * the page. Preference is a stable id, then a data attribute, a name, a unique
+ * class combination, then a semantic attribute such as aria-label or href.
+ * A positional selector is only the shortest path that still matches this
+ * element alone. It is watched until it matches once, for up to ten seconds,
+ * then left alone so a later insert does not move the change. Other selectors
+ * stay watched after the first match, so a later render is updated once. The
+ * page is not held blank for that wait.
  */
 (function (root) {
   const ELEMENT_WAIT_MS = 4000;
@@ -1469,7 +1472,8 @@
       banner.style.color = '#3f3420';
       banner.style.padding = '16px 20px';
       banner.style.fontFamily = '-apple-system, "Segoe UI", Roboto, sans-serif';
-      banner.style.fontSize = '14px';
+      banner.style.fontSize = '16px';
+      banner.style.fontWeight = '650';
       banner.style.lineHeight = '1.45';
       banner.style.boxShadow = '0 2px 10px rgba(19,23,35,0.12)';
       const parent = document.body || document.documentElement;
@@ -3405,25 +3409,93 @@
     return tag + '.' + pool.map(cssEscape).join('.');
   }
 
-  function anchorSel(el) {
-    if (!el || !el.tagName) return '';
-    if (el.id) return '#' + cssEscape(el.id);
-    const pool = poolFor(classTokens(el));
-    if (!pool.length) return '';
-    return String(el.tagName).toLowerCase() + '.' + pool.map(cssEscape).join('.');
+  // React useId and component-library ids change between renders. A real id
+  // such as #pay-now is kept.
+  function isGeneratedId(id) {
+    const value = String(id || '');
+    if (!value) return false;
+    if (value.indexOf(':') !== -1) return true;
+    return /^(?:headlessui|radix|mui-|react-|ember\d)/i.test(value);
   }
 
-  // id, then a unique class chain (section.hero h1), then a data attribute.
+  function usableAttr(name, value) {
+    if (value == null) return false;
+    const text = String(value);
+    if (!text || text.length > 80) return false;
+    if (String(name).indexOf('data-pivit') === 0) return false;
+    if (/^data-(?:react|emotion|styled)/.test(name)) return false;
+    return true;
+  }
+
+  function attrSel(tag, name, value) {
+    return tag + '[' + name + '="' + attrEscape(value) + '"]';
+  }
+
+  function firstUniqueAttr(queryAll, el, names) {
+    const tag = String(el.tagName).toLowerCase();
+    for (let i = 0; i < names.length; i++) {
+      const name = names[i];
+      const value = attrValue(el, name);
+      if (!usableAttr(name, value)) continue;
+      if (name === 'href') {
+        const href = String(value).trim();
+        if (href === '#' || href.indexOf('javascript:') === 0) continue;
+      }
+      const withTag = attrSel(tag, name, value);
+      if (matchesOnly(queryAll, withTag, el)) return withTag;
+      const bare = '[' + name + '="' + attrEscape(value) + '"]';
+      if (matchesOnly(queryAll, bare, el)) return bare;
+    }
+    return '';
+  }
+
+  function semanticAttrNames(el) {
+    const tag = String(el.tagName || '').toLowerCase();
+    const names = ['aria-label'];
+    if (tag === 'a') names.push('href');
+    if (tag === 'img' || tag === 'input' || tag === 'area') names.push('alt');
+    if (tag === 'input' || tag === 'textarea') names.push('placeholder');
+    names.push('title');
+    return names;
+  }
+
+  function anchorCandidates(el) {
+    const out = [];
+    if (!el || !el.tagName) return out;
+    const tag = String(el.tagName).toLowerCase();
+    if (el.id && !isGeneratedId(el.id)) out.push('#' + cssEscape(el.id));
+    dataAttrNames(el).forEach((name) => {
+      const value = attrValue(el, name);
+      if (!usableAttr(name, value)) return;
+      out.push(attrSel(tag, name, value));
+    });
+    const named = attrValue(el, 'name');
+    if (usableAttr('name', named)) out.push(attrSel(tag, 'name', named));
+    const pool = poolFor(classTokens(el));
+    if (pool.length) out.push(tag + '.' + pool.map(cssEscape).join('.'));
+    return out;
+  }
+
+  // id, data-*, name, a unique class, then aria-label / href / alt.
+  // An ancestor narrows a tag that is not unique on its own (section.hero h1).
   // Empty when nothing on the page matches this element alone.
   function stableSelector(el, queryAll) {
     if (!el || !el.tagName || !queryAll) return '';
-    if (el.id) {
+    if (el.id && !isGeneratedId(el.id)) {
       const idSel = '#' + cssEscape(el.id);
       if (matchesOnly(queryAll, idSel, el)) return idSel;
     }
+    const dataHit = firstUniqueAttr(queryAll, el, dataAttrNames(el));
+    if (dataHit) return dataHit;
+    const nameHit = firstUniqueAttr(queryAll, el, ['name']);
+    if (nameHit) return nameHit;
+
     const pool = poolFor(classTokens(el));
     const selfBit = elementClassSel(el);
     if (pool.length && matchesOnly(queryAll, selfBit, el)) return selfBit;
+
+    const semanticHit = firstUniqueAttr(queryAll, el, semanticAttrNames(el));
+    if (semanticHit) return semanticHit;
 
     const ancestors = [];
     let node = el.parentElement;
@@ -3435,33 +3507,55 @@
     }
     const tail = pool.length ? selfBit : String(el.tagName).toLowerCase();
     for (let i = 0; i < ancestors.length; i++) {
-      const near = anchorSel(ancestors[i]);
-      if (!near) continue;
-      const combined = near + ' ' + tail;
-      if (matchesOnly(queryAll, combined, el)) return combined;
-    }
-    for (let i = 0; i < ancestors.length; i++) {
-      const near = anchorSel(ancestors[i]);
-      if (!near) continue;
-      for (let j = i + 1; j < ancestors.length; j++) {
-        const far = anchorSel(ancestors[j]);
-        if (!far) continue;
-        const combined = far + ' ' + near + ' ' + tail;
+      const nearList = anchorCandidates(ancestors[i]);
+      for (let n = 0; n < nearList.length; n++) {
+        const combined = nearList[n] + ' ' + tail;
         if (matchesOnly(queryAll, combined, el)) return combined;
       }
     }
+    for (let i = 0; i < ancestors.length; i++) {
+      const nearList = anchorCandidates(ancestors[i]);
+      for (let j = i + 1; j < ancestors.length; j++) {
+        const farList = anchorCandidates(ancestors[j]);
+        for (let n = 0; n < nearList.length; n++) {
+          for (let f = 0; f < farList.length; f++) {
+            const combined = farList[f] + ' ' + nearList[n] + ' ' + tail;
+            if (matchesOnly(queryAll, combined, el)) return combined;
+          }
+        }
+      }
+    }
+    return '';
+  }
 
-    const names = dataAttrNames(el);
-    const tag = String(el.tagName).toLowerCase();
-    for (let i = 0; i < names.length; i++) {
-      const name = names[i];
-      if (name.indexOf('data-pivit') === 0) continue;
-      if (/^data-(?:react|emotion|styled)/.test(name)) continue;
-      const value = attrValue(el, name);
-      if (value == null || value === '') continue;
-      const attr = '[' + name + '="' + attrEscape(value) + '"]';
-      if (matchesOnly(queryAll, tag + attr, el)) return tag + attr;
-      if (matchesOnly(queryAll, attr, el)) return attr;
+  function stableCompound(node, withNth) {
+    const tag = String(node.tagName).toLowerCase();
+    const pool = poolFor(classTokens(node));
+    let part = pool.length ? tag + '.' + pool.map(cssEscape).join('.') : tag;
+    if (!withNth || !node.parentElement || !node.parentElement.children) return part;
+    const siblings = Array.prototype.filter.call(node.parentElement.children, (child) => child.tagName === node.tagName);
+    if (siblings.length > 1) part += ':nth-of-type(' + (siblings.indexOf(node) + 1) + ')';
+    return part;
+  }
+
+  // Shortest path that still matches this element alone. Stable classes only.
+  // nth-of-type is added on a step that would otherwise match a sibling.
+  function durablePositional(el, queryAll, doc) {
+    const body = (doc && doc.body) || (typeof document !== 'undefined' ? document.body : null);
+    const chain = [];
+    let node = el;
+    while (node && node.nodeType === 1 && node !== body && chain.length < 6) {
+      const tag = String(node.tagName || '').toUpperCase();
+      if (tag === 'HTML') break;
+      chain.unshift(node);
+      node = node.parentElement;
+    }
+    for (let start = chain.length - 1; start >= 0; start--) {
+      const slice = chain.slice(start);
+      const plain = slice.map((item) => stableCompound(item, false)).join(' ');
+      if (matchesOnly(queryAll, plain, el)) return plain;
+      const nth = slice.map((item) => stableCompound(item, true)).join(' ');
+      if (nth !== plain && matchesOnly(queryAll, nth, el)) return nth;
     }
     return '';
   }
@@ -3497,6 +3591,8 @@
     if (queryAll) {
       const stable = stableSelector(el, queryAll);
       if (stable) return stable;
+      const durable = durablePositional(el, queryAll, doc);
+      if (durable) return durable;
       return positionalSelector(el, doc, false);
     }
     return positionalSelector(el, doc, true);
@@ -3673,8 +3769,17 @@
       if (name && list.indexOf(name) === -1) list.push(name);
     });
     if (list.length === 0) return "Change not applied: the element wasn't found on this page.";
-    if (list.length === 1) return "Change not applied: the element wasn't found on this page (" + list[0] + ").";
-    return "Changes not applied: these elements weren't found on this page (" + list.join(', ') + ").";
+    const positional = list.filter((name) => isPositionalSelector(name));
+    if (list.length === 1) {
+      if (positional.length) {
+        return 'Change not applied: ' + list[0] + " follows a position on the page and didn't appear. The selector is probably wrong. Pick the element again.";
+      }
+      return 'Change not applied: ' + list[0] + " didn't appear. It may only show on a later step. Open that step, or pick the element again.";
+    }
+    if (positional.length === list.length) {
+      return "Changes not applied: these follow a position on the page and didn't appear (" + list.join(', ') + '). They are probably wrong. Pick the elements again.';
+    }
+    return "Changes not applied: these didn't appear (" + list.join(', ') + '). They may only show on a later step. Open that step, or pick them again.';
   }
 
   function cssDomId(key) {

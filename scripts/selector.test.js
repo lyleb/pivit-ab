@@ -178,8 +178,16 @@ function selectorParts(selector) {
 }
 
 function compoundMatches(node, compound) {
+  const nth = compound.match(/:nth-of-type\((\d+)\)/);
+  let source = compound.replace(/:nth-of-type\(\d+\)/g, '');
+  if (nth) {
+    const parent = node.parentElement;
+    if (!parent) return false;
+    const same = parent.children.filter((child) => child.tagName === node.tagName);
+    if (same.indexOf(node) + 1 !== Number(nth[1])) return false;
+  }
   const attrs = [];
-  let rest = compound.replace(/\[([^\]=]+)="([^"]*)"\]/g, (_, name, value) => {
+  let rest = source.replace(/\[([^\]=]+)="([^"]*)"\]/g, (_, name, value) => {
     attrs.push({ name, value });
     return '';
   });
@@ -227,6 +235,7 @@ hero.children.push(secondHeroHeading);
 secondHeroHeading.parentElement = hero;
 const positional = runtime.uniqueSelector(heroHeading, { querySelectorAll: fernhillQuery, body: fernhill });
 assert.ok(runtime.isPositionalSelector(positional), positional);
+assert.strictEqual(positional, 'section.hero h1:nth-of-type(1)');
 hero.children.pop();
 secondHeroHeading.parentElement = null;
 
@@ -245,6 +254,43 @@ assert.strictEqual(
   runtime.stableSelector(tested, (selector) => treeQuery(testedPage, selector)),
   'h1[data-testid="hero-title"]'
 );
+
+const pay = pageEl('button', 'pay-now', [], '', { 'data-testid': 'pay' });
+const cancel = pageEl('button', 'cancel');
+const payBar = pageEl('div', '', [pay, cancel]);
+assert.strictEqual(
+  runtime.uniqueSelector(pay, { querySelectorAll: (selector) => treeQuery(payBar, selector), body: payBar }),
+  'button[data-testid="pay"]'
+);
+
+const addToBag = pageEl('button', 'btn', [], '', { name: 'add' });
+const wish = pageEl('button', 'btn', [], '', { name: 'wish' });
+const form = pageEl('form', '', [addToBag, wish]);
+assert.strictEqual(
+  runtime.uniqueSelector(addToBag, { querySelectorAll: (selector) => treeQuery(form, selector), body: form }),
+  'button[name="add"]'
+);
+
+const shopLink = pageEl('a', 'button', [], '', { href: '/shop/', 'aria-label': 'Browse' });
+const aboutLink = pageEl('a', 'button', [], '', { href: '/about/', 'aria-label': 'About' });
+const navLinks = pageEl('nav', '', [shopLink, aboutLink]);
+assert.strictEqual(
+  runtime.uniqueSelector(shopLink, { querySelectorAll: (selector) => treeQuery(navLinks, selector), body: navLinks }),
+  'a[aria-label="Browse"]'
+);
+
+const generated = pageEl('button', 'pay-now', [], ':r1:');
+const plainButton = pageEl('button', 'cancel');
+const generatedPage = pageEl('div', '', [generated, plainButton]);
+assert.strictEqual(
+  runtime.uniqueSelector(generated, { querySelectorAll: (selector) => treeQuery(generatedPage, selector), body: generatedPage }),
+  'button.pay-now'
+);
+
+const queriedRibbon = runtime.uniqueSelector(ribbonA, { querySelectorAll: (selector) => queryAll(body, selector), body });
+assert.ok(runtime.isPositionalSelector(queriedRibbon), queriedRibbon);
+assert.ok(queriedRibbon.indexOf('is-visible') === -1, queriedRibbon);
+assert.ok(queriedRibbon.indexOf(':nth-of-type(') !== -1, queriedRibbon);
 
 assert.strictEqual(
   runtime.textOnlyReplacement(
@@ -284,5 +330,12 @@ assert.strictEqual(
 const editorSrc = require('fs').readFileSync(require('path').join(__dirname, '../snippet/editor.js'), 'utf8');
 assert.ok(editorSrc.includes('uniqueSelector(el, document)'));
 assert.ok(editorSrc.includes('changeFromHtmlEdit'));
+assert.ok(editorSrc.includes("This is a heading. People don't usually click headings"));
+assert.ok(editorSrc.includes('This selector matches nothing, and it follows a position on the page. It is probably wrong. Pick the element again.'));
+assert.ok(editorSrc.includes("This element isn't on the page yet. It may appear on a later step, or after the page draws itself."));
+const pickerSrc = require('fs').readFileSync(require('path').join(__dirname, '../snippet/picker-bookmarklet.js'), 'utf8');
+assert.ok(pickerSrc.includes('PivitRuntime.uniqueSelector'));
+assert.ok(pickerSrc.includes('This picks the element by its position on the page, so it may break if the page layout changes.'));
+assert.ok(pickerSrc.includes('Paste this into the click goal on pivitlab.'));
 
 console.log('selector.test.js ok');
