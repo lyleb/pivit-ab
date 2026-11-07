@@ -31,6 +31,27 @@ function sameAccountDomainMessage(host) {
   return `This agency already has a site for ${host}.`;
 }
 
+const SITE_NAME_ERROR = 'Enter a name for this site.';
+const SITE_REMOVE_NEEDS_CONFIRM = 'Confirm that you want to remove this site.';
+
+function normaliseSiteName(raw) {
+  if (typeof raw !== 'string') return { ok: false, error: SITE_NAME_ERROR };
+  const name = raw.trim().replace(/\s+/g, ' ');
+  if (!name || name.length > 80) {
+    return { ok: false, error: name ? 'That name is too long.' : SITE_NAME_ERROR };
+  }
+  if (/[\u0000-\u001f]/.test(name)) return { ok: false, error: SITE_NAME_ERROR };
+  return { ok: true, name };
+}
+
+function runningSiteRemovalError(count) {
+  const n = Math.max(0, Math.round(Number(count) || 0));
+  if (n === 1) {
+    return 'This site still has a test running. Pause it before you remove the site. pivitlab will not stop a running test for you.';
+  }
+  return `This site still has ${n} tests running. Pause them before you remove the site. pivitlab will not stop a running test for you.`;
+}
+
 function isUuid(value) {
   return UUID_RE.test(String(value || ''));
 }
@@ -116,6 +137,9 @@ function routeStatus(err) {
 module.exports = {
   DOMAIN_IN_USE_WARNING,
   normaliseSiteDomain,
+  normaliseSiteName,
+  runningSiteRemovalError,
+  SITE_REMOVE_NEEDS_CONFIRM,
   sameAccountDomainMessage,
   isUuid,
   chosenSite,

@@ -14,6 +14,9 @@ const { checklistFromFacts } = require('../checklist');
 const {
   DOMAIN_IN_USE_WARNING,
   normaliseSiteDomain,
+  normaliseSiteName,
+  runningSiteRemovalError,
+  SITE_REMOVE_NEEDS_CONFIRM,
   sameAccountDomainMessage,
   chosenSite,
   siteChoiceRequired,
@@ -221,11 +224,44 @@ sitesRouter.post('/', requireAuth(['owner']), async (req, res) => {
 
 sitesRouter.patch('/:id', requireAuth(['owner']), async (req, res) => {
   try {
-    const host = websiteHost(req.body);
-    if (!host) return res.status(400).json({ error: 'Enter your website, such as example.co.uk.' });
     const existing = await loadOwnedSite(req.account.id, req.params.id);
     if (!existing) return res.status(404).json({ error: 'no site found with that id' });
     if (refuseViewOnly(req, res)) return;
+    const body = req.body || {};
+    const hasWebsite = Object.prototype.hasOwnProperty.call(body, 'website')
+      || Object.prototype.hasOwnProperty.call(body, 'domain');
+    const hasName = Object.prototype.hasOwnProperty.call(body, 'name');
+    if (!hasWebsite && !hasName) {
+      return res.status(400).json({ error: 'Enter a name or a website.' });
+    }
+    let name = null;
+    if (hasName) {
+      const parsed = normaliseSiteName(body.name);
+      if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+      name = parsed.name;
+    }
+    if (!hasWebsite) {
+      const updated = await db.query(
+        `UPDATE sites SET name = $2
+         WHERE id = $1 AND account_id = $3
+         RETURNING ${SITE_COLUMNS}`,
+        [existing.id, name, req.account.id]
+      );
+      await recordAudit(db, {
+        accountId: req.account.id,
+        userId: req.account.userId,
+        actorLabel: 'owner',
+        action: 'site_edited',
+        targetType: 'site',
+        targetId: existing.id,
+        detail: { name, host: (existing.domains || [])[0] || existing.name },
+        ip: req.ip,
+      });
+      const paid = await accountPaidPlan(db, req.account.id);
+      return res.json({ site: sitePayload(updated.rows[0], paid), domain_warning: null });
+    }
+    const host = websiteHost(body);
+    if (!host) return res.status(400).json({ error: 'Enter your website, such as example.co.uk.' });
     const guard = await guardSiteDomains(sql, {
       accountId: req.account.id,
       hosts: [host],
@@ -234,6 +270,7 @@ sitesRouter.patch('/:id', requireAuth(['owner']), async (req, res) => {
     if (!guard.ok) return res.status(409).json({ error: guard.error || sameAccountDomainMessage(host) });
     const current = (existing.domains || []).map((domain) => normaliseSiteDomain(domain)).filter(Boolean).sort();
     const domainChanged = current.length !== 1 || current[0] !== host;
+    const nextName = name != null ? name : host;
     const updated = await db.query(
       `UPDATE sites
        SET name = $2,
@@ -245,7 +282,7 @@ sitesRouter.patch('/:id', requireAuth(['owner']), async (req, res) => {
            qa_seen_at = CASE WHEN $5 THEN NULL ELSE qa_seen_at END
        WHERE id = $1 AND account_id = $6
        RETURNING ${SITE_COLUMNS}`,
-      [existing.id, host, [host], guard.warningHost != null, domainChanged, req.account.id]
+      [existing.id, nextName, [host], guard.warningHost != null, domainChanged, req.account.id]
     );
     let warning = null;
     if (guard.warningHost) {
@@ -260,11 +297,91 @@ sitesRouter.patch('/:id', requireAuth(['owner']), async (req, res) => {
       action: 'site_edited',
       targetType: 'site',
       targetId: existing.id,
-      detail: { host },
+      detail: { host, name: nextName },
       ip: req.ip,
     });
     const paid = await accountPaidPlan(db, req.account.id);
     res.json({ site: sitePayload(updated.rows[0], paid), domain_warning: warning });
+  } catch (err) {
+    res.status(500).json(publicServerError(err));
+  }
+});
+
+// DELETE /api/sites/:id  { confirm: true }
+// Owner-only. A running test blocks removal. Draft and paused tests on the
+// site are archived, then unlinked, so their results stay. The site row goes.
+sitesRouter.delete('/:id', requireAuth(['owner']), async (req, res) => {
+  try {
+    const existing = await loadOwnedSite(req.account.id, req.params.id);
+    if (!existing) return res.status(404).json({ error: 'no site found with that id' });
+    if (refuseViewOnly(req, res)) return;
+    if (!req.body || req.body.confirm !== true) {
+      return res.status(400).json({ error: SITE_REMOVE_NEEDS_CONFIRM });
+    }
+    const client = await db.pool.connect();
+    let archived = 0;
+    try {
+      await client.query('BEGIN');
+      const running = await client.query(
+        `SELECT COUNT(*)::int AS n
+         FROM experiments
+         WHERE site_id = $1 AND account_id = $2 AND status = 'running'`,
+        [existing.id, req.account.id]
+      );
+      const runningCount = running.rows[0] ? running.rows[0].n : 0;
+      if (runningCount > 0) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: runningSiteRemovalError(runningCount) });
+      }
+      const archivedRows = await client.query(
+        `UPDATE experiments
+         SET status = 'archived'
+         WHERE site_id = $1 AND account_id = $2 AND status IN ('draft', 'paused')
+         RETURNING id`,
+        [existing.id, req.account.id]
+      );
+      archived = archivedRows.rows.length;
+      await client.query(
+        `UPDATE experiments
+         SET site_id = NULL, needs_site = true
+         WHERE site_id = $1 AND account_id = $2`,
+        [existing.id, req.account.id]
+      );
+      await client.query(
+        `UPDATE accounts SET active_site_id = NULL
+         WHERE id = $1 AND active_site_id = $2`,
+        [req.account.id, existing.id]
+      );
+      const removed = await client.query(
+        `DELETE FROM sites WHERE id = $1 AND account_id = $2 RETURNING id`,
+        [existing.id, req.account.id]
+      );
+      if (!removed.rows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'no site found with that id' });
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch((rollbackErr) => console.error('Rollback failed:', rollbackErr));
+      throw err;
+    } finally {
+      client.release();
+    }
+    await recordAudit(db, {
+      accountId: req.account.id,
+      userId: req.account.userId,
+      actorLabel: 'owner',
+      action: 'site_removed',
+      targetType: 'site',
+      targetId: existing.id,
+      detail: {
+        host: (existing.domains || [])[0] || existing.name,
+        name: existing.name,
+        archived_tests: archived,
+      },
+      ip: req.ip,
+    });
+    res.json({ removed: true, archived_tests: archived });
   } catch (err) {
     res.status(500).json(publicServerError(err));
   }

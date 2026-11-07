@@ -71,6 +71,9 @@ input, textarea, select {
   background: #10131a;
   color: var(--ink);
 }
+/* Native menus follow the page. Without this, a light menu can draw the
+   light text and the list looks as if it did not open. */
+select { color-scheme: dark; }
 input:focus, textarea:focus, select:focus {
   outline: none;
   border-color: var(--indigo);

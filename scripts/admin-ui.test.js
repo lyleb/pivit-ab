@@ -337,6 +337,32 @@ const fernhill = [
   { id: 'site2', domains: ['site2-spa.netlify.app'] },
   { id: 'site3', domains: ['site3-checkout.netlify.app'] },
 ];
+assert.strictEqual(ui.wizardDraftFromStorage(null), null);
+assert.strictEqual(ui.wizardDraftFromStorage({ expId: 'exp-1', name: 'Old', editing: false }), null);
+assert.strictEqual(ui.wizardDraftFromStorage({ expId: 'exp-1', name: 'Old' }), null);
+const kept = ui.wizardDraftFromStorage({ name: 'Fresh', url: '/pricing', editing: false });
+assert.strictEqual(kept.name, 'Fresh');
+assert.strictEqual(kept.expId, undefined);
+assert.strictEqual(kept.busy, false);
+const editing = ui.wizardDraftFromStorage({ expId: 'exp-2', name: 'Shop', editing: true, siteChosen: false });
+assert.strictEqual(editing.expId, 'exp-2');
+assert.strictEqual(editing.name, 'Shop');
+assert.strictEqual(editing.siteChosen, true);
+assert.strictEqual(editing.busy, false);
+const freshLock = ui.wizardFieldLock(false);
+assert.strictEqual(freshLock.name, false);
+assert.strictEqual(freshLock.url, false);
+assert.strictEqual(freshLock.site, false);
+assert.strictEqual(freshLock.testType, false);
+const savedLock = ui.wizardFieldLock(true);
+assert.strictEqual(savedLock.name, false);
+assert.strictEqual(savedLock.url, false);
+assert.strictEqual(savedLock.site, false);
+assert.strictEqual(savedLock.testType, true);
+assert.ok(ui.SITE_REMOVE_EXPLANATION.includes('pivitlab will not remove the site'));
+assert.ok(ui.SITE_REMOVE_EXPLANATION.includes('archived'));
+assert.strictEqual(ui.auditActionLabel('site_removed'), 'Removed a site');
+assert.strictEqual(ui.auditActionLabel('site_edited'), 'Edited a site');
 assert.strictEqual(ui.wizardSiteValue(fernhill, ''), '');
 assert.strictEqual(ui.wizardSiteValue(fernhill, 'site3'), 'site3');
 assert.strictEqual(ui.wizardSiteValue([{ id: 'only' }], ''), 'only');
