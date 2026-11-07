@@ -264,6 +264,10 @@
   }
   .variant-card.disabled { border-left-color: #3a4054; opacity: 0.72; }
   .vc-meta { font-size: 0.85em; color: var(--text-muted); margin-top: 4px; }
+  .change-list { margin: 6px 0 0; padding-left: 1.1em; }
+  .change-list li { margin: 2px 0; }
+  .settings-changes { margin-top: 12px; }
+  .settings-changes .hint { margin: 4px 0 0; }
   .vc-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
   .vc-actions button { margin: 0; }
   .client-card {
@@ -3464,6 +3468,13 @@ function renderDetail() {
     <div data-tab-panel="settings" hidden>
       <div class="card" style="max-width:640px;">
         <div id="settings-planner"></div>
+        <h2>Changes</h2>
+        <p class="hint">Saved changes on each variant.</p>
+        ${(variants || []).map((variant) => `
+          <div class="settings-changes">
+            <strong>${UI.escapeHtml(variant.name || 'Variant')}</strong>
+            ${variantChangeLines(variant.changes)}
+          </div>`).join('')}
         <label for="settings-url">Page URL</label>
         <input id="settings-url" class="mono" readonly value="${UI.escapeHtml(exp.url_match || '')}">
         <p id="settings-site-mismatch" class="banner" role="status" hidden></p>
@@ -5716,6 +5727,7 @@ async function renderWizard() {
     });
   }
   if (wizard.step === 5) {
+    await refreshWizardChanges();
     renderWizardSummary();
     if (wizard.expId) {
       if (wizard.testType === 'demo') mountDemoPlan('wizard');
@@ -5962,6 +5974,34 @@ async function persistWizardGoals() {
   return true;
 }
 
+function variantChangeLines(changes) {
+  const list = Array.isArray(changes) ? changes : [];
+  if (!list.length) return '<p class="hint">No changes</p>';
+  return '<ul class="change-list">' + list.map((change) => `<li>${UI.escapeHtml(UI.describeChange(change))}</li>`).join('') + '</ul>';
+}
+
+function wizardChangeLines() {
+  if (!wizard.variants.length) return '—';
+  return wizard.variants.map((row) => `
+    <div class="settings-changes">
+      <strong>${UI.escapeHtml(row.name || 'Variant')}</strong>
+      ${variantChangeLines(row.changes)}
+    </div>`).join('');
+}
+
+async function refreshWizardChanges() {
+  if (!wizard.expId) return;
+  const result = await callApi(`/api/experiments/${wizard.expId}`, { headers: authHeaders() });
+  if (!result.ok || !result.data) return;
+  const byId = Object.create(null);
+  (result.data.variants || []).forEach((variant) => {
+    byId[variant.id] = Array.isArray(variant.changes) ? variant.changes : [];
+  });
+  wizard.variants.forEach((row) => {
+    if (row.id && Object.prototype.hasOwnProperty.call(byId, row.id)) row.changes = byId[row.id];
+  });
+}
+
 function renderWizardSummary() {
   const goals = (wizard.goalRows || []).map((g) => UI.describeGoal(g)).filter(Boolean);
   const variants = wizard.variants.map((v) => `${v.name} ${v.split}%`).join(' · ') || '—';
@@ -5991,6 +6031,7 @@ function renderWizardSummary() {
     <dt>Send to GA4</dt><dd>${wizard.ga4Enabled === true ? 'On for this test' : 'Off for this test'}</dd>
     <dt>dataLayer events</dt><dd>${wizard.datalayerEvents === true ? 'On for this test' : 'Off for this test'}</dd>
     <dt>Variants</dt><dd>${UI.escapeHtml(variants)}</dd>
+    <dt>Changes</dt><dd>${wizardChangeLines()}</dd>
     <dt>Goals</dt><dd>${goalLine}</dd>
     <dt>Status after save</dt><dd><span class="badge draft">Draft</span> — start when you’re ready to collect traffic</dd>
   `;
@@ -7001,6 +7042,7 @@ async function loadManageVariants() {
         <strong>${UI.escapeHtml(v.name)}</strong>
         <span class="badge ${v.enabled ? 'live' : 'paused'}">${v.enabled ? 'enabled' : 'paused'}</span>
         <div class="vc-meta">${v.traffic_split}% traffic · ${(v.changes || []).length} change(s) · ${(v.goals || []).length} goal(s)</div>
+        ${variantChangeLines(v.changes)}
       </div>
       <div class="vc-actions">
         <button type="button" class="btn-ghost" data-manage="preview" data-id="${v.id}">Preview</button>

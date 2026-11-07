@@ -12,6 +12,7 @@ const elementChanges = [
   { selector: 'a.buy', type: 'attr', attr: 'href', value: '/checkout' },
   { selector: '#cta', type: 'js', value: 'el.dataset.ready = "1"' },
   { selector: '#cta', type: 'remove' },
+  { selector: '#cta', type: 'delete', label: 'Buy button' },
   { selector: '#cta', type: 'duplicate' },
   { selector: '#cta', type: 'insert_before', value: '<p>Above</p>' },
   { selector: '#cta', type: 'insert_after', value: '<p>Below</p>' },
@@ -38,5 +39,6 @@ assert.ok(CHANGE_TYPES.indexOf('banner') !== -1);
 assert.ok(CHANGE_TYPES.indexOf('html') !== -1);
 assert.ok(CHANGE_TYPES.indexOf('js') !== -1);
 assert.ok(CHANGE_TYPES.indexOf('stylesheet') !== -1);
+assert.ok(CHANGE_TYPES.indexOf('delete') !== -1);
 
 console.log('page-changes.test.js ok');

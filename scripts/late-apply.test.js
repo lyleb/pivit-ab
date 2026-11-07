@@ -176,6 +176,39 @@ async function flush() {
   assert.ok(invalidBanner.textContent.includes('not valid'));
   assert.ok(!invalidBanner.textContent.includes('Should not apply'));
 
+  const deleted = harness(href);
+  deleted.setPayload({
+    experiments: [{
+      id: experimentId,
+      name: 'Remove the trust bar',
+      variants: [{
+        id: variantId,
+        name: 'B',
+        changes: [{
+          selector: 'section.hero h1',
+          type: 'delete',
+          label: 'Goods from the hill, made to be used.',
+        }],
+      }],
+    }],
+    preview: { variant_id: variantId, experiment_id: experimentId },
+  });
+  vm.runInNewContext(snippetSrc, deleted.sandbox, { filename: 'ab.js' });
+  await flush();
+  assert.ok(deleted.removed.indexOf('ab-hide') !== -1);
+  const hideRule = (deleted.document.head.children || []).map((node) => node.textContent || '').join('\n');
+  assert.ok(hideRule.indexOf('section.hero h1{display:none !important}') !== -1);
+  assert.strictEqual(deleted.document.getElementById('pivit-preview-missed'), null);
+  const deleteWait = deleted.timers.filter((timer) => timer.ms >= 10000 && !timer.cleared);
+  assert.strictEqual(deleteWait.length, 1);
+  deleteWait[0].fn();
+  const deleteMissed = deleted.document.getElementById('pivit-preview-missed');
+  assert.ok(deleteMissed);
+  assert.strictEqual(
+    deleteMissed.textContent,
+    "Change not applied: section.hero h1 didn't appear. It may only show on a later step. Open that step, or pick the element again."
+  );
+
   console.log('late-apply tests passed');
 })().catch((err) => {
   console.error(err);
