@@ -107,6 +107,13 @@
  * British Summer Time, so the short day in spring and the long day in
  * autumn are both the real gap until midnight.
  *
+ * insert_before and insert_after add the HTML once. Editing that HTML,
+ * applying the same change again, a new applier on the same document, or a
+ * later render that replaces the anchor all put the new block in place of
+ * the old one. A second copy is not added. Re-watching a selector that has
+ * not matched yet still inserts once. The editor's Remove and Undo drop the
+ * block that was inserted.
+ *
  * Anti-flicker: if the anti-flicker snippet (from the dashboard's "Copy
  * Snippet" popover) is also installed in <head>, it hides the page via an
  * `ab-hide` class on <html>. This file removes that class as soon as DOM
@@ -4092,6 +4099,167 @@
     return el;
   }
 
+  const INSERT_ATTR = 'data-pivit-insert';
+
+  function changeText(change) {
+    return change && typeof change.value === 'string' ? change.value : '';
+  }
+
+  function keyIndex(key) {
+    const raw = String(key == null ? '' : key);
+    const cut = raw.lastIndexOf(':');
+    return cut === -1 ? raw : raw.slice(cut + 1);
+  }
+
+  function keyPrefix(key) {
+    const raw = String(key == null ? '' : key);
+    const cut = raw.lastIndexOf(':');
+    return cut === -1 ? '' : raw.slice(0, cut);
+  }
+
+  function nodeLive(node) {
+    if (!node) return false;
+    if (node.isConnected === false) return false;
+    if (node.isConnected === true) return true;
+    return !!(node.parentElement || node.parentNode);
+  }
+
+  function removeNode(node) {
+    if (!node) return;
+    try {
+      if (typeof node.remove === 'function') node.remove();
+      else if (node.parentNode && typeof node.parentNode.removeChild === 'function') node.parentNode.removeChild(node);
+      else if (node.parentElement && typeof node.parentElement.removeChild === 'function') node.parentElement.removeChild(node);
+    } catch (err) { /* already gone */ }
+  }
+
+  function removeNodes(nodes) {
+    if (!nodes) return;
+    for (let i = 0; i < nodes.length; i++) removeNode(nodes[i]);
+  }
+
+  function insertBook(doc) {
+    if (!doc) return null;
+    if (!doc.__pivitInserted || typeof doc.__pivitInserted.length !== 'number') {
+      try { doc.__pivitInserted = []; }
+      catch (err) { return null; }
+    }
+    return doc.__pivitInserted;
+  }
+
+  // One inserted block per anchor. The same change (same list slot, or the
+  // same HTML applied again under a new prefix) replaces that block. A
+  // different change on the same element is left alone. An anchor that has
+  // left the page takes its block with it, so a later render does not stack
+  // a second copy beside the first.
+  function sameInsert(record, el, change, key) {
+    if (!record || !change) return false;
+    const selector = change.selector || '';
+    const value = changeText(change);
+    const sameAnchor = record.anchor === el;
+    const dead = !nodeLive(record.anchor);
+    const sameKey = record.key === key;
+    const sameIndex = keyIndex(record.key) === keyIndex(key);
+    const sameKind = record.type === change.type && (record.selector || '') === selector && sameIndex;
+    const samePrefix = keyPrefix(record.key) === keyPrefix(key);
+    const sameCopy = sameKind && record.value === value;
+    if (sameAnchor && sameKey) return true;
+    if (sameAnchor && sameKind && samePrefix) return true;
+    if (sameAnchor && sameCopy) return true;
+    if (dead && (sameKey || sameCopy || (sameKind && samePrefix))) return true;
+    return false;
+  }
+
+  function isInsertContent(doc, el, change, key) {
+    if (!el || !change) return false;
+    const book = doc && doc.__pivitInserted;
+    const sameSlot = (record) => record && (
+      record.key === key
+      || (record.type === change.type && (record.selector || '') === (change.selector || '') && keyIndex(record.key) === keyIndex(key))
+    );
+    if (book) {
+      for (let i = 0; i < book.length; i++) {
+        const record = book[i];
+        if (!sameSlot(record) || !record.nodes) continue;
+        for (let n = 0; n < record.nodes.length; n++) {
+          const root = record.nodes[n];
+          if (root === el) return true;
+          if (root && typeof root.contains === 'function' && root.contains(el)) return true;
+        }
+      }
+    }
+    // The block carries the attribute even when a descendant is what matched.
+    let cursor = el;
+    while (cursor && cursor.nodeType === 1) {
+      const tag = cursor.getAttribute && cursor.getAttribute(INSERT_ATTR);
+      if (tag != null && tag === key) return true;
+      cursor = cursor.parentElement;
+    }
+    return false;
+  }
+
+  function insertIsCurrent(doc, el, key, change) {
+    const book = doc && doc.__pivitInserted;
+    if (!book) return false;
+    const value = changeText(change);
+    for (let i = 0; i < book.length; i++) {
+      const record = book[i];
+      if (!record || record.anchor !== el || record.key !== key) continue;
+      if (record.value !== value) return false;
+      const nodes = record.nodes || [];
+      if (!nodes.length) return value === '';
+      for (let n = 0; n < nodes.length; n++) {
+        if (!nodeLive(nodes[n])) return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  function retireDeadInserts(doc, change, key) {
+    const book = doc && doc.__pivitInserted;
+    if (!book) return;
+    for (let i = book.length - 1; i >= 0; i--) {
+      const record = book[i];
+      if (!record || nodeLive(record.anchor)) continue;
+      if (!sameInsert(record, record.anchor, change, key)) continue;
+      removeNodes(record.nodes);
+      book.splice(i, 1);
+    }
+  }
+
+  function walkElements(node, visit) {
+    const kids = node && node.children;
+    if (!kids) return;
+    for (let i = 0; i < kids.length; i++) {
+      const child = kids[i];
+      if (!child || child.nodeType !== 1) continue;
+      visit(child);
+      walkElements(child, visit);
+    }
+  }
+
+  function clearInserted(doc) {
+    if (!doc) return;
+    const book = doc.__pivitInserted;
+    if (book && typeof book.length === 'number') {
+      const records = book.splice(0, book.length);
+      for (let i = 0; i < records.length; i++) removeNodes(records[i] && records[i].nodes);
+    }
+    const roots = [];
+    if (doc.documentElement) roots.push(doc.documentElement);
+    else if (doc.body) roots.push(doc.body);
+    const tagged = [];
+    for (let r = 0; r < roots.length; r++) {
+      const root = roots[r];
+      if (root && root.getAttribute && root.getAttribute(INSERT_ATTR) != null) tagged.push(root);
+      walkElements(root, (el) => {
+        if (el.getAttribute && el.getAttribute(INSERT_ATTR) != null) tagged.push(el);
+      });
+    }
+    for (let i = 0; i < tagged.length; i++) removeNode(tagged[i]);
+  }
+
   function createApplier(doc, options) {
     const schedule = (options && options.schedule) || function (fn) {
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(fn);
@@ -4211,10 +4379,80 @@
       }
     }
 
+    function boundaryBeyond(el, which, dropping) {
+      let n = which === 'before' ? el.previousSibling : el.nextSibling;
+      while (n && dropping.indexOf(n) !== -1) {
+        n = which === 'before' ? n.previousSibling : n.nextSibling;
+      }
+      return n;
+    }
+
+    function collectInserted(el, which, boundary) {
+      const nodes = [];
+      let n = which === 'before' ? el.previousSibling : el.nextSibling;
+      while (n && n !== boundary) {
+        const step = which === 'before' ? n.previousSibling : n.nextSibling;
+        nodes.push(n);
+        n = step;
+      }
+      return nodes;
+    }
+
+    // Replace the block this change already added, then insert once. The
+    // boundary is the sibling that stays, so a neighbour inserted by another
+    // change is not recorded as part of this one.
+    function placeFresh(el, change, key, which) {
+      const book = insertBook(doc);
+      const dropping = [];
+      if (book) {
+        for (let i = 0; i < book.length; i++) {
+          if (!sameInsert(book[i], el, change, key)) continue;
+          const nodes = book[i].nodes || [];
+          for (let n = 0; n < nodes.length; n++) {
+            if (dropping.indexOf(nodes[n]) === -1) dropping.push(nodes[n]);
+          }
+        }
+      }
+      const boundary = boundaryBeyond(el, which, dropping);
+      if (book) {
+        for (let i = book.length - 1; i >= 0; i--) {
+          if (!sameInsert(book[i], el, change, key)) continue;
+          removeNodes(book[i].nodes);
+          book.splice(i, 1);
+        }
+      }
+      el.insertAdjacentHTML(which === 'before' ? 'beforebegin' : 'afterend', changeText(change));
+      const nodes = collectInserted(el, which, boundary);
+      for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
+        if (node && node.nodeType === 1 && node.setAttribute && node.getAttribute(INSERT_ATTR) == null) {
+          node.setAttribute(INSERT_ATTR, key);
+        }
+      }
+      if (book) {
+        book.push({
+          key: key,
+          type: change.type,
+          selector: change.selector || '',
+          value: changeText(change),
+          anchor: el,
+          nodes: nodes,
+        });
+      }
+      markInserted(el, which, change.selector, key, boundary);
+    }
+
     function applyToElement(el, change, key, track) {
       if (!el || el.nodeType !== 1) return;
       if (skip(el)) return;
-      if (track && already(el, key)) return;
+      const inserting = change && (change.type === 'insert_before' || change.type === 'insert_after');
+      if (inserting) {
+        if (isInsertContent(doc, el, change, key)) return;
+        retireDeadInserts(doc, change, key);
+        // The anchor can still be marked after the block was removed, including
+        // when two replays share a key. Missing or edited HTML is written again.
+        if (track && already(el, key) && insertIsCurrent(doc, el, key, change)) return;
+      } else if (track && already(el, key)) return;
       if (domApplies > 500) { disconnect(); return; }
       domApplies += 1;
       if (track) mark(el, key);
@@ -4259,18 +4497,12 @@
             el.insertAdjacentElement('afterend', clone);
             break;
           }
-          case 'insert_before': {
-            const boundary = el.previousSibling;
-            el.insertAdjacentHTML('beforebegin', change.value || '');
-            markInserted(el, 'before', change.selector, key, boundary);
+          case 'insert_before':
+            placeFresh(el, change, key, 'before');
             break;
-          }
-          case 'insert_after': {
-            const boundary = el.nextSibling;
-            el.insertAdjacentHTML('afterend', change.value || '');
-            markInserted(el, 'after', change.selector, key, boundary);
+          case 'insert_after':
+            placeFresh(el, change, key, 'after');
             break;
-          }
           case 'replace': {
             const boundary = el.nextSibling;
             el.insertAdjacentHTML('afterend', change.value || '');
@@ -4484,7 +4716,14 @@
         catch (err) { console.warn('[ab] banner change failed:', err); }
         return { checked: false, applied: false };
       }
-      if (seen.has(key)) return { checked: false, applied: false };
+      if (seen.has(key)) {
+        // The HTML may have been edited. Replace the block already on the
+        // page. A second pass with the same HTML leaves that one block.
+        if (change.type === 'insert_before' || change.type === 'insert_after') {
+          applyDomQuery(change, key, true);
+        }
+        return { checked: false, applied: false };
+      }
       seen.add(key);
       if (change.type === 'delete') return applyDelete(change, key);
       if (change.type === 'stylesheet') {
@@ -4573,6 +4812,7 @@
     previewMissMessage,
     WATCH_LIMIT_MS,
     createApplier,
+    clearInserted,
     applyBanner,
     nextLondonMidnight,
     formatRemaining,

@@ -130,7 +130,126 @@
 
   // --- DOM mutation primitives (same semantics as snippet/ab.js's applyChange,
   // kept as its own copy so this file has no runtime dependency on ab.js). ---
-  function applyChange(change) {
+
+  // The book is the same one snippet/ab.js keeps, so a replay can drop every
+  // inserted block before the list is applied again. Text nodes have no
+  // attribute, so they live on the book. Elements also carry data-pivit-insert.
+  function editorInsertBook() {
+    if (!document.__pivitInserted || typeof document.__pivitInserted.length !== 'number') {
+      document.__pivitInserted = [];
+    }
+    return document.__pivitInserted;
+  }
+
+  function removeInsertedNode(node) {
+    if (!node) return;
+    try {
+      if (typeof node.remove === 'function') node.remove();
+    } catch (err) { /* already gone */ }
+  }
+
+  function clearInsertedNodes() {
+    if (window.PivitRuntime && typeof window.PivitRuntime.clearInserted === 'function') {
+      window.PivitRuntime.clearInserted(document);
+      return;
+    }
+    const book = document.__pivitInserted;
+    if (book && typeof book.length === 'number') {
+      const records = book.splice(0, book.length);
+      records.forEach((record) => {
+        const nodes = record && record.nodes;
+        if (!nodes) return;
+        for (let i = 0; i < nodes.length; i++) removeInsertedNode(nodes[i]);
+      });
+    }
+    const root = document.documentElement || document.body;
+    const tagged = [];
+    function walk(node) {
+      const kids = node && node.children;
+      if (!kids) return;
+      for (let i = 0; i < kids.length; i++) {
+        const child = kids[i];
+        if (!child || child.nodeType !== 1) continue;
+        if (child.getAttribute && child.getAttribute('data-pivit-insert') != null) tagged.push(child);
+        walk(child);
+      }
+    }
+    walk(root);
+    tagged.forEach(removeInsertedNode);
+  }
+
+  function insertedKeyIndex(key) {
+    const raw = String(key == null ? '' : key);
+    const cut = raw.lastIndexOf(':');
+    return cut === -1 ? raw : raw.slice(cut + 1);
+  }
+
+  function nodeStillThere(node) {
+    if (!node) return false;
+    if (node.isConnected === false) return false;
+    if (node.isConnected === true) return true;
+    return !!(node.parentElement || node.parentNode);
+  }
+
+  // Insert above or below, replacing a block this change already added.
+  function placeEditorInsert(el, change, key, which) {
+    const book = editorInsertBook();
+    const index = insertedKeyIndex(key);
+    const selector = change.selector || '';
+    const dropping = [];
+    for (let i = 0; i < book.length; i++) {
+      const record = book[i];
+      if (!record) continue;
+      const sameAnchor = record.anchor === el;
+      const dead = !nodeStillThere(record.anchor);
+      const sameIndex = insertedKeyIndex(record.key) === index;
+      const sameKind = record.type === change.type && (record.selector || '') === selector && sameIndex;
+      if (!((sameAnchor && sameKind) || (dead && record.key === key))) continue;
+      const nodes = record.nodes || [];
+      for (let n = 0; n < nodes.length; n++) {
+        if (dropping.indexOf(nodes[n]) === -1) dropping.push(nodes[n]);
+      }
+    }
+    let boundary = which === 'before' ? el.previousSibling : el.nextSibling;
+    while (boundary && dropping.indexOf(boundary) !== -1) {
+      boundary = which === 'before' ? boundary.previousSibling : boundary.nextSibling;
+    }
+    for (let i = book.length - 1; i >= 0; i--) {
+      const record = book[i];
+      if (!record) continue;
+      const sameAnchor = record.anchor === el;
+      const dead = !nodeStillThere(record.anchor);
+      const sameIndex = insertedKeyIndex(record.key) === index;
+      const sameKind = record.type === change.type && (record.selector || '') === selector && sameIndex;
+      if (!((sameAnchor && sameKind) || (dead && record.key === key))) continue;
+      const nodes = record.nodes || [];
+      for (let n = 0; n < nodes.length; n++) removeInsertedNode(nodes[n]);
+      book.splice(i, 1);
+    }
+    el.insertAdjacentHTML(which === 'before' ? 'beforebegin' : 'afterend', change.value || '');
+    const nodes = [];
+    let cursor = which === 'before' ? el.previousSibling : el.nextSibling;
+    while (cursor && cursor !== boundary) {
+      const step = which === 'before' ? cursor.previousSibling : cursor.nextSibling;
+      nodes.push(cursor);
+      cursor = step;
+    }
+    nodes.forEach((node) => {
+      if (node && node.nodeType === 1 && node.setAttribute && node.getAttribute('data-pivit-insert') == null) {
+        node.setAttribute('data-pivit-insert', key);
+      }
+    });
+    book.push({
+      key: key,
+      type: change.type,
+      selector: selector,
+      value: typeof change.value === 'string' ? change.value : '',
+      anchor: el,
+      nodes: nodes,
+    });
+  }
+
+  function applyChange(change, key) {
     // Raw CSS isn't tied to a matched element — own <style> tag per change, so a
     // typo in one block can't break the others (mirrors snippet/ab.js).
     if (change.type === 'stylesheet') {
@@ -199,8 +318,8 @@
           el.insertAdjacentElement('afterend', clone);
           break;
         }
-        case 'insert_before': el.insertAdjacentHTML('beforebegin', change.value); break;
-        case 'insert_after': el.insertAdjacentHTML('afterend', change.value); break;
+        case 'insert_before': placeEditorInsert(el, change, key || ('edit:' + (change.selector || '')), 'before'); break;
+        case 'insert_after': placeEditorInsert(el, change, key || ('edit:' + (change.selector || '')), 'after'); break;
         case 'replace': el.insertAdjacentHTML('afterend', change.value); el.remove(); break;
       }
     });
@@ -463,11 +582,13 @@
   // Run the working list on the DOM that is already on screen. Identical page
   // JavaScript does not run a second time. A changed page script does. Style
   // tags this editor added are replaced, so an edited page CSS block does not
-  // sit on top of the old one.
+  // sit on top of the old one. Inserted HTML is removed first, then each
+  // insert is put back once, so an edit or a removal does not leave a copy.
   function replayOnPage() {
     persistWorkingSet();
     if (editorApplier && typeof editorApplier.disconnect === 'function') editorApplier.disconnect();
     editorApplier = null;
+    clearInsertedNodes();
     // Snapshot first. A live list shrinks as each tag is removed, and a
     // deletion's hide rule has to go even when another stylesheet is present.
     const styles = Array.from(document.querySelectorAll('style[data-pivit-css], style[data-pivit-page-css]'));
@@ -475,8 +596,8 @@
       if (style && typeof style.remove === 'function') style.remove();
     });
     const applier = ensureApplier();
-    if (applier) applier.applyAll(allChanges, 'replay-' + Date.now());
-    else allChanges.forEach(applyChange);
+    if (applier) applier.applyAll(allChanges, 'replay-' + Date.now() + '-' + (replaySerial += 1));
+    else allChanges.forEach((change, i) => applyChange(change, 'edit:' + i));
     refreshToolbarState();
   }
 
@@ -533,6 +654,7 @@
   // insulated from whatever CSS the host page already has. ---
   let root, toolbar, statusEl, modeStatusEl, browseBtn, selectBtn, stepsInput, countEl, actionPopup, panelEl, replayEl, changesListEl, goalsListEl, customCssBtn, bannerBtn, selectorWarnEl;
   let editorApplier = null;
+  let replaySerial = 0;
   let scopePanelEl = null;
   let similarHits = [];
   const SIMILAR_CLASS = 'pivit-similar-hit';
@@ -1988,8 +2110,9 @@
 
   function recordAndApply(change) {
     const applier = ensureApplier();
-    if (applier) applier.applyOne(change, 'edit:' + allChanges.length);
-    else applyChange(change);
+    const key = 'edit:' + allChanges.length;
+    if (applier) applier.applyOne(change, key);
+    else applyChange(change, key);
     allChanges.push(change);
     persistWorkingSet();
     refreshToolbarState();
@@ -2546,7 +2669,7 @@
 
       const applier = ensureApplier();
       if (applier) applier.applyAll(allChanges, 'edit');
-      else allChanges.forEach(applyChange);
+      else allChanges.forEach((change, i) => applyChange(change, 'edit:' + i));
 
       buildToolbar();
       refreshToolbarState();
