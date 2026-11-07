@@ -2,6 +2,8 @@
 // Element HTML, CSS and JS stay the types they already use. page_css and
 // page_js are the whole page, not one element. banner is one bar for the
 // page (text, countdown, colours, position, sticky, optional link).
+// delete hides an element and leaves the node in the page. remove takes
+// the node out.
 
 const CHANGE_TYPES = [
   'text',
@@ -12,6 +14,7 @@ const CHANGE_TYPES = [
   'attr',
   'js',
   'remove',
+  'delete',
   'duplicate',
   'insert_before',
   'insert_after',

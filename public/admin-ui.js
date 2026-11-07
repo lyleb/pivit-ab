@@ -287,6 +287,40 @@
     return ' · funnel step ' + step;
   }
 
+  function describeChange(change) {
+    if (!change || typeof change !== 'object') return '';
+    const sel = change.selector ? String(change.selector) : '';
+    switch (change.type) {
+      case 'text': return sel ? `Change text on ${sel}` : 'Change text';
+      case 'html': return sel ? `Replace HTML on ${sel}` : 'Replace HTML';
+      case 'hide': return sel ? `Hide ${sel}` : 'Hide';
+      case 'show': return sel ? `Show ${sel}` : 'Show';
+      case 'style': return sel ? `Inline styles on ${sel}` : 'Inline styles';
+      case 'stylesheet': return sel ? `Add CSS rules (for ${sel})` : 'Custom CSS for this variant';
+      case 'page_css': return 'Page CSS';
+      case 'page_js': return 'Page JavaScript';
+      case 'banner': {
+        const place = change.position === 'bottom' ? 'bottom' : 'top';
+        let extra = '';
+        if (change.countdown === 'midnight') extra = ', counting down to UK midnight';
+        else if (change.countdown === 'fixed') extra = ', counting down to a fixed time';
+        return `Banner at the ${place}${extra}`;
+      }
+      case 'replace': return sel ? `Replace element ${sel}` : 'Replace element';
+      case 'attr': return `Set ${change.attr || 'attribute'}${sel ? ` on ${sel}` : ''}`;
+      case 'js': return sel ? `Custom JS on ${sel}` : 'Custom JS';
+      case 'remove': return sel ? `Remove ${sel}` : 'Remove';
+      case 'delete': {
+        const label = String(change.label || '').replace(/[\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim();
+        return 'Deleted: ' + (label || sel || 'element');
+      }
+      case 'duplicate': return sel ? `Duplicate ${sel}` : 'Duplicate';
+      case 'insert_before': return sel ? `Insert HTML above ${sel}` : 'Insert HTML above';
+      case 'insert_after': return sel ? `Insert HTML below ${sel}` : 'Insert HTML below';
+      default: return change.type ? `${change.type}${sel ? ` on ${sel}` : ''}` : '';
+    }
+  }
+
   function describeGoal(goal) {
     if (!goal) return '';
     const type = goal.type || 'click';
@@ -1482,6 +1516,7 @@
     ELEMENT_GOAL_HELP,
     CUSTOM_GOAL_HELP,
     describeGoal,
+    describeChange,
     goalResultLabel,
     renderFunnel,
     MAX_VARIANTS,

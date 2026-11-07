@@ -78,6 +78,17 @@
  * a banner. Switching device or refreshing loads the frame again, including
  * JavaScript that runs once on load. A normal visit ignores pivit_device.
  *
+ * delete hides the element and leaves the node in the page. A stable
+ * selector becomes a stylesheet rule (display:none !important) before the
+ * anti-flicker class is removed, so a later render does not flash the
+ * original element. The node stays, because taking it out makes a
+ * single-page app put it back or throw on its next update, and the editor
+ * cannot undo a removal without reloading. A positional selector cannot use
+ * that stylesheet: the rule would follow a different element if the layout
+ * changed. That case is applied when the element appears, then the watch
+ * stops. A selector that matches nothing is still reported, and a route
+ * change tries again, using the same re-watch as any other element change.
+ *
  * page_css adds one <style> in the head. Applying it again updates that tag
  * and does not add a second one. page_js runs at most once per experiment
  * per document, not once per element. A second apply, a new applier on the
@@ -659,10 +670,13 @@
   }
 
   // One applier for the page so every variant shares a single observer.
-  // Style and hide on a non-positional selector become a <style> rule (current
-  // and later matches, no per-element write). Text, HTML, attributes and the
-  // structural types are applied to matches now and to elements added later.
-  // A positional selector is included in that watch until it matches once.
+  // Style, hide and delete on a non-positional selector become a <style>
+  // rule (current and later matches, no per-element write). Text, HTML,
+  // attributes and the structural types are applied to matches now and to
+  // elements added later. A positional selector is included in that watch
+  // until it matches once. A delete that matches nothing stays on the watch
+  // so a late render and a route change can still hide it, and so a preview
+  // can say the element never appeared.
   let pageApplier = null;
   function applyVariantChanges(variant, options) {
     if (!variant) return null;
@@ -3665,7 +3679,11 @@
     if (!change || !change.selector) return '';
     if (isPositionalSelector(change.selector)) return '';
     if (!selectorSafeForCss(change.selector)) return '';
-    if (change.type === 'hide') return change.selector + '{display:none !important}';
+    // delete uses the same rule as hide. The node stays in the page, which
+    // is what keeps a single-page app and the editor undo working. The
+    // !important declaration wins against a later inline display, and it is
+    // already in the document when a late node is painted.
+    if (change.type === 'hide' || change.type === 'delete') return change.selector + '{display:none !important}';
     if (change.type !== 'style' || !change.value || typeof change.value !== 'object') return '';
     const decls = [];
     Object.keys(change.value).forEach((key) => {
@@ -4228,6 +4246,12 @@
           case 'remove':
             el.remove();
             break;
+          case 'delete':
+            // Hide, do not remove. See cssForChange. Positional selectors
+            // reach here because a stylesheet would retarget. setProperty
+            // with !important beats a site rule that shows the element.
+            hideInline(el);
+            break;
           case 'duplicate': {
             const clone = el.cloneNode(true);
             clone.removeAttribute('id');
@@ -4404,6 +4428,44 @@
       observer.observe(target, { childList: true, subtree: true });
     }
 
+    function hideInline(el) {
+      if (!el || !el.style) return;
+      if (typeof el.style.setProperty === 'function') el.style.setProperty('display', 'none', 'important');
+      else el.style.display = 'none';
+    }
+
+    // Stable selectors are hidden by the stylesheet from cssForChange, which
+    // is in place before the page is revealed and before a later node is
+    // painted. The watch is only for a miss (the preview notice) and for a
+    // route change that should try again. Positional selectors skip the
+    // stylesheet and use hideInline when the element appears.
+    function applyDelete(change, key) {
+      if (!change.selector) {
+        console.warn('[ab] delete change has no selector');
+        return { checked: false, applied: false };
+      }
+      const css = cssForChange(change);
+      if (css) inject(css, key);
+      const positional = isPositionalSelector(change.selector);
+      if (!css) {
+        const found = applyDomQuery(change, key, true);
+        const matched = found > 0;
+        if (!positional || !matched) {
+          watched.push({ change: change, key: key, matched: matched });
+          ensureObserver();
+          if (!matched) armWatchLimit();
+        }
+        return { checked: true, applied: matched };
+      }
+      const found = matchCount(change.selector);
+      if (found === 0) {
+        watched.push({ change: change, key: key, matched: false });
+        ensureObserver();
+        armWatchLimit();
+      }
+      return { checked: true, applied: found > 0 };
+    }
+
     function applyOne(change, key) {
       if (!change) return { checked: false, applied: false };
       // Whole-page changes are not tied to an element, so they are not part
@@ -4424,6 +4486,7 @@
       }
       if (seen.has(key)) return { checked: false, applied: false };
       seen.add(key);
+      if (change.type === 'delete') return applyDelete(change, key);
       if (change.type === 'stylesheet') {
         // Free-form CSS, including the variant's custom CSS block. Injected
         // only because this variant is active — other variants never reach here.

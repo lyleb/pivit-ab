@@ -159,6 +159,8 @@ assert.strictEqual(
   'span.badge{background-color:#ff00aa !important;color:white !important}'
 );
 assert.strictEqual(runtime.cssForChange({ selector: 'span.badge', type: 'hide' }), 'span.badge{display:none !important}');
+assert.strictEqual(runtime.cssForChange({ selector: 'span.badge', type: 'delete', label: 'Badge' }), 'span.badge{display:none !important}');
+assert.strictEqual(runtime.cssForChange({ selector: 'span.badge:nth-of-type(2)', type: 'delete' }), '');
 assert.strictEqual(runtime.cssForChange({ selector: 'span.badge:nth-of-type(2)', type: 'style', value: { color: 'red' } }), '');
 assert.strictEqual(runtime.cssForChange({ selector: 'span.badge:nth-of-type(2)', type: 'hide' }), '');
 assert.strictEqual(runtime.cssForChange({ type: 'stylesheet', selector: '', value: '.a{color:red}' }), '');

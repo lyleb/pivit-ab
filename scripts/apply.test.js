@@ -779,4 +779,98 @@ function manualTimers() {
   assert.deepStrictEqual(missed, []);
 }
 
+// Delete hides with a stylesheet and leaves the node in the page. A later
+// badge is covered by the same rule. The node is not removed.
+{
+  const doc = createDocument();
+  const first = addBadge(doc, 'A');
+  let removed = 0;
+  const originalRemove = first.remove;
+  first.remove = () => { removed += 1; originalRemove(); };
+  const applier = applierFor(doc);
+  const result = applier.applyAll([{ selector: 'span.badge', type: 'delete', label: 'Badge' }], 'del');
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.checked, 1);
+  assert.strictEqual(removed, 0);
+  assert.strictEqual(first.isConnected, true);
+  assert.strictEqual(first.style.display, undefined);
+  const css = styleTags(doc).map((tag) => tag.textContent).join('\n');
+  assert.ok(css.indexOf('span.badge{display:none !important}') !== -1);
+  const late = addBadge(doc, 'B');
+  assert.strictEqual(late.isConnected, true);
+  assert.notStrictEqual(late.style.display, 'none');
+}
+
+// A positional delete cannot use a stylesheet. It hides the matched node
+// only, and a node inserted in front does not take the change.
+{
+  const doc = createDocument();
+  const first = addBadge(doc, 'A');
+  const applier = applierFor(doc);
+  const result = applier.applyAll([{ selector: 'span.badge:nth-of-type(1)', type: 'delete', label: 'First badge' }], 'delpos');
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(first.style.display, 'none');
+  assert.strictEqual(first.isConnected, true);
+  assert.ok(styleTags(doc).every((tag) => String(tag.textContent).indexOf('display:none') === -1));
+  const inserted = doc.createElement('span');
+  inserted.className = 'badge';
+  inserted.attributes.class = 'badge';
+  inserted.textContent = 'N';
+  doc.insertFirst(inserted);
+  assert.strictEqual(inserted.style.display, undefined);
+  assert.strictEqual(first.style.display, 'none');
+  assert.strictEqual(inserted.isConnected, true);
+}
+
+// A delete that matches nothing still injects the hide rule, then says so
+// when the watch ends. A route change tries again and hides the late node
+// without taking it out of the page.
+{
+  const doc = createDocument();
+  const clock = manualTimers();
+  const missed = [];
+  const applier = runtime.createApplier(doc, {
+    schedule: (fn) => fn(),
+    MutationObserver: doc.MutationObserver,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    onMissed: (change) => { missed.push(change.selector); },
+  });
+  const result = applier.applyAll([{ selector: 'span.badge', type: 'delete', label: 'Badge' }], 'delmiss');
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.checked, 1);
+  const css = styleTags(doc).map((tag) => tag.textContent).join('\n');
+  assert.ok(css.indexOf('span.badge{display:none !important}') !== -1);
+  assert.strictEqual(clock.timers.length, 1);
+  assert.strictEqual(clock.timers[0].cleared, false);
+  clock.timers[0].fn();
+  assert.deepStrictEqual(missed, ['span.badge']);
+  applier.rewatchUnmatched();
+  const late = addBadge(doc, 'Later');
+  assert.strictEqual(late.isConnected, true);
+  assert.strictEqual(late.style.display, 'none');
+}
+
+// A delete that appears inside the watch does not raise a miss, and the
+// node stays in the page.
+{
+  const doc = createDocument();
+  const clock = manualTimers();
+  const missed = [];
+  const applier = runtime.createApplier(doc, {
+    schedule: (fn) => fn(),
+    MutationObserver: doc.MutationObserver,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    onMissed: (change) => { missed.push(change.selector); },
+  });
+  applier.applyAll([{ selector: 'span.badge', type: 'delete', label: 'Badge' }], 'delsoon');
+  const late = addBadge(doc, 'Soon');
+  assert.strictEqual(late.isConnected, true);
+  assert.strictEqual(late.style.display, 'none');
+  assert.strictEqual(clock.timers[0].cleared, true);
+  clock.timers[0].fn();
+  assert.deepStrictEqual(missed, []);
+}
+
 console.log('apply.test.js ok');

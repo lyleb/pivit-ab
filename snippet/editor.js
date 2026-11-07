@@ -9,7 +9,10 @@
  * for why: normal session cookies are deliberately never sent cross-site).
  *
  * "Edit text" writes a text change for the selected element. It replaces that
- * element's text and does not ask for HTML. "Edit element" still opens a panel
+ * element's text and does not ask for HTML. "Delete element" hides the
+ * element on this variant after a confirm. It is stored as a delete change.
+ * Undo in the changes list puts the element back during this editing
+ * session, because the node stays in the page. "Edit element" still opens a panel
  * with HTML / CSS / JS tabs. Each part becomes its own entry in the Changes
  * list ('replace', 'stylesheet', 'js'), so it can be edited or removed
  * independently later. If the HTML tab only changes the text of the same
@@ -189,6 +192,7 @@
         case 'attr': if (change.attr) el.setAttribute(change.attr, change.value); break;
         case 'js': try { new Function('el', change.value)(el); } catch (e) { console.warn('[pivit-editor] js change failed:', e); } break;
         case 'remove': el.remove(); break;
+        case 'delete': hideInline(el); break;
         case 'duplicate': {
           const clone = el.cloneNode(true);
           clone.removeAttribute('id');
@@ -200,6 +204,52 @@
         case 'replace': el.insertAdjacentHTML('afterend', change.value); el.remove(); break;
       }
     });
+  }
+
+  function hideInline(el) {
+    if (!el || !el.style) return;
+    if (typeof el.style.setProperty === 'function') el.style.setProperty('display', 'none', 'important');
+    else el.style.display = 'none';
+  }
+
+  function showElement(el) {
+    if (!el || !el.style) return;
+    if (typeof el.style.removeProperty === 'function') el.style.removeProperty('display');
+    else el.style.display = '';
+  }
+
+  function deleteLabel(change) {
+    const label = String(change && change.label || '').replace(/[\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (label) return label;
+    const sel = change && change.selector ? String(change.selector).trim() : '';
+    return sel || 'element';
+  }
+
+  // What a person would call this element. The words on it, then an
+  // accessible name, then a plain word for the kind of element.
+  function elementLabel(el) {
+    if (!el || !el.tagName) return 'element';
+    const attr = (name) => {
+      const value = el.getAttribute && el.getAttribute(name);
+      return value ? String(value).replace(/[\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim() : '';
+    };
+    const visible = (typeof el.innerText === 'string' && el.innerText.trim())
+      ? el.innerText
+      : (el.textContent || '');
+    const raw = String(visible).replace(/[\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim()
+      || attr('aria-label') || attr('alt') || attr('title');
+    if (raw) return raw.length > 80 ? raw.slice(0, 79).trim() + '…' : raw;
+    const tag = String(el.tagName).toLowerCase();
+    const words = {
+      h1: 'heading', h2: 'heading', h3: 'heading', h4: 'heading', h5: 'heading', h6: 'heading',
+      a: 'link', button: 'button', img: 'image', picture: 'image', svg: 'image',
+      p: 'paragraph', section: 'section', form: 'form', input: 'field', textarea: 'field',
+      select: 'field', nav: 'navigation', ul: 'list', ol: 'list', li: 'list item',
+      header: 'header', footer: 'footer', aside: 'sidebar', figure: 'figure',
+    };
+    const word = words[tag] || 'element';
+    const id = el.id && String(el.id).indexOf(':') === -1 ? String(el.id) : '';
+    return id ? word + ' ' + id : word;
   }
 
   // Plain-English description of a change, for the Changes list.
@@ -225,6 +275,7 @@
       case 'attr': return `Set ${change.attr || 'attribute'} on ${sel}`;
       case 'js': return `Custom JS on ${sel}`;
       case 'remove': return `Remove ${sel}`;
+      case 'delete': return `Deleted: ${deleteLabel(change)}`;
       case 'duplicate': return `Duplicate ${sel}`;
       case 'insert_before': return `Insert HTML above ${sel}`;
       case 'insert_after': return `Insert HTML below ${sel}`;
@@ -417,10 +468,12 @@
     persistWorkingSet();
     if (editorApplier && typeof editorApplier.disconnect === 'function') editorApplier.disconnect();
     editorApplier = null;
-    const styles = document.querySelectorAll('style[data-pivit-css], style[data-pivit-page-css]');
-    for (let i = 0; i < styles.length; i++) {
-      if (styles[i] && typeof styles[i].remove === 'function') styles[i].remove();
-    }
+    // Snapshot first. A live list shrinks as each tag is removed, and a
+    // deletion's hide rule has to go even when another stylesheet is present.
+    const styles = Array.from(document.querySelectorAll('style[data-pivit-css], style[data-pivit-page-css]'));
+    styles.forEach((style) => {
+      if (style && typeof style.remove === 'function') style.remove();
+    });
     const applier = ensureApplier();
     if (applier) applier.applyAll(allChanges, 'replay-' + Date.now());
     else allChanges.forEach(applyChange);
@@ -861,11 +914,19 @@
         editBtn.style.padding = '5px 10px';
         btnRow.appendChild(editBtn);
       }
-      const removeBtn = makeButton('Remove', '#fdeaea', () => removeChangeAtIndex(idx));
-      removeBtn.style.color = COLORS.danger;
-      removeBtn.style.fontSize = '11px';
-      removeBtn.style.padding = '5px 10px';
-      btnRow.appendChild(removeBtn);
+      if (change && change.type === 'delete') {
+        const undoBtn = makeButton('Undo', '#f0f0f7', () => undoDeleteAtIndex(idx));
+        undoBtn.style.color = COLORS.ink;
+        undoBtn.style.fontSize = '11px';
+        undoBtn.style.padding = '5px 10px';
+        btnRow.appendChild(undoBtn);
+      } else {
+        const removeBtn = makeButton('Remove', '#fdeaea', () => removeChangeAtIndex(idx));
+        removeBtn.style.color = COLORS.danger;
+        removeBtn.style.fontSize = '11px';
+        removeBtn.style.padding = '5px 10px';
+        btnRow.appendChild(removeBtn);
+      }
 
       row.appendChild(btnRow);
       changesListEl.appendChild(row);
@@ -921,6 +982,21 @@
       row.appendChild(removeBtn);
       goalsListEl.appendChild(row);
     });
+  }
+
+  // A deletion only hides the node, so putting it back does not need a
+  // reload. Clearing the inline hide and replaying the list drops the
+  // stylesheet rule as well. The element is back for this editing session.
+  // Save to keep that.
+  function undoDeleteAtIndex(idx) {
+    const change = allChanges[idx];
+    if (!change || change.type !== 'delete') return;
+    let nodes = [];
+    try { nodes = Array.from(document.querySelectorAll(change.selector)); }
+    catch (err) { nodes = []; }
+    nodes.forEach(showElement);
+    allChanges.splice(idx, 1);
+    replayOnPage();
   }
 
   function removeChangeAtIndex(idx) {
@@ -1763,6 +1839,68 @@
     });
   }
 
+  function openDeleteConfirm(el, selector) {
+    closeActionPopup();
+    closeScopePanel();
+    if (panelEl) panelEl.remove();
+    const label = elementLabel(el);
+    const already = allChanges.some((change) => change && change.type === 'delete' && change.selector === selector);
+    const missing = selectorMissing(selector);
+
+    panelEl = document.createElement('div');
+    panelEl.id = 'pivit-delete-confirm';
+    panelEl.setAttribute('role', 'dialog');
+    styleReset(panelEl);
+    Object.assign(panelEl.style, {
+      position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+      zIndex: String(Z), background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: '12px',
+      boxShadow: '0 12px 40px rgba(19,23,35,0.25)', padding: '20px', width: '420px', maxWidth: '92vw',
+      color: COLORS.ink, fontSize: '13px',
+    });
+    ['keydown', 'keyup', 'keypress'].forEach((evt) => panelEl.addEventListener(evt, (e) => e.stopPropagation()));
+    document.body.appendChild(panelEl);
+
+    const title = document.createElement('div');
+    styleReset(title);
+    title.style.fontWeight = '700';
+    title.style.fontSize = '15px';
+    title.style.marginBottom = '8px';
+    title.textContent = 'Delete element';
+    panelEl.appendChild(title);
+
+    const detail = document.createElement('div');
+    styleReset(detail);
+    Object.assign(detail.style, { fontSize: '13px', lineHeight: '1.45', marginBottom: '14px' });
+    if (already) {
+      detail.textContent = 'This element is already deleted on this variant. Undo it from the changes list if you want it back.';
+    } else if (missing) {
+      detail.textContent = `This hides "${label}" on this variant when it appears. You can undo it from the changes list during this editing session.`;
+    } else {
+      detail.textContent = `This hides "${label}" on this variant. Visitors will not see it. You can undo it from the changes list during this editing session.`;
+    }
+    panelEl.appendChild(detail);
+
+    function close() {
+      if (panelEl) { panelEl.remove(); panelEl = null; }
+    }
+    if (!already) {
+      const yes = makeButton('Delete element', COLORS.danger, () => {
+        close();
+        recordAndApply({ selector, type: 'delete', label });
+      });
+      yes.id = 'pivit-delete-confirm-yes';
+      yes.style.width = '100%';
+      yes.style.whiteSpace = 'normal';
+      panelEl.appendChild(yes);
+    }
+    const no = makeButton('Cancel', '#f0f0f7', close);
+    no.id = 'pivit-delete-confirm-no';
+    no.style.width = '100%';
+    no.style.marginTop = '8px';
+    no.style.color = COLORS.ink;
+    panelEl.appendChild(no);
+  }
+
   function showActionPopup(el, x, y, selector, scope) {
     closeActionPopup();
     closeScopePanel();
@@ -1807,6 +1945,7 @@
 
     const actions = [
       ['Edit text', () => openEditTextPanel(el, selector)],
+      ['Delete element', () => openDeleteConfirm(el, selector)],
       ['✎ Edit element', () => openEditElementPanel(el, selector)],
       ['Whole page', () => openWholePagePanel(null)],
       ['⬆ Add above', () => openInsertPanel(selector, 'insert_before')],
