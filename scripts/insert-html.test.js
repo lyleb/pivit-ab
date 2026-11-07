@@ -1,5 +1,5 @@
 // Insert HTML is one block. Editing it, applying it again, and a late render
-// replace that block. Remove and Undo drop it.
+// replace that block. Remove and Undo drop it. The dashboard logo links home.
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -7,9 +7,20 @@ const vm = require('vm');
 const runtime = require('../snippet/ab.js');
 
 const editorSrc = fs.readFileSync(path.join(__dirname, '../snippet/editor.js'), 'utf8');
+const admin = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
 const variantId = '11111111-1111-4111-8111-111111111111';
 const expId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const selector = 'div.product-list__content';
+
+assert.ok(admin.includes('id="brand-home"'));
+assert.ok(admin.includes('class="brand-home"'));
+assert.ok(admin.includes('href="#home"'));
+assert.ok(admin.includes('data-go="#home"'));
+assert.ok(admin.includes('aria-label="pivitlab home"'));
+assert.ok(admin.includes('<span class="brand-logo" role="img" aria-label="pivitlab" aria-hidden="true"></span>'));
+assert.ok(admin.indexOf('aria-label="pivitlab home"') < admin.indexOf('class="brand-logo"'));
+assert.ok(admin.includes('a.brand-home:focus-visible'));
+assert.ok(!admin.includes('Pivitlab'));
 
 function matchCompound(node, compound) {
   if (!node || node.nodeType !== 1) return false;
