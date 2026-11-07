@@ -292,6 +292,124 @@ async function main() {
     assert.ok(!peek.text.includes('north.example'));
     assert.ok(!peek.text.includes(mineId));
 
+    const named = await request(server, 'PATCH', '/api/sites/' + firstId, { name: '  North shop  ' });
+    assert.strictEqual(named.status, 200, named.text);
+    assert.strictEqual(named.json.site.name, 'North shop');
+    assert.deepStrictEqual(named.json.site.domains, ['north.example']);
+    assert.strictEqual(named.json.site.verified, true);
+    const blankName = await request(server, 'PATCH', '/api/sites/' + firstId, { name: '   ' });
+    assert.strictEqual(blankName.status, 400);
+    const keptName = await db.query(`SELECT name, domains, verified_at FROM sites WHERE id = $1`, [firstId]);
+    assert.strictEqual(keptName.rows[0].name, 'North shop');
+    assert.ok(keptName.rows[0].verified_at);
+
+    const both = await request(server, 'PATCH', '/api/sites/' + firstId, {
+      name: 'North shop',
+      website: 'north.example',
+    });
+    assert.strictEqual(both.status, 200, both.text);
+    assert.strictEqual(both.json.site.name, 'North shop');
+    assert.deepStrictEqual(both.json.site.domains, ['north.example']);
+
+    const memberUser = await db.query(
+      `INSERT INTO users (email, verified_at) VALUES ('member@north.example', now()) RETURNING id`
+    );
+    await db.query(
+      `INSERT INTO memberships (account_id, user_id, role) VALUES ($1, $2, 'member')`,
+      [mineId, memberUser.rows[0].id]
+    );
+    const memberServer = await listen(appFor({
+      role: 'owner',
+      accountId: mineId,
+      userId: memberUser.rows[0].id,
+    }));
+    servers.push(memberServer);
+
+    const memberRename = await request(memberServer, 'PATCH', '/api/sites/' + firstId, { name: 'Stolen name' });
+    assert.strictEqual(memberRename.status, 403, memberRename.text);
+    const memberRemove = await request(memberServer, 'DELETE', '/api/sites/' + firstId, { confirm: true });
+    assert.strictEqual(memberRemove.status, 403, memberRemove.text);
+    const stillNamed = await db.query(`SELECT name FROM sites WHERE id = $1`, [firstId]);
+    assert.strictEqual(stillNamed.rows[0].name, 'North shop');
+
+    const foreignRemove = await request(otherServer, 'DELETE', '/api/sites/' + firstId, { confirm: true });
+    assert.strictEqual(foreignRemove.status, 404, foreignRemove.text);
+
+    const details = await request(server, 'PATCH', '/api/experiments/' + ownExperiment.json.id + '/details', {
+      name: '  Shop sale  ',
+      url_match: '/sale',
+    });
+    assert.strictEqual(details.status, 200, details.text);
+    assert.strictEqual(details.json.name, 'Shop sale');
+    assert.strictEqual(details.json.url_match, '/sale');
+    assert.strictEqual(details.json.url_match_type, 'contains');
+    const memberDetails = await request(memberServer, 'PATCH', '/api/experiments/' + ownExperiment.json.id + '/details', {
+      name: 'Member edit',
+      url_match: '/nope',
+    });
+    assert.strictEqual(memberDetails.status, 403, memberDetails.text);
+    const detailsRow = await db.query(`SELECT name, url_match FROM experiments WHERE id = $1`, [ownExperiment.json.id]);
+    assert.strictEqual(detailsRow.rows[0].name, 'Shop sale');
+    assert.strictEqual(detailsRow.rows[0].url_match, '/sale');
+
+    const gone = await request(server, 'POST', '/api/sites', { website: 'gone.north.example' });
+    assert.strictEqual(gone.status, 201, gone.text);
+    const goneId = gone.json.site.id;
+    const draft = await request(server, 'POST', '/api/experiments', {
+      name: 'Draft on gone',
+      url_match: '/draft',
+      allowed_hosts: ['gone.north.example'],
+      site_id: goneId,
+    });
+    assert.strictEqual(draft.status, 201, draft.text);
+    const paused = await db.query(
+      `INSERT INTO experiments
+         (name, url_match, status, allowed_hosts, account_id, site_id, goals, goals_scope, goals_migrated)
+       VALUES ('Paused on gone', '/paused', 'paused', $1::text[], $2, $3, '[]'::jsonb, 'shared', true)
+       RETURNING id`,
+      [['gone.north.example'], mineId, goneId]
+    );
+    const running = await db.query(
+      `INSERT INTO experiments
+         (name, url_match, status, allowed_hosts, account_id, site_id, goals, goals_scope, goals_migrated)
+       VALUES ('Running on gone', '/running', 'running', $1::text[], $2, $3, '[]'::jsonb, 'shared', true)
+       RETURNING id`,
+      [['gone.north.example'], mineId, goneId]
+    );
+    await db.query(`UPDATE accounts SET active_site_id = $2 WHERE id = $1`, [mineId, goneId]);
+
+    const unconfirmed = await request(server, 'DELETE', '/api/sites/' + goneId, {});
+    assert.strictEqual(unconfirmed.status, 400, unconfirmed.text);
+    const blocked = await request(server, 'DELETE', '/api/sites/' + goneId, { confirm: true });
+    assert.strictEqual(blocked.status, 409, blocked.text);
+    assert.ok(blocked.json.error.includes('running'));
+    const stillRunning = await db.query(`SELECT status, site_id FROM experiments WHERE id = $1`, [running.rows[0].id]);
+    assert.strictEqual(stillRunning.rows[0].status, 'running');
+    assert.strictEqual(stillRunning.rows[0].site_id, goneId);
+
+    await db.query(`UPDATE experiments SET status = 'paused' WHERE id = $1`, [running.rows[0].id]);
+    const removed = await request(server, 'DELETE', '/api/sites/' + goneId, { confirm: true });
+    assert.strictEqual(removed.status, 200, removed.text);
+    assert.strictEqual(removed.json.removed, true);
+    assert.strictEqual(removed.json.archived_tests, 3);
+    const goneRow = await db.query(`SELECT id FROM sites WHERE id = $1`, [goneId]);
+    assert.strictEqual(goneRow.rows.length, 0);
+    const rememberedAfter = await db.query(`SELECT active_site_id FROM accounts WHERE id = $1`, [mineId]);
+    assert.strictEqual(rememberedAfter.rows[0].active_site_id, null);
+    for (const id of [draft.json.id, paused.rows[0].id, running.rows[0].id]) {
+      const row = await db.query(`SELECT status, site_id, needs_site FROM experiments WHERE id = $1`, [id]);
+      assert.strictEqual(row.rows[0].status, 'archived');
+      assert.strictEqual(row.rows[0].site_id, null);
+      assert.strictEqual(row.rows[0].needs_site, true);
+    }
+    const audit = await db.query(
+      `SELECT action, detail FROM audit_log WHERE target_id = $1 AND action = 'site_removed'`,
+      [goneId]
+    );
+    assert.strictEqual(audit.rows.length, 1);
+    assert.strictEqual(audit.rows[0].detail.host, 'gone.north.example');
+    assert.strictEqual(audit.rows[0].detail.archived_tests, 3);
+
     console.log('site-choice db tests passed');
   } finally {
     for (const server of servers) {

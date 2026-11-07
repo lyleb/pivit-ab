@@ -6,6 +6,9 @@ const { customerHost } = require('../src/auth-flow');
 const {
   DOMAIN_IN_USE_WARNING,
   normaliseSiteDomain,
+  normaliseSiteName,
+  runningSiteRemovalError,
+  SITE_REMOVE_NEEDS_CONFIRM,
   sameAccountDomainMessage,
   chosenSite,
   siteChoiceRequired,
@@ -26,6 +29,12 @@ assert.strictEqual(normaliseSiteDomain('localhost'), '');
 assert.strictEqual(normaliseSiteDomain('http://127.0.0.1/admin'), '');
 assert.strictEqual(normaliseSiteDomain('not a domain'), '');
 assert.strictEqual(customerHost('https://WWW.Example.co.uk/pricing/'), normaliseSiteDomain('https://WWW.Example.co.uk/pricing/'));
+assert.strictEqual(normaliseSiteName('  North shop  ').name, 'North shop');
+assert.strictEqual(normaliseSiteName('').ok, false);
+assert.strictEqual(normaliseSiteName('x'.repeat(81)).error, 'That name is too long.');
+assert.ok(runningSiteRemovalError(1).includes('Pause it'));
+assert.ok(runningSiteRemovalError(2).includes('2 tests running'));
+assert.ok(SITE_REMOVE_NEEDS_CONFIRM.includes('Confirm'));
 
 assert.strictEqual(
   sameAccountDomainMessage('example.co.uk'),
@@ -89,6 +98,13 @@ for (const phrase of [
   DOMAIN_IN_USE_WARNING,
   'UI.siteChoiceState',
   '/api/setup/site',
+  'data-site-remove',
+  'data-site-name',
+  'UI.SITE_REMOVE_EXPLANATION',
+  'data-action="edit-basics"',
+  'wizardDraftFromStorage',
+  'wizardFieldLock',
+  'startNewExperiment()',
 ]) {
   assert.ok(dashboard.includes(phrase), phrase);
 }

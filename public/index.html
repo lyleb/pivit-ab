@@ -130,7 +130,7 @@
   .support-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .support-controls select {
     width: 220px; max-width: 100%; margin: 0; flex: 0 0 auto;
-    color: #1a1d27; background: #fff;
+    color: #1a1d27; background: #fff; color-scheme: light;
   }
   .support-controls select option { color: #1a1d27; background: #fff; }
   .site-picker { margin: 0 0 14px; }
@@ -140,6 +140,14 @@
     padding: 12px 0; border-bottom: 1px solid var(--border);
   }
   .site-row:last-child { border-bottom: none; }
+  .site-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+  .site-actions button { margin: 0; }
+  .site-confirm {
+    margin-top: 10px; padding: 12px; border: 1px solid var(--border);
+    border-radius: 8px; background: var(--card-2);
+  }
+  .site-confirm p { margin: 0 0 10px; }
+  .site-confirm .inline-actions { margin-top: 0; }
   .site-row .banner { margin: 8px 0 0; }
   .site-ga4 { margin-top: 12px; max-width: 40rem; }
   .site-ga4 .check { margin-top: 0; }
@@ -668,7 +676,7 @@
       </div>
       <div class="card" id="sites-card">
         <h2>Sites</h2>
-        <p class="hint" style="margin-top:0;">Each site has its own snippet. pivitlab only runs a test on the domains you add here. www, https:// and a trailing path are saved as the bare domain.</p>
+        <p class="hint" style="margin-top:0;">Each site has its own snippet. pivitlab only runs a test on the domains you add here. www, https:// and a trailing path are saved as the bare domain. Edit changes the name and the website. Remove asks you to confirm first.</p>
         <div id="sites-list"></div>
         <form id="sites-add-form" style="margin-top:12px;">
           <label for="sites-add-website">Website</label>
@@ -869,7 +877,7 @@
           <p class="hint" id="wizard-ga4-hint" hidden></p>
           <label class="check" for="wizard-datalayer"><input type="checkbox" id="wizard-datalayer"> Count dataLayer events</label>
           <p class="hint" id="wizard-datalayer-hint" hidden></p>
-          <p id="wizard-lock-hint" class="hint" hidden>Name, URL and test type are fixed once the draft exists. A demo test cannot be switched to live. Match, the element rule, when the test starts, the viewer, site domains, and these two tickboxes can still be changed. They can also be changed later in Settings.</p>
+          <p id="wizard-lock-hint" class="hint" hidden>You can change the name, the page, the site, the match, and the rest of this step. The test type stays as it was when the test was first saved. A demo test cannot be switched to live, and a live test cannot be turned into a demo. The same details can be changed later with Edit basics, or in Settings.</p>
         </div>
 
         <div id="wizard-step-2" class="wizard-step" hidden>
@@ -1360,6 +1368,7 @@ const wizard = {
   ga4Touched: false,
   datalayerTouched: false,
   advancedAt: 0,
+  editing: false,
 };
 
 let wizardContinueAt = 0;
@@ -2086,10 +2095,16 @@ function paintSitePickers() {
       const label = domainLabel(site) || 'Site';
       return `<option value="${UI.escapeHtml(site.id)}">${UI.escapeHtml(label)}</option>`;
     }));
-    select.innerHTML = options.join('');
+    const signature = accountSites.map((site) => `${site.id}:${domainLabel(site) || 'Site'}`).join('|');
+    if (select.dataset.siteOptions !== signature) {
+      select.innerHTML = options.join('');
+      select.dataset.siteOptions = signature;
+    }
     const wizardPick = wizardResolvedSiteId();
-    select.value = id === 'wizard-site' ? wizardPick : (chosenSiteId || '');
-    if (id === 'wizard-site') select.disabled = !!wizard.expId;
+    const wanted = id === 'wizard-site' ? wizardPick : (chosenSiteId || '');
+    if (select.value !== wanted) select.value = wanted;
+    const siteLock = UI.wizardFieldLock(!!wizard.expId);
+    if (id === 'wizard-site' && select.disabled !== siteLock.site) select.disabled = siteLock.site;
     if (wrap) wrap.hidden = !show || (id === 'setup-site' && !agencyCanChange());
   });
   const needed = document.getElementById('snippet-site-needed');
@@ -2205,43 +2220,76 @@ function paintIntegrations(sites) {
   }).join('');
 }
 
+function siteListSignature(sites) {
+  return (sites || []).map((site) => [
+    site.id,
+    site.name || '',
+    domainLabel(site),
+    site.verified ? '1' : '0',
+    site.conflict ? '1' : '0',
+    site.ga4_enabled ? '1' : '0',
+    site.datalayer_events ? '1' : '0',
+  ].join('\t')).join('\n');
+}
+
 function paintSitesCard(sites) {
   const list = document.getElementById('sites-list');
   const addForm = document.getElementById('sites-add-form');
   if (!list) return;
   const readOnly = !agencyCanChange();
   if (addForm) addForm.hidden = readOnly;
+  // Home checks the snippet every few seconds. Rebuilding the cards each time
+  // closed Edit and Remove while they were open, so a click never landed.
+  const signature = (readOnly ? '1' : '0') + '\n' + siteListSignature(sites);
+  if (list.dataset.sites === signature) return;
+  list.dataset.sites = signature;
   if (!sites.length) {
     list.innerHTML = '<p class="hint">No site yet. Add the website you want to test.</p>';
     return;
   }
   list.innerHTML = sites.map((site) => {
     const domain = domainLabel(site);
+    const title = (site.name && site.name !== domain) ? site.name : (domain || site.name || 'Site');
     const seen = site.verified ? 'Snippet seen' : 'Snippet not seen yet';
     const warning = site.conflict
       ? `<p class="banner" role="status">${UI.escapeHtml(UI.DOMAIN_IN_USE_WARNING)}</p>`
       : '';
     const ga4 = integrationStatusHtml(site);
-    const edit = readOnly ? '' : `
-      <button type="button" class="btn-ghost" data-site-edit-toggle="${UI.escapeHtml(site.id)}">Edit</button>`;
+    const actions = readOnly ? '' : `
+      <div class="site-actions">
+        <button type="button" class="btn-ghost" data-site-edit-toggle="${UI.escapeHtml(site.id)}">Edit</button>
+        <button type="button" class="btn-danger" data-site-remove="${UI.escapeHtml(site.id)}">Remove</button>
+      </div>`;
     const form = readOnly ? '' : `
       <form class="site-edit" data-site-edit="${UI.escapeHtml(site.id)}" hidden>
+        <label>Name</label>
+        <input data-site-name value="${UI.escapeHtml(site.name || domain)}" spellcheck="false" autocomplete="off">
         <label>Website</label>
         <input data-site-website value="${UI.escapeHtml(domain)}" spellcheck="false" autocapitalize="off" autocomplete="off">
-        <p class="hint">Saving replaces the domains on this site with this website.</p>
+        <p class="hint">Saving a new website replaces the domains on this site. The snippet has to be seen again.</p>
         <button type="submit">Save site</button>
         <p class="error-msg" data-site-error></p>
         <p class="banner" data-site-warning role="status" hidden></p>
-      </form>`;
+      </form>
+      <div class="site-confirm" data-site-remove-panel="${UI.escapeHtml(site.id)}" hidden>
+        <p><strong>Remove ${UI.escapeHtml(title)}?</strong></p>
+        <p>${UI.escapeHtml(UI.SITE_REMOVE_EXPLANATION)}</p>
+        <div class="inline-actions">
+          <button type="button" class="btn-danger" data-site-remove-confirm="${UI.escapeHtml(site.id)}">Remove site</button>
+          <button type="button" class="btn-ghost" data-site-remove-cancel="${UI.escapeHtml(site.id)}">Cancel</button>
+        </div>
+        <p class="error-msg" data-site-remove-error></p>
+      </div>`;
     return `<div class="site-row" data-site-id="${UI.escapeHtml(site.id)}">
       <div style="flex:1;min-width:0;">
-        <strong>${UI.escapeHtml(domain)}</strong>
+        <strong>${UI.escapeHtml(title)}</strong>
+        ${domain && title !== domain ? `<span class="hint">${UI.escapeHtml(domain)}</span>` : ''}
         <span class="hint">${seen}</span>
         ${warning}
         ${form}
         ${ga4}
       </div>
-      ${edit}
+      ${actions}
     </div>`;
   }).join('');
 }
@@ -2503,7 +2551,7 @@ function agencyCanChange() {
 }
 
 const MEMBER_WRITE_ACTIONS = new Set([
-  'set-status', 'add-variant', 'save-variant', 'make-edits', 'toggle-variant',
+  'edit-basics', 'set-status', 'add-variant', 'save-variant', 'make-edits', 'toggle-variant',
   'delete-variant', 'add-goal-row', 'save-goals', 'remove-goal', 'add-goal',
   'save-settings', 'archive-experiment', 'delete-experiment', 'test-traffic',
   'save-plan', 'reveal-early', 'adopt-plan', 'conclusion-generate', 'conclusion-release',
@@ -2517,7 +2565,7 @@ function stripMemberControls(root) {
   });
   const addRow = document.getElementById('add-variant-row');
   if (addRow && scope.contains(addRow)) addRow.hidden = true;
-  ['settings-match', 'settings-element', 'settings-activation', 'settings-activation-value', 'settings-activation-js', 'settings-hosts', 'settings-client', 'settings-status', 'settings-ga4', 'settings-datalayer'].forEach((id) => {
+  ['settings-name', 'settings-url', 'settings-match', 'settings-element', 'settings-activation', 'settings-activation-value', 'settings-activation-js', 'settings-hosts', 'settings-client', 'settings-status', 'settings-ga4', 'settings-datalayer'].forEach((id) => {
     const el = document.getElementById(id);
     if (el && scope.contains(el)) el.disabled = true;
   });
@@ -2526,7 +2574,10 @@ function stripMemberControls(root) {
 }
 
 function startNewExperiment() {
-  if (!agencyCanChange()) return;
+  if (!agencyCanChange()) {
+    go('#home');
+    return;
+  }
   resetWizard();
   go('#create');
 }
@@ -2534,6 +2585,10 @@ function startNewExperiment() {
 document.querySelector('.sidebar').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-go]');
   if (!btn) return;
+  if (btn.dataset.go === '#create') {
+    startNewExperiment();
+    return;
+  }
   go(btn.dataset.go);
 });
 
@@ -3283,6 +3338,7 @@ function renderDetail() {
         </div>
       </div>
       <div class="header-actions">
+        ${agencyCanChange() ? '<button type="button" class="btn-ghost" data-action="edit-basics">Edit basics</button>' : ''}
         <button type="button" class="btn-ghost" data-action="preview">Preview</button>
         <button type="button" class="btn-ghost" data-snippet-toggle>Copy snippet</button>
         ${action ? `<button type="button" data-action="set-status" data-status="${action.next}">${action.label}</button>` : ''}
@@ -3475,8 +3531,10 @@ function renderDetail() {
             <strong>${UI.escapeHtml(variant.name || 'Variant')}</strong>
             ${variantChangeLines(variant.changes)}
           </div>`).join('')}
+        <label for="settings-name">Experiment name</label>
+        <input id="settings-name" value="${UI.escapeHtml(exp.name || '')}">
         <label for="settings-url">Page URL</label>
-        <input id="settings-url" class="mono" readonly value="${UI.escapeHtml(exp.url_match || '')}">
+        <input id="settings-url" class="mono" value="${UI.escapeHtml(exp.url_match || '')}">
         <p id="settings-site-mismatch" class="banner" role="status" hidden></p>
         <label for="settings-match">Match</label>
         <select id="settings-match">
@@ -4055,6 +4113,10 @@ document.getElementById('page-detail').addEventListener('click', async (e) => {
     applyMatchingPreviewPage();
     return;
   }
+  if (action === 'edit-basics') {
+    openExperimentInWizard(currentDetail);
+    return;
+  }
   if (action === 'preview') {
     const pageUrl = requirePageUrl();
     if (!pageUrl) return;
@@ -4421,6 +4483,19 @@ async function loadSeenHosts(experimentId) {
 
 async function saveDetailSettings() {
   const msg = document.getElementById('settings-msg');
+  const nameField = document.getElementById('settings-name');
+  const urlField = document.getElementById('settings-url');
+  const detailsResult = await callApi(`/api/experiments/${currentDetail.id}/details`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({
+      name: nameField ? nameField.value : currentDetail.name,
+      url_match: urlField ? urlField.value : currentDetail.url_match,
+    }),
+  });
+  if (!detailsResult.ok) { msg.className = 'error-msg'; msg.textContent = apiErrorText(detailsResult); return; }
+  currentDetail.name = detailsResult.data.name;
+  currentDetail.url_match = detailsResult.data.url_match;
   const hostsField = document.getElementById('settings-hosts');
   const clientId = document.getElementById('settings-client').value || null;
   const status = document.getElementById('settings-status').value;
@@ -5508,10 +5583,15 @@ function loadWizard() {
   try {
     const raw = sessionStorage.getItem('pivit_wizard');
     if (!raw) return;
-    const saved = JSON.parse(raw);
-    Object.assign(wizard, saved, { busy: false, advancedAt: 0 });
-    if (wizard.expId) wizard.siteChosen = true;
-  } catch (e) {}
+    const draft = UI.wizardDraftFromStorage(JSON.parse(raw));
+    if (!draft) {
+      sessionStorage.removeItem('pivit_wizard');
+      return;
+    }
+    Object.assign(wizard, draft);
+  } catch (e) {
+    try { sessionStorage.removeItem('pivit_wizard'); } catch (err) {}
+  }
 }
 
 function saveWizard() {
@@ -5547,6 +5627,7 @@ function resetWizard() {
   wizard.ga4Touched = false;
   wizard.datalayerTouched = false;
   wizard.advancedAt = 0;
+  wizard.editing = false;
   try { sessionStorage.removeItem('pivit_wizard'); } catch (e) {}
   const list = document.getElementById('wizard-goals-list');
   if (list) list.innerHTML = '';
@@ -5676,17 +5757,19 @@ async function renderWizard() {
   if (!wizard.hostsEdited) wizard.hosts = suggestedSiteDomains();
   document.getElementById('wizard-hosts').value = wizard.hosts || '';
   fillClientSelect(document.getElementById('wizard-client'), 'None — internal only', wizard.clientId || '');
-  const locked = !!wizard.expId;
+  const fieldLock = UI.wizardFieldLock(!!wizard.expId);
   if (wizard.testType === 'demo' && wizard.expId) wizard.planSaved = true;
-  document.getElementById('wizard-name').readOnly = locked;
-  document.getElementById('wizard-url').readOnly = locked;
+  document.getElementById('wizard-name').readOnly = fieldLock.name;
+  document.getElementById('wizard-url').readOnly = fieldLock.url;
   const typeEl = document.getElementById('wizard-type');
   if (typeEl) {
     typeEl.value = wizard.testType === 'demo' ? 'demo' : 'live';
-    typeEl.disabled = locked;
+    typeEl.disabled = fieldLock.testType;
   }
+  const matchLock = document.getElementById('wizard-match');
+  if (matchLock) matchLock.disabled = fieldLock.match;
   updateWizardTypeHint();
-  document.getElementById('wizard-lock-hint').hidden = !locked;
+  document.getElementById('wizard-lock-hint').hidden = !wizard.expId;
 
   const back = document.getElementById('wizard-back');
   const skip = document.getElementById('wizard-skip');
@@ -5832,6 +5915,7 @@ async function persistWizardBasics() {
     if (!result.ok) { wizardMsg(apiErrorText(result)); return false; }
     showFormWarning(document.getElementById('wizard-domain-warning'), result.data.domain_warning || '');
     wizard.expId = result.data.id;
+    wizard.editing = true;
     wizard.siteChosen = true;
     if (result.data.site_id) wizard.siteId = String(result.data.site_id);
     if (result.data.test_type) wizard.testType = result.data.test_type;
@@ -5855,6 +5939,13 @@ async function persistWizardBasics() {
     loadExperimentList();
     return true;
   }
+  const detailsResult = await callApi(`/api/experiments/${wizard.expId}/details`, {
+    method: 'PATCH', headers: authHeaders(),
+    body: JSON.stringify({ name: wizard.name, url_match: wizard.url }),
+  });
+  if (!detailsResult.ok) { wizardMsg(apiErrorText(detailsResult)); return false; }
+  wizard.name = detailsResult.data.name || wizard.name;
+  wizard.url = detailsResult.data.url_match || wizard.url;
   const elementResult = await callApi(`/api/experiments/${wizard.expId}/element-selector`, {
     method: 'PATCH', headers: authHeaders(),
     body: JSON.stringify({ element_selector: wizard.activationType === 'element' ? '' : (wizard.elementSelector || '') }),
@@ -5882,10 +5973,16 @@ async function persistWizardBasics() {
   });
   if (!result.ok) { wizardMsg(result.message); return false; }
   const hostsResult = await callApi(`/api/experiments/${wizard.expId}/hosts`, {
-    method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ allowed_hosts: wizard.hosts }),
+    method: 'PATCH', headers: authHeaders(),
+    body: JSON.stringify({
+      allowed_hosts: wizard.hosts,
+      site_id: siteForWizard || null,
+    }),
   });
   if (!hostsResult.ok) { wizardMsg(hostsResult.message); return false; }
   rememberSavedHosts(hostsResult.data);
+  if (hostsResult.data.site_id) wizard.siteId = String(hostsResult.data.site_id);
+  wizard.editing = true;
   const flagBody = {};
   const ga4BoxNow = document.getElementById('wizard-ga4');
   const layerBoxNow = document.getElementById('wizard-datalayer');
@@ -6082,6 +6179,35 @@ async function saveWizardPlan() {
   if (next) next.textContent = UI.wizardReviewAction(true);
   saveWizard();
   return true;
+}
+
+function openExperimentInWizard(exp) {
+  if (!agencyCanChange() || !exp || !exp.id) return;
+  resetWizard();
+  wizard.editing = true;
+  wizard.expId = exp.id;
+  wizard.siteChosen = true;
+  wizard.siteId = exp.site_id ? String(exp.site_id) : '';
+  wizard.name = exp.name || '';
+  wizard.testType = exp.test_type === 'demo' ? 'demo' : 'live';
+  wizard.url = exp.url_match || '';
+  wizard.match = exp.url_match_type || 'contains';
+  wizard.matchTouched = true;
+  wizard.elementSelector = exp.activation_type === 'element' ? '' : (exp.element_selector || '');
+  wizard.activationType = exp.activation_type || 'page_load';
+  wizard.activationValue = exp.activation_value || '';
+  wizard.clientId = exp.client_id || '';
+  wizard.pageUrl = /^https?:\/\//i.test(exp.url_match || '') ? exp.url_match : '';
+  wizard.hosts = Array.isArray(exp.allowed_hosts) ? exp.allowed_hosts.join('\n') : '';
+  wizard.hostsEdited = wizard.hosts.length > 0;
+  wizard.ga4Enabled = exp.ga4_enabled !== false;
+  wizard.datalayerEvents = exp.datalayer_events !== false;
+  wizard.ga4Touched = true;
+  wizard.datalayerTouched = true;
+  wizard.step = 1;
+  wizard.maxStep = 5;
+  saveWizard();
+  go('#create');
 }
 
 function openWizardReview() {
@@ -7335,7 +7461,13 @@ document.getElementById('logout-all').addEventListener('click', async () => {
 document.getElementById('first-run').addEventListener('click', (event) => {
   const link = event.target.closest('a.setup-link');
   if (!link) return;
-  if ((link.getAttribute('href') || '') !== '#sites-card') return;
+  const href = link.getAttribute('href') || '';
+  if (href === '#create') {
+    event.preventDefault();
+    startNewExperiment();
+    return;
+  }
+  if (href !== '#sites-card') return;
   event.preventDefault();
   const card = document.getElementById('sites-card');
   if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -7348,18 +7480,7 @@ document.getElementById('first-run-copy').addEventListener('click', () => {
 document.getElementById('first-run-create').addEventListener('click', () => {
   if (!agencyCanChange()) return;
   if (accountSites.length > 1 && !chosenSiteId) return;
-  if (!wizard.expId) {
-    wizard.hostsEdited = false;
-    if (accountSites.length > 1) {
-      wizard.siteChosen = false;
-      wizard.hosts = '';
-    } else {
-      wizard.hosts = domainsForChosenSite();
-    }
-    const hosts = document.getElementById('wizard-hosts');
-    if (hosts) hosts.value = wizard.hosts;
-  }
-  go('#create');
+  startNewExperiment();
 });
 
 document.getElementById('first-run-dismiss').addEventListener('click', async () => {
@@ -7428,8 +7549,7 @@ document.getElementById('add-site-form').addEventListener('submit', async (event
         if (!wizard.expId) wizard.siteId = '';
         select.value = '';
         refreshWizardDomainWarning();
-      } else if (!wizard.expId) {
-        wizard.hostsEdited = false;
+      } else if (!wizard.hostsEdited) {
         wizard.hosts = domainsForChosenSite();
         const field = document.getElementById('wizard-hosts');
         if (field) field.value = wizard.hosts;
@@ -7520,11 +7640,56 @@ document.getElementById('integrations-list').addEventListener('change', async (e
   await refreshFirstRun();
 });
 
-document.getElementById('sites-list').addEventListener('click', (event) => {
+document.getElementById('sites-list').addEventListener('click', async (event) => {
   const toggle = event.target.closest('[data-site-edit-toggle]');
-  if (!toggle) return;
-  const form = document.querySelector(`[data-site-edit="${toggle.getAttribute('data-site-edit-toggle')}"]`);
-  if (form) form.hidden = !form.hidden;
+  if (toggle) {
+    const id = toggle.getAttribute('data-site-edit-toggle');
+    const form = document.querySelector(`[data-site-edit="${id}"]`);
+    const panel = document.querySelector(`[data-site-remove-panel="${id}"]`);
+    if (panel) panel.hidden = true;
+    if (form) {
+      form.hidden = !form.hidden;
+      if (!form.hidden) {
+        const field = form.querySelector('[data-site-name]');
+        if (field) field.focus();
+      }
+    }
+    return;
+  }
+  const remove = event.target.closest('[data-site-remove]');
+  if (remove && !remove.hasAttribute('data-site-remove-confirm')) {
+    const id = remove.getAttribute('data-site-remove');
+    const panel = document.querySelector(`[data-site-remove-panel="${id}"]`);
+    const form = document.querySelector(`[data-site-edit="${id}"]`);
+    if (form) form.hidden = true;
+    if (panel) panel.hidden = false;
+    return;
+  }
+  const cancel = event.target.closest('[data-site-remove-cancel]');
+  if (cancel) {
+    const panel = document.querySelector(`[data-site-remove-panel="${cancel.getAttribute('data-site-remove-cancel')}"]`);
+    if (panel) panel.hidden = true;
+    return;
+  }
+  const confirmRemove = event.target.closest('[data-site-remove-confirm]');
+  if (!confirmRemove) return;
+  const siteId = confirmRemove.getAttribute('data-site-remove-confirm');
+  const panel = document.querySelector(`[data-site-remove-panel="${siteId}"]`);
+  const errorEl = panel ? panel.querySelector('[data-site-remove-error]') : null;
+  if (errorEl) errorEl.textContent = '';
+  confirmRemove.disabled = true;
+  const result = await callApi('/api/sites/' + encodeURIComponent(siteId), {
+    method: 'DELETE',
+    headers: authHeaders(),
+    body: JSON.stringify({ confirm: true }),
+  });
+  confirmRemove.disabled = false;
+  if (!result.ok) {
+    if (errorEl) errorEl.textContent = apiErrorText(result);
+    return;
+  }
+  await refreshFirstRun();
+  loadExperimentList();
 });
 
 async function saveSiteGa4(ga4Form, revertToggle) {
@@ -7564,12 +7729,16 @@ document.getElementById('sites-list').addEventListener('submit', async (event) =
   const siteId = form.getAttribute('data-site-edit');
   const errorEl = form.querySelector('[data-site-error]');
   const input = form.querySelector('[data-site-website]');
+  const nameInput = form.querySelector('[data-site-name]');
   if (errorEl) errorEl.textContent = '';
   showFormWarning(form.querySelector('[data-site-warning]'), '');
   const result = await callApi('/api/sites/' + encodeURIComponent(siteId), {
     method: 'PATCH',
     headers: authHeaders(),
-    body: JSON.stringify({ website: input ? input.value : '' }),
+    body: JSON.stringify({
+      name: nameInput ? nameInput.value : '',
+      website: input ? input.value : '',
+    }),
   });
   if (!result.ok) {
     if (errorEl) errorEl.textContent = apiErrorText(result);

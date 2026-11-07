@@ -26,7 +26,7 @@ const {
   parseHostList,
   hostScopingMode,
 } = require('../host-scope');
-const { publicScope, ownedExperiment, placeOnSite, resolveExperimentSite } = require('../tenant');
+const { publicScope, ownedExperiment, resolveExperimentSite } = require('../tenant');
 const { markDomainConflict } = require('../auth-flow');
 const { DOMAIN_IN_USE_WARNING, routeStatus } = require('../site-domain');
 const { matchPageUrl, resolvePageMatch } = require('../../public/url-match');
@@ -1114,6 +1114,52 @@ router.patch('/:id/element-selector', async (req, res) => {
   }
 });
 
+function normaliseExperimentName(value) {
+  if (typeof value !== 'string') return { ok: false, error: 'Enter a name for the experiment.' };
+  const name = value.trim().replace(/\s+/g, ' ');
+  if (!name) return { ok: false, error: 'Enter a name for the experiment.' };
+  if (name.length > 200) return { ok: false, error: 'That name is too long.' };
+  if (/[\u0000-\u001f]/.test(name)) return { ok: false, error: 'Enter a name for the experiment.' };
+  return { ok: true, name };
+}
+
+function normaliseExperimentUrl(value) {
+  if (typeof value !== 'string') return { ok: false, error: 'Enter the page this test runs on.' };
+  const url = value.trim();
+  if (!url) return { ok: false, error: 'Enter the page this test runs on.' };
+  if (url.length > 500) return { ok: false, error: 'That page address is too long.' };
+  if (/[\u0000-\u001f]/.test(url)) return { ok: false, error: 'Enter the page this test runs on.' };
+  return { ok: true, url };
+}
+
+// PATCH /api/experiments/:id/details  { name, url_match }
+// Owner-only. The page match type stays as it is. A Member is refused.
+router.patch('/:id/details', async (req, res) => {
+  try {
+    const experiment = await ownedExperiment(req.account.id, req.params.id);
+    if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
+    if (refuseViewOnly(req, res)) return;
+    const name = normaliseExperimentName(req.body && req.body.name);
+    if (!name.ok) return res.status(400).json({ error: name.error });
+    const url = normaliseExperimentUrl(req.body && req.body.url_match);
+    if (!url.ok) return res.status(400).json({ error: url.error });
+    const pageMatch = resolvePageMatch(url.url, experiment.url_match_type || 'contains');
+    if (!pageMatch.ok) return res.status(400).json({ error: pageMatch.error });
+    const { rows } = await db.query(
+      `UPDATE experiments
+       SET name = $1, url_match = $2
+       WHERE id = $3 AND account_id = $4
+       RETURNING id, name, url_match, url_match_type`,
+      [name.name, url.url, experiment.id, req.account.id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'no experiment found with that id' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal error', detail: err.message });
+  }
+});
+
 // PATCH /api/experiments/:id/url-match  { url_match_type }
 // Owner-only. Does not change url_match text, and does not guess a new type
 // when the field is omitted, so saving other settings cannot turn a stored
@@ -1159,7 +1205,14 @@ router.patch('/:id/hosts', async (req, res) => {
     const client = await db.pool.connect();
     try {
       await client.query('BEGIN');
-      const placed = await placeOnSite(client.query.bind(client), req.account.id, id, parsed.hosts);
+      const requestedSiteId = req.body && req.body.site_id ? String(req.body.site_id) : '';
+      const placed = await resolveExperimentSite(
+        client.query.bind(client),
+        req.account.id,
+        id,
+        parsed.hosts,
+        requestedSiteId
+      );
       const domainWarning = await noteDomainWarning(client, req.account.id, placed);
       const { rows } = await client.query(
         `UPDATE experiments

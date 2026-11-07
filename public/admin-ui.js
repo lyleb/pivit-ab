@@ -548,6 +548,8 @@
     signup_requested: 'Asked to sign up',
     signin_failed: 'Failed sign-in',
     site_added: 'Added a site',
+    site_edited: 'Edited a site',
+    site_removed: 'Removed a site',
     site_verified: 'Verified a site',
     domain_conflict: 'Flagged a domain clash',
     invite_created: 'Created an invite',
@@ -1377,6 +1379,33 @@
   // The create wizard does not inherit the remembered site. One site is used
   // as it is. Several sites stay on "Choose a site" until chosenId is one of them.
   // Ids are compared as text so a remembered id still matches the site record.
+  // A stored wizard with an experiment id is a previous test. Create starts
+  // clean unless the owner is explicitly editing that test.
+  function wizardDraftFromStorage(saved) {
+    if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return null;
+    if (saved.expId && saved.editing !== true) return null;
+    return Object.assign({}, saved, {
+      busy: false,
+      advancedAt: 0,
+      siteChosen: saved.expId ? true : saved.siteChosen === true,
+    });
+  }
+
+  // Name, page, site and the other Basics fields stay editable after the
+  // draft exists. Test type cannot change: a demo test cannot become live,
+  // and a live test cannot become a demo.
+  function wizardFieldLock(hasExperiment) {
+    return {
+      name: false,
+      url: false,
+      site: false,
+      match: false,
+      testType: !!hasExperiment,
+    };
+  }
+
+  const SITE_REMOVE_EXPLANATION = 'The snippet on this website will stop. pivitlab will not remove the site while a test is running. Pause that test first. Draft and paused tests on this site are archived. Their results stay, and you can still open them. Tests that were already archived stay archived.';
+
   function wizardSiteValue(sites, chosenId) {
     const list = Array.isArray(sites) ? sites : [];
     if (list.length === 1 && list[0] && list[0].id != null && String(list[0].id) !== '') {
@@ -1596,6 +1625,9 @@
     manualActivationSnippet,
     ga4UptakeText,
     ga4AgencySitesText,
+    wizardDraftFromStorage,
+    wizardFieldLock,
+    SITE_REMOVE_EXPLANATION,
     wizardSiteValue,
     siteDomainsFor,
     domainMismatchMessage,
