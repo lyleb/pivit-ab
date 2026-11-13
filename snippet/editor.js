@@ -8,8 +8,9 @@
  * scoped, short-lived token instead of a session cookie (see src/edit-token.js
  * for why: normal session cookies are deliberately never sent cross-site).
  *
- * "Edit text" writes a text change for the selected element. It replaces that
- * element's text and does not ask for HTML. "Delete element" hides the
+ * "Edit text" writes a text change for the selected element. It replaces the
+ * words and leaves icons and other parts inside the element as they are.
+ * It does not ask for HTML. "Delete element" hides the
  * element on this variant after a confirm. It is stored as a delete change.
  * Undo in the changes list puts the element back during this editing
  * session, because the node stays in the page. "Edit element" still opens a panel
@@ -313,7 +314,7 @@
     const els = document.querySelectorAll(change.selector);
     els.forEach((el) => {
       switch (change.type) {
-        case 'text': el.textContent = change.value; break;
+        case 'text': writeText(el, change.value); break;
         case 'html': el.innerHTML = change.value; break;
         case 'hide': el.style.display = 'none'; break;
         case 'show': el.style.display = ''; break;
@@ -417,7 +418,7 @@
   // edit, and 'style' (inline-style object) / 'attr' (attr + value) predate the
   // visual editor and don't fit one text box — remove and re-add via CSS/JS.
   const EDIT_META = {
-    text: { label: 'Text', hint: "Plain text — replaces the element's text content." },
+    text: { label: 'Text', hint: 'Plain text. Icons and other parts inside the element stay put.' },
     html: { label: 'HTML', hint: 'Replaces everything inside the element.' },
     replace: { label: 'HTML', hint: 'Replaces the whole element.' },
     insert_before: { label: 'HTML', hint: 'Inserted directly above the element.' },
@@ -1693,35 +1694,115 @@
     if (scopePanelEl) { scopePanelEl.remove(); scopePanelEl = null; }
   }
 
+  function writeText(el, value) {
+    if (window.PivitRuntime && typeof window.PivitRuntime.writeElementText === 'function') {
+      window.PivitRuntime.writeElementText(el, value);
+      return;
+    }
+    if (el) el.textContent = value;
+  }
+
+  function readText(el) {
+    if (!el) return '';
+    if (window.PivitRuntime && typeof window.PivitRuntime.readElementText === 'function') {
+      try { return window.PivitRuntime.readElementText(el); }
+      catch (err) { /* fall through to the whole text */ }
+    }
+    return typeof el.textContent === 'string' ? el.textContent : '';
+  }
+
+  function elementHidden(el) {
+    try {
+      if (window.PivitRuntime && typeof window.PivitRuntime.isHiddenElement === 'function') {
+        return window.PivitRuntime.isHiddenElement(el) === true;
+      }
+    } catch (err) { /* treat as on screen */ }
+    return false;
+  }
+
+  function stabilityOf(selector) {
+    try {
+      if (window.PivitRuntime && typeof window.PivitRuntime.selectorStability === 'function') {
+        return window.PivitRuntime.selectorStability(selector) || { unstable: false, kind: '' };
+      }
+    } catch (err) { /* an unreadable selector is handled by matchesFor */ }
+    return { unstable: false, kind: '' };
+  }
+
   function matchesFor(selector) {
     let nodes;
     try { nodes = Array.from(document.querySelectorAll(selector)); }
-    catch (e) { return { valid: false, nodes: [] }; }
-    nodes = nodes.filter((n) => !(root && root.contains(n)) && !(scopePanelEl && scopePanelEl.contains(n)));
-    return { valid: true, nodes };
+    catch (e) { return { valid: false, nodes: [], visible: [], hidden: [] }; }
+    nodes = nodes.filter((n) => !(root && root.contains(n)) && !(scopePanelEl && scopePanelEl.contains(n)) && !isEditorChrome(n));
+    const hidden = [];
+    const visible = [];
+    nodes.forEach((node) => { (elementHidden(node) ? hidden : visible).push(node); });
+    return { valid: true, nodes, visible, hidden };
   }
 
   function paintSimilarHits(nodes) {
     clearSimilarHits();
-    nodes.slice(0, 200).forEach((el) => {
+    (nodes || []).forEach((el) => {
       if (!el.classList) return;
       el.classList.add(SIMILAR_CLASS);
       similarHits.push(el);
     });
   }
 
-  function matchLabel(n) {
-    return n === 1 ? '1 element matches' : `${n} elements match`;
+  function affectLabel(n) {
+    const count = Number(n) || 0;
+    return count === 1 ? 'This change affects 1 element.' : `This change affects ${count} elements.`;
   }
 
-  // After a pick: confirm a shared-class selector, or keep the one element.
-  // The count and highlight follow whatever is in the field, including hand edits.
+  function hiddenCopyLabel(n) {
+    return n === 1
+      ? '1 more copy is hidden on this screen size.'
+      : `${n} more copies are hidden on this screen size.`;
+  }
+
+  const STABILITY_WARNING = {
+    positional: POSITION_WARNING,
+    long: 'This follows a long path through the page. A small layout change can point it at the wrong thing.',
+    generated: "This uses an automatic name from the site's code. That name can change, and then the edit would miss.",
+  };
+
+  function levelWord(node) {
+    const tag = String(node && node.tagName || '').toLowerCase();
+    if (tag === 'svg' || tag === 'img' || tag === 'i' || tag === 'use' || tag === 'path' || tag === 'circle' || tag === 'polygon') return 'Icon';
+    const cls = typeof node.className === 'string' ? node.className : '';
+    if (/(^|\s)icon(\s|$)/i.test(cls)) return 'Icon';
+    const words = {
+      a: 'Link', button: 'Button',
+      h1: 'Heading', h2: 'Heading', h3: 'Heading', h4: 'Heading', h5: 'Heading', h6: 'Heading',
+      p: 'Text', span: 'Text', label: 'Text', li: 'List item', ul: 'List', ol: 'List',
+      article: 'Card', section: 'Section', nav: 'Menu', form: 'Form', figure: 'Figure',
+      picture: 'Image', div: 'Box',
+    };
+    return words[tag] || 'Element';
+  }
+
+  function levelChain(node) {
+    const chain = [];
+    let current = node;
+    while (current && current.nodeType === 1 && chain.length < 6) {
+      const tag = String(current.tagName || '').toUpperCase();
+      if (tag === 'BODY' || tag === 'HTML') break;
+      if (isEditorChrome(current)) break;
+      chain.push(current);
+      current = current.parentElement;
+    }
+    return chain;
+  }
+
+  // After a pick: highlight every match, then choose one element or all of them.
+  // The count follows that choice, including a hand-edited selector.
   function showScopePanel(el, x, y) {
     closeActionPopup();
     closeScopePanel();
     ensureSimilarStyle();
     const unique = getSelector(el);
     const suggested = window.PivitRuntime.generaliseSelector(el, pageQuery);
+    let includeHidden = true;
 
     scopePanelEl = document.createElement('div');
     styleReset(scopePanelEl);
@@ -1729,8 +1810,8 @@
     Object.assign(scopePanelEl.style, {
       position: 'fixed', top: '16px', left: '16px',
       zIndex: String(Z), background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: '12px',
-      boxShadow: '0 12px 40px rgba(19,23,35,0.25)', padding: '20px', width: '420px', maxWidth: '92vw',
-      maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', color: COLORS.ink, fontSize: '13px',
+      boxShadow: '0 12px 40px rgba(19,23,35,0.25)', padding: '20px', width: '460px', maxWidth: '92vw',
+      maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', color: COLORS.ink, fontSize: '16px', lineHeight: '1.45',
     });
     ['keydown', 'keyup', 'keypress'].forEach((evt) => scopePanelEl.addEventListener(evt, (e) => e.stopPropagation()));
     document.body.appendChild(scopePanelEl);
@@ -1738,23 +1819,70 @@
     const title = document.createElement('div');
     styleReset(title);
     title.style.fontWeight = '700';
-    title.style.fontSize = '15px';
+    title.style.fontSize = '22px';
     title.textContent = 'Which elements should this change?';
     scopePanelEl.appendChild(title);
 
+    const chain = levelChain(el);
+    if (chain.length > 1) {
+      const levelIntro = document.createElement('div');
+      styleReset(levelIntro);
+      Object.assign(levelIntro.style, { fontSize: '16px', marginTop: '10px', lineHeight: '1.45' });
+      levelIntro.textContent = 'You clicked inside another element. Choose the level to change.';
+      scopePanelEl.appendChild(levelIntro);
+
+      const crumbs = document.createElement('div');
+      styleReset(crumbs);
+      crumbs.id = 'pivit-level-crumbs';
+      Object.assign(crumbs.style, { display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', marginTop: '10px' });
+      const outerFirst = chain.slice().reverse();
+      outerFirst.forEach((node, index) => {
+        if (index) {
+          const sep = document.createElement('span');
+          styleReset(sep);
+          sep.textContent = '›';
+          sep.style.color = '#6b6f83';
+          crumbs.appendChild(sep);
+        }
+        const crumb = makeButton(levelWord(node), node === el ? COLORS.indigo : '#f4f5fb', () => {
+          if (node !== el) showScopePanel(node, x, y);
+        });
+        crumb.type = 'button';
+        crumb.style.fontSize = '15px';
+        crumb.style.padding = '8px 12px';
+        crumb.style.marginTop = '0';
+        if (node !== el) crumb.style.color = COLORS.ink;
+        crumb.setAttribute('data-level', levelWord(node));
+        crumbs.appendChild(crumb);
+      });
+      scopePanelEl.appendChild(crumbs);
+
+      const parentBtn = makeButton('Select parent', '#f4f5fb', () => showScopePanel(chain[1], x, y));
+      parentBtn.type = 'button';
+      parentBtn.id = 'pivit-select-parent';
+      parentBtn.style.color = COLORS.ink;
+      parentBtn.style.fontSize = '17px';
+      parentBtn.style.padding = '12px 16px';
+      parentBtn.style.marginTop = '10px';
+      parentBtn.style.width = '100%';
+      scopePanelEl.appendChild(parentBtn);
+    }
+
     const intro = document.createElement('div');
     styleReset(intro);
-    Object.assign(intro.style, { fontSize: '12px', color: '#6b6f83', marginTop: '6px', lineHeight: '1.45' });
+    Object.assign(intro.style, { fontSize: '16px', marginTop: '12px', lineHeight: '1.45' });
     const selectorIsPositional = window.PivitRuntime
       && typeof window.PivitRuntime.isPositionalSelector === 'function'
       && window.PivitRuntime.isPositionalSelector(suggested);
-    intro.textContent = 'Choose whether this change applies to every similar element, or only the one you picked.';
+    intro.textContent = selectorIsPositional
+      ? 'All similar changes every match. Just this one follows where the element sits on the page, so read the note before you choose.'
+      : 'All similar changes every match. Just this one changes only the element you picked.';
     scopePanelEl.appendChild(intro);
 
     const label = document.createElement('div');
     styleReset(label);
-    Object.assign(label.style, { fontSize: '12px', fontWeight: '600', marginTop: '14px', marginBottom: '4px' });
-    label.textContent = 'Selector';
+    Object.assign(label.style, { fontSize: '15px', fontWeight: '600', marginTop: '14px', marginBottom: '4px' });
+    label.textContent = 'How pivitlab finds it';
     scopePanelEl.appendChild(label);
 
     const input = document.createElement('input');
@@ -1770,76 +1898,178 @@
 
     const count = document.createElement('div');
     styleReset(count);
-    Object.assign(count.style, { fontSize: '22px', fontWeight: '700', color: COLORS.indigo, marginTop: '12px' });
+    Object.assign(count.style, { fontSize: '26px', fontWeight: '700', color: COLORS.indigo, marginTop: '14px', lineHeight: '1.3' });
     count.id = 'pivit-similar-count';
     scopePanelEl.appendChild(count);
 
+    const hiddenNote = document.createElement('div');
+    styleReset(hiddenNote);
+    hiddenNote.id = 'pivit-hidden-note';
+    Object.assign(hiddenNote.style, {
+      display: 'none', fontSize: '18px', fontWeight: '650', lineHeight: '1.4', color: '#24324a',
+      background: '#eef3fb', borderRadius: '8px', padding: '12px 14px', marginTop: '10px',
+    });
+    scopePanelEl.appendChild(hiddenNote);
+
+    const hiddenRow = document.createElement('div');
+    styleReset(hiddenRow);
+    hiddenRow.id = 'pivit-hidden-choice';
+    Object.assign(hiddenRow.style, { display: 'none', flexDirection: 'column', gap: '8px', marginTop: '8px' });
+    scopePanelEl.appendChild(hiddenRow);
+
     const note = document.createElement('div');
     styleReset(note);
-    Object.assign(note.style, { fontSize: '12px', color: '#6b6f83', marginTop: '4px', lineHeight: '1.4', minHeight: '18px' });
+    Object.assign(note.style, { fontSize: '16px', color: '#6b6f83', marginTop: '8px', lineHeight: '1.45', minHeight: '18px' });
     note.id = 'pivit-similar-note';
     scopePanelEl.appendChild(note);
 
+    let steadierValue = '';
+    const steadierBtn = makeButton('Use this steadier choice', COLORS.indigo, () => {
+      if (!steadierValue) return;
+      input.value = steadierValue;
+      refresh();
+    });
+    steadierBtn.type = 'button';
+    steadierBtn.id = 'pivit-steadier';
+    steadierBtn.style.display = 'none';
+    steadierBtn.style.width = '100%';
+    steadierBtn.style.fontSize = '17px';
+    steadierBtn.style.padding = '12px 16px';
+    steadierBtn.style.marginTop = '8px';
+    steadierBtn.style.whiteSpace = 'normal';
+    scopePanelEl.appendChild(steadierBtn);
+
+    function paintWarn(message, tone) {
+      note.textContent = message;
+      note.style.fontWeight = '650';
+      note.style.fontSize = '16px';
+      note.style.padding = '12px 14px';
+      note.style.borderRadius = '8px';
+      if (tone === 'bad') {
+        note.style.color = COLORS.danger;
+        note.style.background = 'transparent';
+        note.style.padding = '0';
+      } else if (tone === 'later') {
+        note.style.color = '#24324a';
+        note.style.background = '#eef3fb';
+      } else {
+        note.style.color = '#6a4b12';
+        note.style.background = '#fff4e5';
+      }
+    }
+
+    function quietNote(message) {
+      note.textContent = message;
+      note.style.fontWeight = '400';
+      note.style.fontSize = '16px';
+      note.style.padding = '0';
+      note.style.borderRadius = '0';
+      note.style.background = 'transparent';
+      note.style.color = '#6b6f83';
+    }
+
+    function betterChoice(selector) {
+      try {
+        if (!window.PivitRuntime || typeof window.PivitRuntime.steadierSelector !== 'function') return '';
+        const better = window.PivitRuntime.steadierSelector(el, pageQuery);
+        if (!better || better === selector) return '';
+        if (stabilityOf(better).unstable) return '';
+        return better;
+      } catch (err) { return ''; }
+    }
+
+    function selectorForAll(found) {
+      const raw = input.value.trim();
+      if (!found || !found.valid) return '';
+      if (includeHidden || !found.hidden.length) return raw;
+      if (!found.visible.length) return '';
+      const parts = [];
+      found.visible.forEach((node) => {
+        let sel = '';
+        try { sel = getSelector(node); } catch (err) { sel = ''; }
+        if (sel && parts.indexOf(sel) === -1) parts.push(sel);
+      });
+      return parts.join(', ');
+    }
+
+    function paintHiddenChoice(included) {
+      includeBtn.style.background = included ? COLORS.indigo : '#f4f5fb';
+      includeBtn.style.color = included ? '#fff' : COLORS.ink;
+      leaveBtn.style.background = included ? '#f4f5fb' : COLORS.indigo;
+      leaveBtn.style.color = included ? COLORS.ink : '#fff';
+      includeBtn.setAttribute('aria-pressed', included ? 'true' : 'false');
+      leaveBtn.setAttribute('aria-pressed', included ? 'false' : 'true');
+    }
+
     function refresh() {
-      const found = matchesFor(input.value.trim());
-      const fieldPositional = window.PivitRuntime
-        && typeof window.PivitRuntime.isPositionalSelector === 'function'
-        && window.PivitRuntime.isPositionalSelector(input.value.trim());
+      const raw = input.value.trim();
+      const found = matchesFor(raw);
+      const stability = stabilityOf(raw);
       note.style.padding = '0';
       note.style.borderRadius = '0';
       note.style.background = 'transparent';
       note.style.fontWeight = '400';
-      note.style.fontSize = '12px';
+      note.style.fontSize = '16px';
+      steadierBtn.style.display = 'none';
+      steadierValue = '';
+      const uniqueStability = stabilityOf(unique);
+      if (justNote) {
+        const sameWarning = stability.unstable && stability.kind === uniqueStability.kind;
+        justNote.hidden = !uniqueStability.unstable || sameWarning;
+        if (!justNote.hidden) {
+          let message = STABILITY_WARNING[uniqueStability.kind] || POSITION_WARNING;
+          const better = betterChoice(unique);
+          if (better) message += ' A steadier choice is ' + better + '.';
+          justNote.textContent = message;
+        }
+      }
       if (!found.valid) {
         clearSimilarHits();
-        count.textContent = 'Not a valid selector';
+        count.textContent = 'That is not a valid selector.';
         count.style.color = COLORS.danger;
-        note.textContent = 'That selector isn\'t valid. Check the brackets and colons, then try again.';
-        note.style.color = COLORS.danger;
+        paintWarn('Check the brackets and colons, then try again.', 'bad');
+        hiddenNote.style.display = 'none';
+        hiddenRow.style.display = 'none';
         applyAllBtn.disabled = true;
         applyAllBtn.style.opacity = '0.45';
         return;
       }
       paintSimilarHits(found.nodes);
-      count.textContent = matchLabel(found.nodes.length);
+      const leavingHidden = !includeHidden && found.hidden.length > 0;
+      const scopeCount = leavingHidden ? found.visible.length : found.nodes.length;
+      count.textContent = affectLabel(scopeCount);
       count.style.color = COLORS.indigo;
-      applyAllBtn.disabled = false;
-      applyAllBtn.style.opacity = '1';
-      const justWarn = scopePanelEl.querySelector('#pivit-positional-warning');
-      if (justWarn) justWarn.hidden = fieldPositional;
-      if (fieldPositional && found.nodes.length === 0) {
-        note.textContent = WRONG_WARNING;
-        note.style.color = '#6a4b12';
-        note.style.background = '#fff4e5';
-        note.style.padding = '12px 14px';
-        note.style.borderRadius = '8px';
-        note.style.fontWeight = '650';
-        note.style.fontSize = '15px';
-      } else if (fieldPositional) {
-        note.textContent = POSITION_WARNING;
-        note.style.color = '#6a4b12';
-        note.style.background = '#fff4e5';
-        note.style.padding = '12px 14px';
-        note.style.borderRadius = '8px';
-        note.style.fontWeight = '650';
-        note.style.fontSize = '15px';
-      } else if (found.nodes.length === 0) {
-        note.textContent = LATER_WARNING;
-        note.style.color = '#24324a';
-        note.style.background = '#eef3fb';
-        note.style.padding = '12px 14px';
-        note.style.borderRadius = '8px';
-        note.style.fontWeight = '650';
-        note.style.fontSize = '15px';
-      } else if (found.nodes.length > 200) {
-        note.textContent = 'Highlighting the first 200. Narrow the selector if some of them should stay as they are.';
-        note.style.color = '#6b6f83';
-      } else if (found.nodes.length > 25) {
-        note.textContent = 'That\'s a lot of elements. Narrow the selector if some of them should stay as they are.';
-        note.style.color = '#6b6f83';
+      if (found.hidden.length) {
+        hiddenNote.style.display = 'block';
+        hiddenNote.textContent = hiddenCopyLabel(found.hidden.length);
+        hiddenRow.style.display = 'flex';
+        paintHiddenChoice(includeHidden);
       } else {
-        note.textContent = 'Highlighted on the page.';
-        note.style.color = '#6b6f83';
+        hiddenNote.style.display = 'none';
+        hiddenRow.style.display = 'none';
+      }
+      const chosen = selectorForAll(found);
+      applyAllBtn.disabled = !chosen;
+      applyAllBtn.style.opacity = chosen ? '1' : '0.45';
+      const fieldPositional = stability.kind === 'positional' || stability.kind === 'long'
+        || (window.PivitRuntime && typeof window.PivitRuntime.isPositionalSelector === 'function' && window.PivitRuntime.isPositionalSelector(raw));
+      if (fieldPositional && found.nodes.length === 0) {
+        paintWarn(WRONG_WARNING, 'warn');
+      } else if (found.nodes.length === 0) {
+        paintWarn(LATER_WARNING, 'later');
+      } else if (stability.unstable) {
+        let message = STABILITY_WARNING[stability.kind] || POSITION_WARNING;
+        const better = betterChoice(raw);
+        if (better) {
+          message += ' A steadier choice is ' + better + '.';
+          steadierValue = better;
+          steadierBtn.style.display = 'block';
+        }
+        paintWarn(message, 'warn');
+      } else if (found.nodes.length > 25) {
+        quietNote('That is a lot of elements. Narrow it if some of them should stay as they are. Every match is highlighted.');
+      } else {
+        quietNote('Every match is highlighted on the page.');
       }
     }
 
@@ -1847,43 +2077,72 @@
     styleReset(row);
     Object.assign(row.style, { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px' });
 
-    const applyAllBtn = makeButton('Apply to all similar elements', COLORS.indigo, () => {
-      const selector = input.value.trim();
-      const found = matchesFor(selector);
+    const includeBtn = makeButton('Include the hidden copies', COLORS.indigo, () => {
+      includeHidden = true;
+      refresh();
+    });
+    includeBtn.type = 'button';
+    includeBtn.id = 'pivit-include-hidden';
+    includeBtn.style.width = '100%';
+    includeBtn.style.fontSize = '17px';
+    includeBtn.style.padding = '12px 16px';
+    includeBtn.style.whiteSpace = 'normal';
+    const leaveBtn = makeButton('Leave the hidden copies', '#f4f5fb', () => {
+      includeHidden = false;
+      refresh();
+    });
+    leaveBtn.type = 'button';
+    leaveBtn.id = 'pivit-skip-hidden';
+    leaveBtn.style.width = '100%';
+    leaveBtn.style.color = COLORS.ink;
+    leaveBtn.style.fontSize = '17px';
+    leaveBtn.style.padding = '12px 16px';
+    leaveBtn.style.whiteSpace = 'normal';
+    hiddenRow.appendChild(includeBtn);
+    hiddenRow.appendChild(leaveBtn);
+
+    const applyAllBtn = makeButton('All similar', COLORS.indigo, () => {
+      const found = matchesFor(input.value.trim());
+      const selector = selectorForAll(found);
       if (!found.valid || !selector) return;
       closeScopePanel();
-      showActionPopup(el, x, y, selector, 'similar');
+      showActionPopup(el, x, y, selector, found.nodes.length > 1 ? 'similar' : 'element');
     });
     applyAllBtn.id = 'pivit-similar-apply';
     applyAllBtn.style.width = '100%';
+    applyAllBtn.style.fontSize = '17px';
+    applyAllBtn.style.padding = '14px 16px';
     applyAllBtn.style.whiteSpace = 'normal';
 
-    const justBtn = makeButton('Just this element', '#f0f0f7', () => {
+    const justBtn = makeButton('Just this one', '#f0f0f7', () => {
+      if (!unique) return;
       closeScopePanel();
       showActionPopup(el, x, y, unique, 'element');
     });
     justBtn.id = 'pivit-similar-one';
     justBtn.style.width = '100%';
     justBtn.style.color = COLORS.ink;
+    justBtn.style.fontSize = '17px';
+    justBtn.style.padding = '14px 16px';
     justBtn.style.whiteSpace = 'normal';
-    const uniqueIsPositional = window.PivitRuntime
-      && typeof window.PivitRuntime.isPositionalSelector === 'function'
-      && window.PivitRuntime.isPositionalSelector(unique);
+    const uniqueStability = stabilityOf(unique);
     let justNote = null;
-    if (uniqueIsPositional && !selectorIsPositional) {
+    if (uniqueStability.unstable) {
       justNote = document.createElement('div');
       styleReset(justNote);
       justNote.id = 'pivit-positional-warning';
       Object.assign(justNote.style, {
-        fontSize: '15px', fontWeight: '650', lineHeight: '1.45', color: '#6a4b12',
+        fontSize: '16px', fontWeight: '650', lineHeight: '1.45', color: '#6a4b12',
         background: '#fff4e5', borderRadius: '8px', padding: '12px 14px',
       });
-      justNote.textContent = POSITION_WARNING;
+      justNote.textContent = STABILITY_WARNING[uniqueStability.kind] || POSITION_WARNING;
     }
 
     const cancelBtn = makeButton('Cancel', '#f0f0f7', () => closeScopePanel());
+    cancelBtn.type = 'button';
     cancelBtn.style.width = '100%';
     cancelBtn.style.color = '#6b6f83';
+    cancelBtn.style.fontSize = '16px';
 
     row.appendChild(applyAllBtn);
     row.appendChild(justBtn);
@@ -2701,24 +2960,24 @@
   function openEditTextPanel(el, selector) {
     const existingIdx = allChanges.findIndex((change) => change && change.type === 'text' && change.selector === selector);
     const current = existingIdx === -1
-      ? (el && typeof el.textContent === 'string' ? el.textContent : '')
+      ? readText(el)
       : String(allChanges[existingIdx].value || '');
     showEditorPanel({
       id: 'pivit-edit-text-panel',
       title: 'Edit text',
-      subtitle: selector,
+      subtitle: 'The words on this element. Icons inside it stay as they are.',
       fields: [{
         key: 'text',
         label: 'Text',
         value: current,
-        hint: "Replaces this element's text. Nested markup inside it is replaced by this text. No HTML. It is saved with the other changes and shown in preview.",
+        hint: 'Type the words visitors should see. No HTML. Icons and pictures inside this element stay as they are.',
       }],
       applyLabel: existingIdx === -1 ? 'Apply' : 'Save change',
       onApply: (values) => {
         const value = values.text;
         if (!String(value || '').trim()) return { error: 'Enter the text you want visitors to see.' };
         if (existingIdx === -1) {
-          if (el && value === el.textContent) return { error: 'Nothing changed yet.' };
+          if (el && value === readText(el)) return { error: 'Nothing changed yet.' };
           recordAndApply({ selector, type: 'text', value });
           return;
         }

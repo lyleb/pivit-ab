@@ -13,7 +13,8 @@ assert.ok(editorSrc.includes("label: 'HTML'"));
 assert.ok(editorSrc.includes("label: 'CSS'"));
 assert.ok(editorSrc.includes("label: 'JS'"));
 assert.ok(snippetSrc.includes("case 'text':"));
-assert.ok(snippetSrc.includes('el.textContent = change.value'));
+assert.ok(snippetSrc.includes('writeElementText(el, change.value)'));
+assert.ok(editorSrc.includes('writeText(el, change.value)'));
 
 const variantId = '11111111-1111-4111-8111-111111111111';
 const expId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -268,7 +269,7 @@ async function flush() {
   await flush();
   htmlEnv.document.getElementById('pivit-pick-btn').click();
   htmlEnv.dispatchClick(htmlEnv.headline);
-  findExact(htmlEnv.document.body, 'Just this element').click();
+  findExact(htmlEnv.document.body, 'Just this one').click();
   findExact(htmlEnv.document.body, '✎ Edit element').click();
   await flush();
   const htmlAreas = [];

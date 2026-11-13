@@ -260,7 +260,7 @@ async function flush() {
 function openDelete(env) {
   env.document.getElementById('pivit-pick-btn').click();
   env.dispatchClick(env.headline);
-  const one = findExact(env.document.body, 'Just this element');
+  const one = findExact(env.document.body, 'Just this one');
   assert.ok(one);
   one.click();
   const action = findExact(env.document.body, 'Delete element');

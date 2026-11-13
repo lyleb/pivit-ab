@@ -222,10 +222,13 @@
  * the page. Preference is a stable id, then a data attribute, a name, a unique
  * class combination, then a semantic attribute such as aria-label or href.
  * A positional selector is only the shortest path that still matches this
- * element alone. It is watched until it matches once, for up to ten seconds,
- * then left alone so a later insert does not move the change. Other selectors
- * stay watched after the first match, so a later render is updated once. The
- * page is not held blank for that wait.
+ * element alone. It is watched until it matches. After that, a node inserted
+ * in front does not take the change while the original is still on the page.
+ * If that node is replaced (hydration, or a route change that draws the
+ * screen again), the change is applied to the new node, up to a small cap.
+ * Other selectors stay watched after the first match, so a later render is
+ * updated once. The snippet's own DOM writes do not schedule another pass.
+ * The page is not held blank for that wait.
  */
 (function (root) {
   const ELEMENT_WAIT_MS = 4000;
@@ -437,7 +440,7 @@
   let ga4Experiments = [];
   let ga4Reporting = false;
   // Bump when editor.js changes so a cached copy cannot keep the old variant.
-  const EDITOR_VERSION = '20261113a';
+  const EDITOR_VERSION = '20261113b';
   // Bump when device-preview.js changes so a cached shell cannot skip JavaScript.
   const DEVICE_PREVIEW_VERSION = '20261021a';
 
@@ -684,10 +687,12 @@
   // Style, hide and delete on a non-positional selector become a <style>
   // rule (current and later matches, no per-element write). Text, HTML,
   // attributes and the structural types are applied to matches now and to
-  // elements added later. A positional selector is included in that watch
-  // until it matches once. A delete that matches nothing stays on the watch
-  // so a late render and a route change can still hide it, and so a preview
-  // can say the element never appeared.
+  // elements added later. A positional selector stays with the node it
+  // matched. A replacement of that node, including after a route change, is
+  // applied again, up to a small cap. A node inserted in front does not take
+  // the change while the original is still there. A delete that matches
+  // nothing stays on the watch so a late render and a route change can still
+  // hide it, and so a preview can say the element never appeared.
   let pageApplier = null;
   const variantRevision = Object.create(null);
   function rememberContentRevision(variant) {
@@ -709,7 +714,9 @@
   }
 
   // A route change can render the element this page gave up on. The same
-  // applier tries again. A positional change that already matched stays put.
+  // applier tries again, and a positional change whose node was replaced
+  // is applied to the new node. A node that is still on the page is left
+  // as it is, so the change is not written a second time.
   function rewatchPendingChanges() {
     if (pageApplier && typeof pageApplier.rewatchUnmatched === 'function') {
       pageApplier.rewatchUnmatched();
@@ -3362,6 +3369,10 @@
     const c = String(cls);
     if (/^css-[A-Za-z0-9_-]+$/.test(c)) return true;
     if (/^sc-[A-Za-z0-9]+$/.test(c)) return true;
+    if (/^jsx-\d+$/.test(c)) return true;
+    if (/^svelte-[a-z0-9]{3,}$/.test(c)) return true;
+    if (/^emotion-/.test(c)) return true;
+    if (/^go\d{4,}$/.test(c)) return true;
     if (/shopify-section-|template--\d+/i.test(c)) return true;
     if (/[a-f0-9]{8,}/i.test(c)) return true;
     const tail = c.split('__').pop();
@@ -3385,6 +3396,12 @@
   // How long a change that matches nothing keeps being watched. A route
   // change can start this again. The page is not hidden for this long.
   const WATCH_LIMIT_MS = 10000;
+  // Hydration and a route change may replace a positional match. Further
+  // replacements on the same view stop here so a render loop cannot run on.
+  const POSITIONAL_PASS_CAP = 6;
+  // Observer-driven applies per change. The first pass over the page does
+  // not count. A later list can still be updated; a feedback loop cannot.
+  const OBSERVER_APPLY_CAP = 150;
 
   function classTokens(el) {
     if (!el) return [];
@@ -3460,7 +3477,9 @@
     const value = String(id || '');
     if (!value) return false;
     if (value.indexOf(':') !== -1) return true;
-    return /^(?:headlessui|radix|mui-|react-|ember\d)/i.test(value);
+    if (/^(?:headlessui|radix|mui-|react-|ember\d|svelte-)/i.test(value)) return true;
+    if (/^[a-f0-9]{8,}$/i.test(value)) return true;
+    return isGeneratedClass(value);
   }
 
   function usableAttr(name, value) {
@@ -3696,6 +3715,77 @@
       }
     }
     return tag;
+  }
+
+  function unescapeCssIdent(token) {
+    return String(token || '')
+      .replace(/\\([0-9a-fA-F]{1,6})\s?/g, function (all, hex) {
+        const code = parseInt(hex, 16);
+        return code ? String.fromCharCode(code) : '';
+      })
+      .replace(/\\(.)/g, '$1');
+  }
+
+  // generated: an automatic class or id. long: a deep chain of elements.
+  // positional: a short position on the page. Empty kind means it looks steady.
+  function selectorStability(selector) {
+    const raw = String(selector || '').trim();
+    if (!raw) return { unstable: false, kind: '' };
+    const re = /([#.])((?:\\[0-9a-fA-F]{1,6}\s?|\\.|[^\s#.[\]>+~:,])+)/g;
+    let match;
+    while ((match = re.exec(raw))) {
+      const token = unescapeCssIdent(match[2]);
+      if (match[1] === '#' && (isGeneratedId(token) || isGeneratedClass(token))) {
+        return { unstable: true, kind: 'generated' };
+      }
+      if (match[1] === '.' && isGeneratedClass(token)) return { unstable: true, kind: 'generated' };
+    }
+    const childComb = (raw.match(/>/g) || []).length;
+    const nth = (raw.match(/:nth-(?:child|of-type|last-child|last-of-type)\b/g) || []).length;
+    const steps = raw.split(/\s*(?:>|\+|~)\s*|\s+/).filter(Boolean).length;
+    const positional = isPositionalSelector(raw);
+    if (childComb >= 3 || nth >= 2 || (positional && steps >= 5)) return { unstable: true, kind: 'long' };
+    if (positional) return { unstable: true, kind: 'positional' };
+    return { unstable: false, kind: '' };
+  }
+
+  function queryCount(queryAll, selector) {
+    if (!queryAll || !selector) return 0;
+    try {
+      const list = queryAll(selector);
+      return list && typeof list.length === 'number' ? list.length : 0;
+    } catch (err) {
+      return 0;
+    }
+  }
+
+  // A steadier selector for this element when the obvious one is generated
+  // or only a long path. Empty when nothing on the page is steadier.
+  function steadierSelector(el, queryAll) {
+    if (!el || !el.tagName || !queryAll) return '';
+    const general = generaliseSelector(el, queryAll);
+    if (general && !selectorStability(general).unstable) return general;
+    const stable = stableSelector(el, queryAll);
+    if (stable && !selectorStability(stable).unstable) return stable;
+    const tag = String(el.tagName).toLowerCase();
+    let node = el.parentElement;
+    let depth = 0;
+    while (node && node.nodeType === 1 && depth < 6) {
+      const parentTag = String(node.tagName || '').toUpperCase();
+      if (parentTag === 'BODY' || parentTag === 'HTML') break;
+      const pool = poolFor(classTokens(node)).filter((cls) => !isGeneratedClass(cls) && !isStateClass(cls));
+      if (pool.length) {
+        const sel = String(node.tagName).toLowerCase() + '.' + pool.map(cssEscape).join('.') + ' ' + tag;
+        if (!selectorStability(sel).unstable && queryCount(queryAll, sel) >= 1) return sel;
+      }
+      if (node.id && !isGeneratedId(node.id)) {
+        const sel = '#' + cssEscape(node.id) + ' ' + tag;
+        if (!selectorStability(sel).unstable && queryCount(queryAll, sel) >= 1) return sel;
+      }
+      node = node.parentElement;
+      depth += 1;
+    }
+    return '';
   }
 
   function kebab(prop) {
@@ -4284,12 +4374,133 @@
     for (let i = 0; i < tagged.length; i++) removeNode(tagged[i]);
   }
 
+  const TEXT_SKIP_TAGS = { svg: 1, script: 1, style: 1, noscript: 1, path: 1 };
+
+  function hasElementChild(el) {
+    const nodes = el && el.childNodes;
+    if (nodes && typeof nodes.length === 'number') {
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i] && nodes[i].nodeType === 1) return true;
+      }
+      return false;
+    }
+    return !!(el && el.children && el.children.length);
+  }
+
+  function collectTextNodes(el, out) {
+    const nodes = el && el.childNodes;
+    if (!nodes) return;
+    for (let i = 0; i < nodes.length; i++) {
+      const child = nodes[i];
+      if (!child) continue;
+      if (child.nodeType === 3) out.push(child);
+      else if (child.nodeType === 1) {
+        const tag = String(child.tagName || '').toLowerCase();
+        if (TEXT_SKIP_TAGS[tag]) continue;
+        collectTextNodes(child, out);
+      }
+    }
+  }
+
+  // The words a visitor reads. Icons and other elements are left out.
+  function readElementText(el) {
+    if (!el) return '';
+    if (!hasElementChild(el)) return String(el.textContent == null ? '' : el.textContent);
+    const nodes = [];
+    collectTextNodes(el, nodes);
+    const parts = [];
+    for (let i = 0; i < nodes.length; i++) {
+      const text = String(nodes[i].nodeValue == null ? '' : nodes[i].nodeValue).trim();
+      if (text) parts.push(text);
+    }
+    return parts.join(' ');
+  }
+
+  // Replace the words and leave icons and other child elements in place.
+  function writeElementText(el, value) {
+    const next = value == null ? '' : String(value);
+    if (!el) return;
+    if (!hasElementChild(el)) {
+      el.textContent = next;
+      return;
+    }
+    const nodes = [];
+    collectTextNodes(el, nodes);
+    const meaningful = [];
+    for (let i = 0; i < nodes.length; i++) {
+      if (String(nodes[i].nodeValue || '').trim()) meaningful.push(nodes[i]);
+    }
+    if (!meaningful.length) {
+      const owner = el.ownerDocument;
+      if (owner && typeof owner.createTextNode === 'function' && typeof el.appendChild === 'function') {
+        el.appendChild(owner.createTextNode(next));
+        return;
+      }
+      el.textContent = next;
+      return;
+    }
+    meaningful[0].nodeValue = next;
+    for (let i = 1; i < meaningful.length; i++) meaningful[i].nodeValue = '';
+  }
+
+  function inlineHidden(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (el.hidden === true) return true;
+    if (typeof el.hasAttribute === 'function' && el.hasAttribute('hidden')) return true;
+    if (typeof el.getAttribute === 'function' && String(el.getAttribute('aria-hidden') || '').toLowerCase() === 'true') return true;
+    const style = el.style;
+    if (style) {
+      const display = String(style.display || '').replace(/\s*!important\s*/i, '').trim().toLowerCase();
+      const visibility = String(style.visibility || '').replace(/\s*!important\s*/i, '').trim().toLowerCase();
+      if (display === 'none' || visibility === 'hidden' || visibility === 'collapse') return true;
+    }
+    return false;
+  }
+
+  function computedHidden(el) {
+    let view = null;
+    try {
+      const owner = el.ownerDocument;
+      view = owner && owner.defaultView;
+    } catch (err) { view = null; }
+    if ((!view || typeof view.getComputedStyle !== 'function') && typeof getComputedStyle === 'function') {
+      try { view = { getComputedStyle: getComputedStyle }; } catch (err) { view = null; }
+    }
+    if (!view || typeof view.getComputedStyle !== 'function') return false;
+    try {
+      const cs = view.getComputedStyle(el);
+      if (!cs) return false;
+      const display = String(cs.display || '').toLowerCase();
+      const visibility = String(cs.visibility || '').toLowerCase();
+      if (display === 'none' || visibility === 'hidden' || visibility === 'collapse') return true;
+    } catch (err) { return false; }
+    return false;
+  }
+
+  // True when this element, or a parent, is not shown at this screen size.
+  function isHiddenElement(el) {
+    let node = el;
+    let depth = 0;
+    while (node && node.nodeType === 1 && depth < 12) {
+      const tag = String(node.tagName || '').toUpperCase();
+      if (tag === 'HTML') break;
+      if (inlineHidden(node) || computedHidden(node)) return true;
+      node = node.parentElement;
+      depth += 1;
+    }
+    return false;
+  }
+
   function createApplier(doc, options) {
     const schedule = (options && options.schedule) || function (fn) {
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(fn);
       else setTimeout(fn, 50);
     };
     const Observer = (options && options.MutationObserver) || (typeof MutationObserver !== 'undefined' ? MutationObserver : null);
+    // The browser delivers mutation records as a microtask. The test double
+    // delivers them inside the write. Only the browser has to keep the mute
+    // until that microtask, or a node added in the same turn would be missed.
+    const observerIsAsync = !(options && options.MutationObserver);
     const skip = (options && options.skip) || function () { return false; };
     const setTimer = (options && options.setTimeout) || (typeof setTimeout === 'function' ? setTimeout : function () { return null; });
     const clearTimerFn = (options && options.clearTimeout) || (typeof clearTimeout === 'function' ? clearTimeout : function () {});
@@ -4298,23 +4509,116 @@
     const seen = new Set();
     const watched = [];
     const retired = [];
+    // Positional changes that have already matched. The original node is
+    // remembered so a later sibling does not inherit the change, and so a
+    // replacement of that node can be updated.
+    const settled = [];
+    const observerApplies = Object.create(null);
+    const deliveryHooks = [];
     let observer = null;
     let pending = [];
     let scheduled = false;
     let applying = 0;
+    let selfMute = 0;
+    let observerDepth = 0;
     let domApplies = 0;
     let watchTimer = null;
     let watchGeneration = 0;
+
+    function isSnippetChrome(node) {
+      if (!node || node.nodeType !== 1) return false;
+      const id = node.id || (node.getAttribute && node.getAttribute('id')) || '';
+      if (String(id).indexOf('pivit-') === 0) return true;
+      if (!node.getAttribute) return false;
+      if (node.getAttribute('data-pivit-css') != null) return true;
+      if (node.getAttribute('data-pivit-page-css') != null) return true;
+      return false;
+    }
+
+    // structural: this write can add or remove element nodes. A synchronous
+    // observer (the test double) runs inside fn and is ignored. A browser
+    // observer runs as a microtask, so the mute is held until that turn.
+    // A text write does not hold the mute, so a node added straight after
+    // still receives the change.
+    function runSelf(fn, structural) {
+      selfMute += 1;
+      let delivered = false;
+      const mark = function () { delivered = true; };
+      deliveryHooks.push(mark);
+      try {
+        return fn();
+      } finally {
+        const idx = deliveryHooks.indexOf(mark);
+        if (idx !== -1) deliveryHooks.splice(idx, 1);
+        if (delivered || !structural || !observerIsAsync) selfMute -= 1;
+        else if (typeof queueMicrotask === 'function') queueMicrotask(function () { selfMute = Math.max(0, selfMute - 1); });
+        else selfMute -= 1;
+      }
+    }
+
+    function matchedNodes(selector) {
+      try {
+        const list = doc.querySelectorAll(selector);
+        return list ? Array.prototype.slice.call(list) : [];
+      } catch (err) {
+        return [];
+      }
+    }
+
+    function trackedLive(entry) {
+      const nodes = entry && entry.nodes;
+      if (!nodes || !nodes.length) return false;
+      for (let i = 0; i < nodes.length; i++) {
+        if (!nodeLive(nodes[i])) return false;
+      }
+      return true;
+    }
+
+    function takePositional(entry) {
+      const nodes = matchedNodes(entry.change.selector);
+      for (let i = 0; i < settled.length; i++) {
+        if (settled[i].key === entry.key) {
+          settled[i].nodes = nodes;
+          settled[i].change = entry.change;
+          return;
+        }
+      }
+      settled.push({ change: entry.change, key: entry.key, nodes: nodes, passes: 1 });
+    }
+
+    function dropWatch(key) {
+      for (let i = watched.length - 1; i >= 0; i--) {
+        if (watched[i].key === key) watched.splice(i, 1);
+      }
+    }
+
+    // The original node has gone. Apply to whatever matches now, unless this
+    // view has already been replaced too many times. A route change resets
+    // that budget. A node that is still connected is left alone.
+    function reapplySettled(onRoute) {
+      for (let i = settled.length - 1; i >= 0; i--) {
+        const entry = settled[i];
+        if (trackedLive(entry)) continue;
+        if (!onRoute && entry.passes >= POSITIONAL_PASS_CAP) continue;
+        const found = matchedNodes(entry.change.selector);
+        if (!found.length) continue;
+        applyDomQuery(entry.change, entry.key, true);
+        entry.nodes = matchedNodes(entry.change.selector);
+        entry.passes = onRoute ? 1 : entry.passes + 1;
+      }
+    }
 
     function inject(css, key) {
       if (!css) return;
       const id = cssDomId(key);
       if (doc.getElementById && doc.getElementById(id)) return;
-      const styleEl = doc.createElement('style');
-      styleEl.id = id;
-      styleEl.setAttribute('data-pivit-css', '');
-      styleEl.textContent = css;
-      (doc.head || doc.documentElement).appendChild(styleEl);
+      runSelf(function () {
+        const styleEl = doc.createElement('style');
+        styleEl.id = id;
+        styleEl.setAttribute('data-pivit-css', '');
+        styleEl.textContent = css;
+        (doc.head || doc.documentElement).appendChild(styleEl);
+      }, true);
     }
 
     // One style tag per page_css change. A later apply with the same key
@@ -4332,11 +4636,13 @@
         return;
       }
       if (!css) return;
-      const styleEl = doc.createElement('style');
-      styleEl.id = id;
-      styleEl.setAttribute('data-pivit-page-css', '');
-      styleEl.textContent = css;
-      (doc.head || doc.documentElement).appendChild(styleEl);
+      runSelf(function () {
+        const styleEl = doc.createElement('style');
+        styleEl.id = id;
+        styleEl.setAttribute('data-pivit-page-css', '');
+        styleEl.textContent = css;
+        (doc.head || doc.documentElement).appendChild(styleEl);
+      }, true);
     }
 
     // Once per page view. The mark lives on the document, so a new applier
@@ -4477,14 +4783,25 @@
         // when two replays share a key. Missing or edited HTML is written again.
         if (track && already(el, key) && insertIsCurrent(doc, el, key, change)) return;
       } else if (track && already(el, key)) return;
+      if (isSnippetChrome(el)) return;
       if (domApplies > 500) { disconnect(); return; }
+      if (observerDepth > 0) {
+        const seenApplies = (observerApplies[key] || 0) + 1;
+        observerApplies[key] = seenApplies;
+        if (seenApplies > OBSERVER_APPLY_CAP) {
+          dropWatch(key);
+          return;
+        }
+      }
       domApplies += 1;
       if (track) mark(el, key);
+      const structural = change && (change.type === 'html' || change.type === 'replace' || change.type === 'remove' || change.type === 'duplicate' || change.type === 'insert_before' || change.type === 'insert_after' || change.type === 'js');
+      runSelf(function () {
       applying += 1;
       try {
         switch (change.type) {
           case 'text':
-            el.textContent = change.value;
+            writeElementText(el, change.value);
             break;
           case 'html':
             el.innerHTML = change.value;
@@ -4541,6 +4858,7 @@
         applying -= 1;
         if (applying === 0 && pending.length) scheduleFlush();
       }
+      }, structural);
     }
 
     function applyDomQuery(change, key, track) {
@@ -4597,21 +4915,25 @@
       observer = null;
     }
 
-    // A positional change leaves the watch list after it matches, so a node
-    // inserted in front does not take the change. Other selectors stay, so a
-    // later render of the same element is updated once. The mark stops the
-    // same node being written twice.
+    // A positional change leaves the active watch after it matches, and is
+    // remembered on settled. A node inserted in front does not take the
+    // change while the original is still connected. Other selectors stay
+    // watched, so a later render of the same element is updated once. The
+    // mark stops the same node being written twice.
     function settleWatches() {
       for (let i = watched.length - 1; i >= 0; i--) {
         const entry = watched[i];
         if (entry.matched) continue;
         if (matchCount(entry.change.selector) > 0) {
           entry.matched = true;
-          if (isPositionalSelector(entry.change.selector)) watched.splice(i, 1);
+          if (isPositionalSelector(entry.change.selector)) {
+            takePositional(entry);
+            watched.splice(i, 1);
+          }
         }
       }
       if (!hasUnmatched()) clearWatchTimer();
-      if (!watched.length) disconnectObserver();
+      if (!watched.length && !settled.length) disconnectObserver();
     }
 
     function onWatchLimit() {
@@ -4623,14 +4945,17 @@
         if (found > 0) {
           applyDomQuery(entry.change, entry.key, true);
           entry.matched = true;
-          if (isPositionalSelector(entry.change.selector)) watched.splice(i, 1);
+          if (isPositionalSelector(entry.change.selector)) {
+            takePositional(entry);
+            watched.splice(i, 1);
+          }
           continue;
         }
         missed.push(entry.change);
         retired.push(entry);
         watched.splice(i, 1);
       }
-      if (!watched.length) disconnectObserver();
+      if (!watched.length && !settled.length) disconnectObserver();
       missed.forEach((change) => {
         if (typeof onMissed !== 'function') return;
         try { onMissed(change); }
@@ -4653,7 +4978,13 @@
 
     function flush() {
       const batch = pending.splice(0, 40);
-      batch.forEach(processNode);
+      observerDepth += 1;
+      try {
+        batch.forEach(processNode);
+      } finally {
+        observerDepth -= 1;
+      }
+      reapplySettled(false);
       settleWatches();
       if (pending.length) scheduleFlush();
     }
@@ -4672,10 +5003,15 @@
       const target = doc.documentElement || doc;
       if (!target || !target.nodeType) return;
       observer = new Observer((records) => {
+        if (selfMute > 0) {
+          for (let h = 0; h < deliveryHooks.length; h++) deliveryHooks[h]();
+          return;
+        }
         records.forEach((record) => {
           const nodes = record.addedNodes || [];
           for (let i = 0; i < nodes.length; i++) {
-            if (nodes[i] && nodes[i].nodeType === 1) pending.push(nodes[i]);
+            const node = nodes[i];
+            if (node && node.nodeType === 1 && !isSnippetChrome(node)) pending.push(node);
           }
         });
         if (applying) return;
@@ -4706,7 +5042,10 @@
       if (!css) {
         const found = applyDomQuery(change, key, true);
         const matched = found > 0;
-        if (!positional || !matched) {
+        if (positional && matched) {
+          takePositional({ change: change, key: key });
+          ensureObserver();
+        } else if (!positional || !matched) {
           watched.push({ change: change, key: key, matched: matched });
           ensureObserver();
           if (!matched) armWatchLimit();
@@ -4736,7 +5075,7 @@
         return { checked: false, applied: false };
       }
       if (change.type === 'banner') {
-        try { applyBanner(doc, change, options); }
+        try { runSelf(function () { applyBanner(doc, change, options); }, true); }
         catch (err) { console.warn('[ab] banner change failed:', err); }
         return { checked: false, applied: false };
       }
@@ -4771,9 +5110,12 @@
       if (track) {
         const positional = isPositionalSelector(change.selector);
         const matched = found > 0;
-        // Keep watching a positional selector only until the first match.
-        // After that, a new node in the same slot must not take the change.
-        if (!positional || !matched) {
+        // Remember a positional match. A later sibling does not take the
+        // change while this node is still on the page. A replacement does.
+        if (positional && matched) {
+          takePositional({ change: change, key: key });
+          ensureObserver();
+        } else if (!positional || !matched) {
           watched.push({ change: change, key: key, matched: matched });
           ensureObserver();
           if (!matched) armWatchLimit();
@@ -4797,15 +5139,23 @@
     }
 
     function rewatchUnmatched() {
-      if (!retired.length) return;
+      Object.keys(observerApplies).forEach((key) => { delete observerApplies[key]; });
+      reapplySettled(true);
+      if (!retired.length) {
+        if (watched.length || settled.length) ensureObserver();
+        return;
+      }
       const again = retired.splice(0, retired.length);
       again.forEach((entry) => {
         const found = applyDomQuery(entry.change, entry.key, true);
         const positional = isPositionalSelector(entry.change.selector);
-        if (found > 0 && positional) return;
+        if (found > 0 && positional) {
+          takePositional(entry);
+          return;
+        }
         watched.push({ change: entry.change, key: entry.key, matched: found > 0 });
       });
-      if (watched.length) ensureObserver();
+      if (watched.length || settled.length) ensureObserver();
       clearWatchTimer();
       armWatchLimit();
     }
@@ -4814,6 +5164,7 @@
       clearWatchTimer();
       watched.length = 0;
       retired.length = 0;
+      settled.length = 0;
       disconnectObserver();
       clearBannerTimer(doc, options && options.clearInterval);
     }
@@ -4827,6 +5178,12 @@
     isStateClass,
     isGeneratedClass,
     isPositionalSelector,
+    isGeneratedId,
+    selectorStability,
+    steadierSelector,
+    isHiddenElement,
+    readElementText,
+    writeElementText,
     uniqueSelector,
     stableSelector,
     generaliseSelector,
@@ -4835,6 +5192,8 @@
     changeFromHtmlEdit,
     previewMissMessage,
     WATCH_LIMIT_MS,
+    POSITIONAL_PASS_CAP,
+    OBSERVER_APPLY_CAP,
     createApplier,
     clearInserted,
     applyBanner,

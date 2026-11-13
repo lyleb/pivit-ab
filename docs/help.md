@@ -153,6 +153,26 @@ To change or remove a change that is already in the list, choose **Apply without
 
 **Steps note** is a short reminder on the variant, such as "Click Continue twice". It is shown in the editor and in previews. Save it with the other changes.
 
+## Supported pages
+
+pivitlab can change the words and buttons on a page you own. A saved change is still there after a reload. The snippet runs again and applies it once.
+
+These pages work:
+
+- **A normal page.** The content is already in the page when it loads. The Fernhill shop at `https://demo.pivitlab.com/` is one of these.
+- **Content that appears a moment later.** pivitlab keeps looking, then applies the change when the element shows up.
+- **A single-page app.** This includes moving to another address, and the back and forward buttons. The Fernhill single-page shop at `https://site2-spa.netlify.app/` is one of these. The change is applied on the new screen. An element that already has the change is not changed again.
+- **A page that swaps an element for a fresh copy while it loads.** pivitlab applies the change to the new copy.
+
+While you are choosing an element, pivitlab highlights every match and says how many will change, for example “This change affects 6 elements.” Choose **All similar** or **Just this one**. If you clicked the words or an icon inside a button, choose the level, or use **Select parent**. If more copies are hidden on this screen size, pivitlab says so, and you choose whether those copies change too. If the name it found looks unreliable, it says so in plain words and offers a steadier choice when it has one.
+
+pivitlab cannot see or change these:
+
+- **A shadow root.** That is a closed-off part of the page, and the snippet cannot look inside it.
+- **An iframe.** That includes a payment form loaded from another site.
+- **A picture drawn on a canvas,** rather than words and buttons in the page.
+- **A checkout that belongs to someone else,** such as Hostinger's payment page. The change has to run on your own site.
+
 ## When a test starts
 
 Each test has **Start the test when…**.
