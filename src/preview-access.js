@@ -118,6 +118,12 @@ function publicIntegrationFlags(exp) {
   };
 }
 
+function publicRevision(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1 || n > 1000000) return 1;
+  return n;
+}
+
 function publicVariant(variant) {
   const row = {
     id: variant.id,
@@ -126,6 +132,9 @@ function publicVariant(variant) {
     traffic_split: variant.traffic_split,
     changes: variant.changes,
     goals: variant.goals,
+    // Revision 1 when the column is missing, so an older payload still has a
+    // number. Older snippets ignore the field.
+    content_revision: publicRevision(variant && variant.content_revision),
   };
   // Omitted when empty, so a variant with no note keeps the previous shape.
   // The preview reads it and shows "Steps: …". Older snippets ignore it.

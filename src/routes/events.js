@@ -7,6 +7,7 @@ const { scheduleEventDrop } = require('../event-drops');
 const { requestIsTestTraffic } = require('../test-traffic');
 const { captureDemoSample } = require('../demo-sample');
 const { publicScope } = require('../tenant');
+const { eventRevision } = require('../content-revision');
 const router = express.Router();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -73,7 +74,7 @@ router.post('/', async (req, res) => {
   try {
     const scope = await publicScope(req.body && req.body.site);
     const { rows } = await db.query(
-      `SELECT e.allowed_hosts, e.account_id, e.site_id, e.test_type
+      `SELECT e.allowed_hosts, e.account_id, e.site_id, e.test_type, v.content_revision
        FROM variants v
        JOIN experiments e ON e.id = v.experiment_id
        WHERE v.id = $1 AND v.experiment_id = $2`,
@@ -122,9 +123,10 @@ router.post('/', async (req, res) => {
     }
 
     const isTest = demo ? true : requestIsTestTraffic(req);
+    const revision = eventRevision(req.body && req.body.content_revision, row.content_revision);
     await db.query(
-      `INSERT INTO events (experiment_id, variant_id, visitor_id, event_type, goal_id, is_test, change_applied)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      `INSERT INTO events (experiment_id, variant_id, visitor_id, event_type, goal_id, is_test, change_applied, content_revision)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
         experiment_id,
         variant_id,
@@ -133,6 +135,7 @@ router.post('/', async (req, res) => {
         goal_id ?? null,
         isTest,
         storedChangeApplied(event_type, change_applied),
+        revision,
       ]
     );
     if (demo) {

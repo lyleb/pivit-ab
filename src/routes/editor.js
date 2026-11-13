@@ -12,6 +12,7 @@ const {
   expiredEditMessage,
 } = require('../editor-context');
 const { validateChanges } = require('../changes');
+const { recordContentRevision } = require('../content-revision');
 const { normaliseStepsNote } = require('../steps-note');
 const router = express.Router();
 
@@ -159,6 +160,15 @@ router.patch('/variants/:variantId', requireValidEditToken, async (req, res) => 
     if (current.experiment_status === 'archived') {
       await client.query('ROLLBACK');
       return res.status(409).json(archivedFromRow(req, current, archivedEditMessage(current.experiment_name)));
+    }
+    if (changes !== undefined) {
+      await recordContentRevision(client, {
+        experimentId: current.experiment_id,
+        variantId: req.params.variantId,
+        previousChanges: current.changes,
+        nextChanges: changes,
+        status: current.experiment_status,
+      });
     }
     const { rows } = await client.query(
       `UPDATE variants

@@ -142,6 +142,7 @@
       <h2 id="live-title">Results</h2>
       <p id="results-meta" class="muted"></p>
       <p id="results-msg" class="muted"></p>
+      <div id="revision-notice" hidden></div>
       <div id="plan-note"></div>
       <div id="results-live" hidden>
         <div id="bayesian-summary" class="result-summary" hidden></div>
@@ -670,6 +671,12 @@ async function loadLiveResults(exp) {
   if (!result.ok) {
     msgEl.textContent = result.message;
     return;
+  }
+  const revisionEl = document.getElementById('revision-notice');
+  if (revisionEl) {
+    const html = UI.renderRevisionNotice(result.data.revisions);
+    revisionEl.hidden = !html;
+    revisionEl.innerHTML = html || '';
   }
   const results = result.data.results || [];
   const reading = result.data.reading || {};

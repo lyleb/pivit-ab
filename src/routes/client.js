@@ -12,6 +12,7 @@ const { isDemo } = require('../demo-test');
 const { listForClient, detailForClient, owned } = require('../client-portal');
 const { requestReview } = require('../review-request');
 const { formatLondonDay, londonDateISO } = require('../clock');
+const { loadRevisionSummary } = require('../content-revision');
 const {
   MISSING,
   clientConclusionView,
@@ -153,11 +154,12 @@ router.get('/results/:experimentId', async (req, res) => {
     if (!experiment) return res.status(404).json({ error: 'no experiment found with that id' });
 
     const options = isDemo(experiment) ? { testOnly: true } : undefined;
-    const [{ results, primaryKey }, breakdown, funnel, gate] = await Promise.all([
+    const [{ results, primaryKey }, breakdown, funnel, gate, revisions] = await Promise.all([
       getVariantResults(req.params.experimentId, undefined, options),
       getGoalBreakdown(req.params.experimentId, options),
       getFunnel(req.params.experimentId, options),
       outcomeGate(req.params.experimentId, false, req.account.id),
+      loadRevisionSummary(req.params.experimentId, options),
     ]);
     const visible = gate.visible;
     let verdict = null;
@@ -182,6 +184,7 @@ router.get('/results/:experimentId', async (req, res) => {
       verdict,
       srmDetected: !!(gate.loaded && gate.loaded.srm && gate.loaded.srm.srm_detected),
       splitCheck: splitCheckFromVariants(gate.loaded && gate.loaded.srm, gate.loaded && gate.loaded.variants),
+      revisions,
     });
   } catch (err) {
     res.status(500).json(publicServerError(err));
