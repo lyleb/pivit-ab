@@ -238,7 +238,7 @@ function openDelete(env) {
     stopPropagation() {},
   };
   env.listeners.filter((row) => row.type === 'click').forEach((row) => row.fn(event));
-  findExact(env.document.body, 'Just this element').click();
+  findExact(env.document.body, 'Just this one').click();
   findExact(env.document.body, 'Delete element').click();
 }
 

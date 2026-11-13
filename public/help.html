@@ -36,6 +36,7 @@
     <li><a href="#audit">The audit log</a></li>
     <li><a href="#spa">Single-page apps</a></li>
     <li><a href="#editor-spa">Editing on a single-page app</a></li>
+    <li><a href="#supported-pages">Supported pages</a></li>
     <li><a href="#activation">When a test starts</a></li>
     <li><a href="#js-condition">JavaScript condition</a></li>
     <li><a href="#manual-activation">When the page calls pivit.activate</a></li>
@@ -175,6 +176,24 @@
   <p><strong>Browse</strong> sends clicks to the site. Use it to move through a checkout. <strong>Select</strong> picks an element.</p>
   <p>To change or remove a change that is already in the list, choose <strong>Apply without reloading</strong>. pivitlab runs the change list again on the screen you are on, so you stay on this step. <strong>Reload the page</strong> starts again at the first step. The editor says so before you reload.</p>
   <p><strong>Steps note</strong> is a short reminder on the variant, such as "Click Continue twice". It is shown in the editor and in previews. Save it with the other changes.</p>
+
+  <h2 id="supported-pages">Supported pages</h2>
+  <p>pivitlab can change the words and buttons on a page you own. A saved change is still there after a reload. The snippet runs again and applies it once.</p>
+  <p>These pages work:</p>
+  <ul>
+    <li><strong>A normal page.</strong> The content is already in the page when it loads. The Fernhill shop at <code>https://demo.pivitlab.com/</code> is one of these.</li>
+    <li><strong>Content that appears a moment later.</strong> pivitlab keeps looking, then applies the change when the element shows up.</li>
+    <li><strong>A single-page app.</strong> This includes moving to another address, and the back and forward buttons. The Fernhill single-page shop at <code>https://site2-spa.netlify.app/</code> is one of these. The change is applied on the new screen. An element that already has the change is not changed again.</li>
+    <li><strong>A page that swaps an element for a fresh copy while it loads.</strong> pivitlab applies the change to the new copy.</li>
+  </ul>
+  <p>While you are choosing an element, pivitlab highlights every match and says how many will change, for example “This change affects 6 elements.” Choose <strong>All similar</strong> or <strong>Just this one</strong>. If you clicked the words or an icon inside a button, choose the level, or use <strong>Select parent</strong>. If more copies are hidden on this screen size, pivitlab says so, and you choose whether those copies change too. If the name it found looks unreliable, it says so in plain words and offers a steadier choice when it has one.</p>
+  <p>pivitlab cannot see or change these:</p>
+  <ul>
+    <li><strong>A shadow root.</strong> That is a closed-off part of the page, and the snippet cannot look inside it.</li>
+    <li><strong>An iframe.</strong> That includes a payment form loaded from another site.</li>
+    <li><strong>A picture drawn on a canvas,</strong> rather than words and buttons in the page.</li>
+    <li><strong>A checkout that belongs to someone else,</strong> such as Hostinger's payment page. The change has to run on your own site.</li>
+  </ul>
 
   <h2 id="activation">When a test starts</h2>
   <p>Each test has <strong>Start the test when…</strong>.</p>
