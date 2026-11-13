@@ -394,6 +394,30 @@
     return `<div class="card"><h2>Changes</h2>${body}</div>`;
   }
 
+  function revisionLabel(value) {
+    const n = Number(value);
+    const revision = Number.isInteger(n) && n >= 1 ? n : 1;
+    return 'Revision ' + revision;
+  }
+
+  function renderRevisionNotice(summary) {
+    if (!summary) return '';
+    const changed = Array.isArray(summary.changed_while_running) ? summary.changed_while_running : [];
+    const spans = summary.spans === true;
+    if (!changed.length && !spans) return '';
+    const blocks = ['<h2 style="margin:0 0 8px;">Versions of this test</h2>'];
+    changed.forEach((row) => {
+      if (!row || !row.label) return;
+      blocks.push(`<p class="revision-lead" style="font-size:1.25rem;font-weight:750;margin:0 0 8px;">${escapeHtml(row.label)}</p>`);
+    });
+    if (spans) {
+      blocks.push(`<p style="font-size:1.05rem;margin:0 0 8px;">${escapeHtml(summary.notice || '')}</p>`);
+      const items = (summary.revisions || []).map((row) => `<li>${escapeHtml(row && row.line || '')}</li>`).join('');
+      if (items) blocks.push(`<ul style="margin:0;padding-left:1.2em;font-size:1.05rem;">${items}</ul>`);
+    }
+    return `<div class="revision-notice" role="status">${blocks.join('')}</div>`;
+  }
+
   function formatCreated(iso) {
     const date = new Date(iso);
     if (Number.isNaN(date.getTime())) return '';
@@ -1553,6 +1577,8 @@
     variantCapMessage,
     renderHealth,
     renderChangeApplied,
+    revisionLabel,
+    renderRevisionNotice,
     formatCreated,
     displayOrigin,
     snippetTag,

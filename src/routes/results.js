@@ -12,6 +12,7 @@ const { buildVerdict } = require('../verdict');
 const { ownedExperiment } = require('../tenant');
 const { countOptions } = require('../demo-test');
 const { csvFilename, sendCsv } = require('../csv');
+const { loadRevisionSummary } = require('../content-revision');
 const router = express.Router();
 
 router.use(requireAuth(['owner'])); // results are for your eyes only, not the public snippet
@@ -106,11 +107,12 @@ router.get('/:experimentId', async (req, res) => {
     if (!experiment) return;
     const read = prepared(experiment, req);
     const includeTest = read.includeTest;
-    const [{ results, primaryKey }, breakdown, testTraffic, funnel] = await Promise.all([
+    const [{ results, primaryKey }, breakdown, testTraffic, funnel, revisions] = await Promise.all([
       getVariantResults(experimentId, req.query.visitor_type, read.options),
       getGoalBreakdown(experimentId, read.options),
       summariseTestTraffic(experimentId),
       getFunnel(experimentId, read.options),
+      loadRevisionSummary(experimentId, read.options),
     ]);
 
     const gate = await outcomeGate(experimentId, includeTest, req.account.id);
@@ -128,6 +130,7 @@ router.get('/:experimentId', async (req, res) => {
       blinded: !visible,
       srmDetected: !!(gate.loaded && gate.loaded.srm && gate.loaded.srm.srm_detected),
       splitCheck: splitCheckFromVariants(gate.loaded && gate.loaded.srm, gate.loaded && gate.loaded.variants),
+      revisions,
     });
   } catch (err) {
     console.error(err);

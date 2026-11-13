@@ -22,6 +22,10 @@
  * A demo test (test_type "demo") is test traffic only. A real visitor is not
  * bucketed: no assignment, no change, no view. pivit_qa and v_pt still run.
  *
+ * Content revision: a view or conversion may include content_revision, the
+ * version of the variant that was applied. Older snippets omit it. The API
+ * then uses the revision stored on the variant. Clicks omit it.
+ *
  * Change applied: a view beacon may include change_applied true or false.
  * True means every element selector was on the page and the change ran.
  * The field is left off when the variant has no element change to check,
@@ -433,7 +437,7 @@
   let ga4Experiments = [];
   let ga4Reporting = false;
   // Bump when editor.js changes so a cached copy cannot keep the old variant.
-  const EDITOR_VERSION = '20261031b';
+  const EDITOR_VERSION = '20261113a';
   // Bump when device-preview.js changes so a cached shell cannot skip JavaScript.
   const DEVICE_PREVIEW_VERSION = '20261021a';
 
@@ -685,8 +689,17 @@
   // so a late render and a route change can still hide it, and so a preview
   // can say the element never appeared.
   let pageApplier = null;
+  const variantRevision = Object.create(null);
+  function rememberContentRevision(variant) {
+    if (!variant || variant.id == null) return;
+    const n = Number(variant.content_revision);
+    if (!Number.isInteger(n) || n < 1 || n > 1000000) return;
+    variantRevision[String(variant.id)] = n;
+  }
+
   function applyVariantChanges(variant, options) {
     if (!variant) return null;
+    rememberContentRevision(variant);
     if (!pageApplier) {
       const applierOptions = {};
       if (options && options.preview) applierOptions.onMissed = showPreviewMiss;
@@ -717,6 +730,8 @@
     if (eventType === 'view' && (changeApplied === true || changeApplied === false)) {
       fields.change_applied = changeApplied;
     }
+    const remembered = variantRevision[String(variantId)];
+    if (remembered) fields.content_revision = remembered;
     if (SITE_KEY) fields.site = SITE_KEY;
     const body = JSON.stringify(api.eventBody(fields, qaOn));
     // sendBeacon is fire-and-forget and survives page navigation, ideal for tracking calls.
@@ -2659,6 +2674,15 @@
     const id = fields.visitor_id;
     if (flagged || (typeof id === 'string' && id.indexOf('v_pt') === 0)) body.is_test = true;
     if (fields.site && /^site_[a-f0-9]{16,80}$/i.test(fields.site)) body.site = fields.site;
+    const revision = Number(fields.content_revision);
+    if (
+      (fields.event_type === 'view' || fields.event_type === 'convert')
+      && Number.isInteger(revision)
+      && revision >= 1
+      && revision <= 1000000
+    ) {
+      body.content_revision = revision;
+    }
     return body;
   }
 

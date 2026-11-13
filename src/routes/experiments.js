@@ -48,6 +48,7 @@ const {
   expiredPreviewMessage,
 } = require('../editor-context');
 const { validateChanges } = require('../changes');
+const { recordContentRevision } = require('../content-revision');
 const router = express.Router();
 
 async function noteDomainWarning(client, accountId, placed) {
@@ -275,7 +276,7 @@ router.get('/', async (req, res) => {
     }
 
     const { rows: variants } = await db.query(
-      `SELECT id, experiment_id, name, traffic_split, changes, goals, enabled, steps_note
+      `SELECT id, experiment_id, name, traffic_split, changes, goals, enabled, steps_note, content_revision
        FROM variants WHERE experiment_id = ANY($1::uuid[])
        ORDER BY created_at, id`,
       [experimentIds]
@@ -813,12 +814,29 @@ router.patch('/:id/variants/:variantId', async (req, res) => {
 
     await client.query('BEGIN');
     const owned = await client.query(
-      `SELECT id FROM experiments WHERE id = $1 AND account_id = $2`,
+      `SELECT id, status FROM experiments WHERE id = $1 AND account_id = $2 FOR UPDATE`,
       [id, req.account.id]
     );
     if (owned.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'no experiment found with that id' });
+    }
+    const currentVariant = await client.query(
+      `SELECT changes FROM variants WHERE id = $1 AND experiment_id = $2 FOR UPDATE`,
+      [variantId, id]
+    );
+    if (currentVariant.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'no variant found with that id on that experiment' });
+    }
+    if (Array.isArray(changes)) {
+      await recordContentRevision(client, {
+        experimentId: id,
+        variantId,
+        previousChanges: currentVariant.rows[0].changes,
+        nextChanges: changes,
+        status: owned.rows[0].status,
+      });
     }
     const { rows } = await client.query(
       `UPDATE variants SET name = $1, traffic_split = $2, changes = COALESCE($3::jsonb, changes)

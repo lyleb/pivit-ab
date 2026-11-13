@@ -30,6 +30,7 @@ const { applyDatalayerEvents } = require('./datalayer-events');
 const { applyElementActivationSelector } = require('./element-activation-selector');
 const { applyJoinCodes } = require('./join-codes');
 const { applyExperimentIntegrations } = require('./experiment-integrations');
+const { applyContentRevision } = require('./content-revision');
 
 const LOCK_KEY = 814021;
 
@@ -99,6 +100,9 @@ const VERSIONS = [
   // Per-experiment Send to GA4 and Count dataLayer events. Both default on,
   // so existing tests keep sending and counting. Stays out of schema.sql.
   { version: '024', name: 'experiment-integrations', run: applyExperimentIntegrations },
+  // Revision of variant content. Existing rows stay on revision 1. Old events
+  // keep a null revision and count as revision 1. Stays out of schema.sql.
+  { version: '025', name: 'content-revision', run: applyContentRevision },
 ];
 
 async function ensureMigrationsTable(queryable) {

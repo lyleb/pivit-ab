@@ -35,7 +35,10 @@
  * current screen. Reloading is still there, and it says that a reload goes
  * back to the first step. The working change list survives a reload via
  * sessionStorage, keyed by experiment id and variant id, so unsaved edits
- * aren't lost and aren't reused for a different test.
+ * aren't lost and aren't reused for a different test. The same buffer is
+ * also kept in localStorage, so a failed save is still there after the tab
+ * closes. Undo and redo cover the editing session. Reset puts the variant
+ * back to the last successful save.
  *
  * Browse lets clicks through to the site. Select picks an element. The line
  * under the switch says which one is on. pushState and replaceState keep
@@ -120,6 +123,13 @@
   let experimentStatus = '';
   let experimentStatusLabel = '';
   let editWarning = '';
+  let contentRevision = 1;
+  let history = null;
+  let historyQuiet = false;
+  let savePhase = 'idle';
+  let saveError = '';
+  let savedState = { changes: [], goals: [], stepsNote: '' };
+  let liveStateEl, revisionEl, saveErrorEl, saveErrorText, undoBtn, redoBtn;
   let goalsScope = 'shared';
   let pickingActive = false;
   let stepsNote = '';
@@ -521,6 +531,7 @@
           stepsNote: typeof parsed.stepsNote === 'string' ? parsed.stepsNote : null,
           experimentId: parsed.experimentId || '',
           variantId: parsed.variantId || '',
+          history: parsed.history && typeof parsed.history === 'object' ? parsed.history : null,
         };
       }
     } catch (e) { /* ignore malformed buffers */ }
@@ -532,43 +543,70 @@
     if (parsed.variantId && parsed.variantId !== VARIANT_ID) return false;
     return true;
   }
+  function workingPayload() {
+    return JSON.stringify({
+      experimentId,
+      variantId: VARIANT_ID,
+      changes: allChanges,
+      goals: allGoals,
+      stepsNote,
+      history: history ? history.toJSON() : null,
+    });
+  }
+  function browserStore(name) {
+    try { return name === 'local' ? localStorage : sessionStorage; }
+    catch (e) { return null; }
+  }
   function persistWorkingSet() {
-    try {
-      sessionStorage.setItem(storageKey(), JSON.stringify({
-        experimentId,
-        variantId: VARIANT_ID,
-        changes: allChanges,
-        goals: allGoals,
-        stepsNote,
-      }));
-    } catch (e) { /* ignore quota/privacy-mode errors */ }
+    const payload = workingPayload();
+    [browserStore('session'), browserStore('local')].forEach((store) => {
+      if (!store) return;
+      try { store.setItem(storageKey(), payload); } catch (e) { /* quota or private mode */ }
+    });
+  }
+  function readStoreItem(store, key) {
+    if (!store) return null;
+    try { return parseStored(store.getItem(key)); }
+    catch (e) { return null; }
   }
   function readPersistedWorkingSet() {
-    try {
-      const current = parseStored(sessionStorage.getItem(storageKey()));
-      if (storedIsForThisVariant(current)) return current;
-      const legacy = parseStored(sessionStorage.getItem(legacyStorageKey()));
-      if (storedIsForThisVariant(legacy)) return legacy;
-      return null;
-    } catch (e) { return null; }
+    const sessionStore = browserStore('session');
+    const localStore = browserStore('local');
+    const current = readStoreItem(sessionStore, storageKey());
+    if (storedIsForThisVariant(current)) return current;
+    const local = readStoreItem(localStore, storageKey());
+    if (storedIsForThisVariant(local)) return local;
+    const legacy = readStoreItem(sessionStore, legacyStorageKey());
+    if (storedIsForThisVariant(legacy)) return legacy;
+    const legacyLocal = readStoreItem(localStore, legacyStorageKey());
+    if (storedIsForThisVariant(legacyLocal)) return legacyLocal;
+    return null;
   }
   function clearPersistedWorkingSet() {
+    [browserStore('session'), browserStore('local')].forEach((store) => {
+      if (!store) return;
+      try {
+        store.removeItem(storageKey());
+        store.removeItem(legacyStorageKey());
+      } catch (e) { /* ignore */ }
+    });
+  }
+  function clearStoreKeys(store, keep) {
+    if (!store) return;
     try {
-      sessionStorage.removeItem(storageKey());
-      sessionStorage.removeItem(legacyStorageKey());
+      const current = parseStored(store.getItem(keep));
+      if (store.getItem(keep) && !storedIsForThisVariant(current)) store.removeItem(keep);
+      const keys = [];
+      for (let i = 0; i < store.length; i++) keys.push(store.key(i));
+      keys.forEach((key) => {
+        if (key && key.indexOf('pivit_editor_changes_') === 0 && key !== keep) store.removeItem(key);
+      });
     } catch (e) { /* ignore */ }
   }
   function clearStaleEditorState() {
     const keep = storageKey();
-    try {
-      const current = parseStored(sessionStorage.getItem(keep));
-      if (sessionStorage.getItem(keep) && !storedIsForThisVariant(current)) sessionStorage.removeItem(keep);
-      const keys = [];
-      for (let i = 0; i < sessionStorage.length; i++) keys.push(sessionStorage.key(i));
-      keys.forEach((key) => {
-        if (key && key.indexOf('pivit_editor_changes_') === 0 && key !== keep) sessionStorage.removeItem(key);
-      });
-    } catch (e) { /* ignore */ }
+    clearStoreKeys(browserStore('session'), keep);
+    clearStoreKeys(browserStore('local'), keep);
   }
 
   // Edit or remove on an EXISTING change can't reliably be undone in place —
@@ -648,6 +686,195 @@
   }
   function isDirty() {
     return currentSnapshot() !== savedSnapshot;
+  }
+
+  function cloneEditorState(state) {
+    const source = state && typeof state === 'object' ? state : {};
+    return {
+      changes: JSON.parse(JSON.stringify(Array.isArray(source.changes) ? source.changes : [])),
+      goals: JSON.parse(JSON.stringify(Array.isArray(source.goals) ? source.goals : [])),
+    };
+  }
+
+  function sameEditorState(left, right) {
+    return JSON.stringify(cloneEditorState(left)) === JSON.stringify(cloneEditorState(right));
+  }
+
+  function createEditorHistory(initial, serialized) {
+    const MAX = 50;
+    let past = [];
+    let present = cloneEditorState(initial);
+    let future = [];
+    if (serialized && serialized.present && typeof serialized.present === 'object') {
+      past = Array.isArray(serialized.past) ? serialized.past.map(cloneEditorState) : [];
+      present = cloneEditorState(serialized.present);
+      future = Array.isArray(serialized.future) ? serialized.future.map(cloneEditorState) : [];
+      if (past.length > MAX) past = past.slice(past.length - MAX);
+    }
+    function trim() {
+      if (past.length > MAX) past = past.slice(past.length - MAX);
+    }
+    return {
+      current: function () { return cloneEditorState(present); },
+      canUndo: function () { return past.length > 0; },
+      canRedo: function () { return future.length > 0; },
+      push: function (next) {
+        const incoming = cloneEditorState(next);
+        if (sameEditorState(present, incoming)) return false;
+        past.push(cloneEditorState(present));
+        trim();
+        present = incoming;
+        future = [];
+        return true;
+      },
+      undo: function () {
+        if (!past.length) return null;
+        future.push(cloneEditorState(present));
+        present = past.pop();
+        return cloneEditorState(present);
+      },
+      redo: function () {
+        if (!future.length) return null;
+        past.push(cloneEditorState(present));
+        trim();
+        present = future.pop();
+        return cloneEditorState(present);
+      },
+      replacePresent: function (next) {
+        present = cloneEditorState(next);
+      },
+      toJSON: function () {
+        return {
+          past: past.map(cloneEditorState),
+          present: cloneEditorState(present),
+          future: future.map(cloneEditorState),
+        };
+      },
+    };
+  }
+  /* end editor history */
+
+  function historyState() {
+    return { changes: allChanges, goals: allGoals };
+  }
+
+  function noteEdit() {
+    if (historyQuiet || !history) return;
+    history.push(historyState());
+    persistWorkingSet();
+    refreshToolbarState();
+  }
+
+  function applyHistory(state) {
+    if (!state) return;
+    historyQuiet = true;
+    allChanges = state.changes;
+    allGoals = state.goals;
+    historyQuiet = false;
+    replayOnPage();
+  }
+
+  function onUndo() {
+    if (!history || !history.canUndo()) return;
+    applyHistory(history.undo());
+  }
+
+  function onRedo() {
+    if (!history || !history.canRedo()) return;
+    applyHistory(history.redo());
+  }
+
+  function typingTarget(target) {
+    if (!target || !target.tagName) return false;
+    const tag = target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    return target.isContentEditable === true;
+  }
+
+  function onEditorKey(event) {
+    if (!event || !(event.metaKey || event.ctrlKey)) return;
+    const key = String(event.key || '').toLowerCase();
+    if (key !== 'z') return;
+    if (typingTarget(event.target)) return;
+    event.preventDefault();
+    if (typeof event.stopPropagation === 'function') event.stopPropagation();
+    if (event.shiftKey) onRedo();
+    else onUndo();
+  }
+
+  function installEditorKeys() {
+    if (installEditorKeys.done) return;
+    installEditorKeys.done = true;
+    document.addEventListener('keydown', onEditorKey, true);
+  }
+
+  function cloneSaved(state) {
+    const source = state || {};
+    return {
+      changes: JSON.parse(JSON.stringify(Array.isArray(source.changes) ? source.changes : [])),
+      goals: JSON.parse(JSON.stringify(Array.isArray(source.goals) ? source.goals : [])),
+      stepsNote: String(source.stepsNote || ''),
+    };
+  }
+
+  function revisionLabel(value) {
+    const n = Number(value);
+    const revision = Number.isInteger(n) && n >= 1 ? n : 1;
+    return 'Revision ' + revision;
+  }
+
+  function liveWord() {
+    if (experimentStatus === 'running') return 'Live';
+    if (experimentStatus === 'paused') return 'Paused';
+    return 'Draft';
+  }
+
+  function liveDetail() {
+    if (experimentStatus === 'running') return 'Visitors can see this test now.';
+    if (experimentStatus === 'paused') return 'This test is paused. Visitors are not seeing it.';
+    return 'This is a draft. Visitors are not seeing it yet.';
+  }
+
+  function paintSaveState() {
+    if (!countEl) return;
+    let label = 'Saved';
+    let colour = '#0b7a62';
+    if (savePhase === 'saving') {
+      label = 'Saving…';
+      colour = COLORS.ink;
+    } else if (savePhase === 'failed') {
+      label = 'Save failed';
+      colour = COLORS.danger;
+    } else if (isDirty()) {
+      label = 'Unsaved changes';
+      colour = '#8a5a00';
+    }
+    countEl.textContent = label;
+    countEl.style.color = colour;
+    countEl.style.fontWeight = '700';
+    countEl.style.fontSize = '16px';
+    if (saveErrorEl) {
+      const show = savePhase === 'failed';
+      saveErrorEl.style.display = show ? 'block' : 'none';
+      if (saveErrorText) {
+        saveErrorText.textContent = saveError || 'The save did not go through. Your changes are still here.';
+      }
+    }
+    if (revisionEl) revisionEl.textContent = revisionLabel(contentRevision);
+    if (liveStateEl) liveStateEl.textContent = liveWord();
+  }
+
+  function paintHistoryButtons() {
+    if (!undoBtn || !redoBtn || !history) return;
+    undoBtn.disabled = !history.canUndo();
+    redoBtn.disabled = !history.canRedo();
+    undoBtn.style.opacity = undoBtn.disabled ? '0.45' : '1';
+    redoBtn.style.opacity = redoBtn.disabled ? '0.45' : '1';
+  }
+
+  function changesConfirmed(sent, returned) {
+    if (!Array.isArray(returned)) return false;
+    return canon(sent || []) === canon(returned);
   }
 
   // --- UI: a single floating root element, all children styled inline to stay
@@ -769,6 +996,34 @@
     title.style.marginBottom = '2px';
     title.textContent = 'pivitlab editor';
     toolbar.appendChild(title);
+
+    liveStateEl = document.createElement('div');
+    styleReset(liveStateEl);
+    liveStateEl.id = 'pivit-live-state';
+    liveStateEl.textContent = liveWord();
+    Object.assign(liveStateEl.style, {
+      fontSize: '18px', fontWeight: '750', marginTop: '8px',
+      color: experimentStatus === 'running' ? '#0b7a62' : COLORS.ink,
+    });
+    toolbar.appendChild(liveStateEl);
+
+    const liveDetailEl = document.createElement('div');
+    styleReset(liveDetailEl);
+    liveDetailEl.id = 'pivit-live-detail';
+    liveDetailEl.textContent = liveDetail();
+    Object.assign(liveDetailEl.style, {
+      fontSize: '14px', lineHeight: '1.4', color: COLORS.ink, margin: '2px 0 8px',
+    });
+    toolbar.appendChild(liveDetailEl);
+
+    revisionEl = document.createElement('div');
+    styleReset(revisionEl);
+    revisionEl.id = 'pivit-revision';
+    revisionEl.textContent = revisionLabel(contentRevision);
+    Object.assign(revisionEl.style, {
+      fontSize: '16px', fontWeight: '700', marginBottom: '10px', color: COLORS.ink,
+    });
+    toolbar.appendChild(revisionEl);
 
     const identity = document.createElement('div');
     styleReset(identity);
@@ -926,17 +1181,75 @@
     goalsListEl.style.marginTop = '6px';
     toolbar.appendChild(goalsListEl);
 
+    const historyRow = document.createElement('div');
+    styleReset(historyRow);
+    historyRow.id = 'pivit-history-actions';
+    Object.assign(historyRow.style, { display: 'flex', gap: '6px', marginTop: '8px' });
+    undoBtn = makeButton('Undo', '#f0f0f7', onUndo);
+    redoBtn = makeButton('Redo', '#f0f0f7', onRedo);
+    [undoBtn, redoBtn].forEach((btn) => {
+      btn.style.flex = '1';
+      btn.style.color = COLORS.ink;
+      btn.style.fontSize = '14px';
+    });
+    undoBtn.id = 'pivit-undo';
+    redoBtn.id = 'pivit-redo';
+    undoBtn.setAttribute('aria-keyshortcuts', 'Control+Z Meta+Z');
+    redoBtn.setAttribute('aria-keyshortcuts', 'Control+Shift+Z Meta+Shift+Z');
+    historyRow.appendChild(undoBtn);
+    historyRow.appendChild(redoBtn);
+    toolbar.appendChild(historyRow);
+
     countEl = document.createElement('div');
     styleReset(countEl);
-    countEl.style.fontSize = '12px';
+    countEl.id = 'pivit-save-state';
+    countEl.setAttribute('role', 'status');
+    countEl.style.fontSize = '16px';
+    countEl.style.fontWeight = '700';
     countEl.style.color = '#6b6f83';
-    countEl.style.margin = '8px 0';
+    countEl.style.margin = '10px 0';
     toolbar.appendChild(countEl);
 
+    saveErrorEl = document.createElement('div');
+    styleReset(saveErrorEl);
+    saveErrorEl.id = 'pivit-save-error';
+    saveErrorEl.setAttribute('role', 'alert');
+    Object.assign(saveErrorEl.style, {
+      display: 'none', background: '#fdeaea', color: '#8a2d2d', borderRadius: '8px',
+      padding: '12px', marginBottom: '10px', fontSize: '15px', lineHeight: '1.45', fontWeight: '650',
+    });
+    saveErrorText = document.createElement('div');
+    styleReset(saveErrorText);
+    saveErrorText.id = 'pivit-save-error-text';
+    saveErrorEl.appendChild(saveErrorText);
+    const retryBtn = makeButton('Retry', COLORS.indigo, onSave);
+    retryBtn.id = 'pivit-save-retry';
+    retryBtn.style.width = '100%';
+    retryBtn.style.marginTop = '8px';
+    saveErrorEl.appendChild(retryBtn);
+    toolbar.appendChild(saveErrorEl);
+
     const saveBtn = makeButton('💾 Save', COLORS.mint, onSave);
+    saveBtn.id = 'pivit-save';
     saveBtn.style.width = '100%';
     saveBtn.style.color = COLORS.ink;
     toolbar.appendChild(saveBtn);
+
+    const resetBtn = makeButton('Reset this variant', '#f0f0f7', resetVariant);
+    resetBtn.id = 'pivit-reset-variant';
+    resetBtn.style.width = '100%';
+    resetBtn.style.color = COLORS.ink;
+    resetBtn.style.marginTop = '8px';
+    resetBtn.style.fontSize = '14px';
+    toolbar.appendChild(resetBtn);
+
+    const removeAllBtn = makeButton('Remove all changes', '#fdeaea', removeAllChanges);
+    removeAllBtn.id = 'pivit-remove-all';
+    removeAllBtn.style.width = '100%';
+    removeAllBtn.style.color = COLORS.danger;
+    removeAllBtn.style.marginTop = '8px';
+    removeAllBtn.style.fontSize = '14px';
+    toolbar.appendChild(removeAllBtn);
 
     const previewRow = document.createElement('div');
     styleReset(previewRow);
@@ -961,6 +1274,7 @@
     hint.textContent = 'Preview shows the last save, not unsaved edits. Desktop, tablet and mobile run the saved variant, including a banner and whole-page CSS and JavaScript.';
     toolbar.appendChild(hint);
 
+    installEditorKeys();
     refreshToolbarState();
   }
 
@@ -1097,8 +1411,7 @@
       const removeBtn = makeButton('Remove', '#fdeaea', () => {
         if (!confirm(`Remove this goal?\n\n${describeGoal(goal)}`)) return;
         allGoals.splice(idx, 1);
-        persistWorkingSet();
-        refreshToolbarState(); // goals don't touch the page, so no reload needed
+        noteEdit(); // goals don't touch the page, so no reload needed
       });
       Object.assign(removeBtn.style, { color: COLORS.danger, fontSize: '11px', padding: '5px 10px' });
       row.appendChild(removeBtn);
@@ -1118,6 +1431,7 @@
     catch (err) { nodes = []; }
     nodes.forEach(showElement);
     allChanges.splice(idx, 1);
+    noteEdit();
     replayOnPage();
   }
 
@@ -1127,14 +1441,15 @@
     if (!spaEditing()) {
       if (!confirm(`Remove this change?\n\n${describeChange(change)}\n\nThe page will reload to show the result.`)) return;
       allChanges.splice(idx, 1);
+      noteEdit();
       finishExistingEdit();
       return;
     }
     showReplayChoice({
       title: 'Remove this change?',
       detail: describeChange(change) + '\n\n' + REPLAY_WARNING,
-      onApply: () => { allChanges.splice(idx, 1); replayOnPage(); },
-      onReload: () => { allChanges.splice(idx, 1); reloadAndReplay(); },
+      onApply: () => { allChanges.splice(idx, 1); noteEdit(); replayOnPage(); },
+      onReload: () => { allChanges.splice(idx, 1); noteEdit(); reloadAndReplay(); },
     });
   }
 
@@ -1157,6 +1472,7 @@
         const value = v.v.trim();
         if (!value) return { error: "This can't be empty — use Remove on the list entry to delete the change." };
         allChanges[idx] = { ...allChanges[idx], value };
+        noteEdit();
         finishExistingEdit();
       },
     });
@@ -1171,7 +1487,8 @@
   }
 
   function refreshToolbarState() {
-    countEl.textContent = isDirty() ? '● Unsaved changes' : '✓ All changes saved';
+    paintSaveState();
+    paintHistoryButtons();
     if (customCssBtn) customCssBtn.textContent = variantStylesheetIndex() === -1 ? 'Custom CSS' : 'Edit custom CSS';
     if (bannerBtn) bannerBtn.textContent = bannerChangeIndex() === -1 ? 'Insert banner' : 'Edit banner';
     paintModeSwitch();
@@ -1676,6 +1993,7 @@
     const without = allChanges.filter((item) => !item || item.type !== 'banner');
     without.splice(insertAt, 0, change);
     allChanges = without;
+    noteEdit();
     finishExistingEdit();
   }
 
@@ -1951,11 +2269,13 @@
         }
         if (!css) {
           allChanges.splice(idx, 1);
+          noteEdit();
           finishExistingEdit();
           return;
         }
         if (css === String(allChanges[idx].value || '').trim()) return { error: 'Nothing changed yet.' };
         allChanges[idx] = { ...allChanges[idx], type: 'stylesheet', selector: '', value: css };
+        noteEdit();
         finishExistingEdit();
       },
     });
@@ -2114,8 +2434,7 @@
     if (applier) applier.applyOne(change, key);
     else applyChange(change, key);
     allChanges.push(change);
-    persistWorkingSet();
-    refreshToolbarState();
+    noteEdit();
   }
 
   // --- Editor panel: one generic panel used everywhere. With several fields it
@@ -2369,6 +2688,7 @@
         const before = allChanges.slice(0, oldIdx[0]);
         const after = allChanges.slice(oldIdx[0]).filter((_, j) => !oldSet.has(oldIdx[0] + j));
         allChanges = before.concat(finalSet, after);
+        noteEdit();
         finishExistingEdit();
       },
     });
@@ -2404,6 +2724,7 @@
         }
         if (value === String(allChanges[existingIdx].value || '')) return { error: 'Nothing changed yet.' };
         allChanges[existingIdx] = { ...allChanges[existingIdx], type: 'text', selector, value };
+        noteEdit();
         finishExistingEdit();
       },
     });
@@ -2469,6 +2790,7 @@
         const at = insertAt - removedBefore;
         const block = [cssChange, jsChange].filter(Boolean);
         allChanges = kept.slice(0, at).concat(block, kept.slice(at));
+        noteEdit();
         finishExistingEdit();
       },
     });
@@ -2551,8 +2873,7 @@
         if (!label || label.length > 100) return { error: 'Give the goal a name of 100 characters or fewer.' };
         if (allGoals.some((g) => (g.name || g.id) === label)) return { error: `A goal called "${label}" already exists — choose a different name.` };
         allGoals.push({ type: 'click', selector, id: newGoalId(), name: label });
-        persistWorkingSet();
-        refreshToolbarState();
+        noteEdit();
       },
     });
   }
@@ -2581,8 +2902,7 @@
         if (!label || label.length > 100) return { error: 'Give the goal a name of 100 characters or fewer.' };
         if (allGoals.some((g) => (g.name || g.id) === label)) return { error: `A goal called "${label}" already exists — choose a different name.` };
         allGoals.push({ type: 'element', selector, id: newGoalId(), name: label });
-        persistWorkingSet();
-        refreshToolbarState();
+        noteEdit();
       },
     });
   }
@@ -2601,23 +2921,149 @@
     });
   }
 
+  function askConfirm(opts) {
+    return new Promise((resolve) => {
+      closeActionPopup();
+      if (panelEl) panelEl.remove();
+      let settled = false;
+      function finish(value) {
+        if (settled) return;
+        settled = true;
+        if (panelEl) { panelEl.remove(); panelEl = null; }
+        resolve(value);
+      }
+      panelEl = document.createElement('div');
+      panelEl.id = opts.id;
+      panelEl.setAttribute('role', 'alertdialog');
+      panelEl.setAttribute('aria-modal', 'true');
+      styleReset(panelEl);
+      Object.assign(panelEl.style, {
+        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+        zIndex: String(Z), background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: '12px',
+        boxShadow: '0 12px 40px rgba(19,23,35,0.25)', padding: '24px', width: '460px', maxWidth: '92vw',
+        color: COLORS.ink, fontSize: '16px', lineHeight: '1.45',
+      });
+      ['keydown', 'keyup', 'keypress'].forEach((evt) => panelEl.addEventListener(evt, (e) => e.stopPropagation()));
+      document.body.appendChild(panelEl);
+
+      const title = document.createElement('div');
+      styleReset(title);
+      title.style.fontWeight = '750';
+      title.style.fontSize = '20px';
+      title.style.marginBottom = '10px';
+      title.textContent = opts.title;
+      panelEl.appendChild(title);
+
+      const detail = document.createElement('div');
+      styleReset(detail);
+      detail.id = opts.id + '-detail';
+      detail.style.fontSize = '18px';
+      detail.style.lineHeight = '1.45';
+      detail.style.marginBottom = '16px';
+      detail.textContent = opts.detail;
+      panelEl.appendChild(detail);
+
+      const row = document.createElement('div');
+      styleReset(row);
+      Object.assign(row.style, { display: 'flex', gap: '8px' });
+      const yes = makeButton(opts.confirmLabel, COLORS.indigo, () => finish(true));
+      yes.id = opts.id + '-yes';
+      yes.style.flex = '1';
+      yes.style.fontSize = '16px';
+      const no = makeButton(opts.cancelLabel, '#f0f0f7', () => finish(false));
+      no.id = opts.id + '-no';
+      no.style.flex = '1';
+      no.style.color = COLORS.ink;
+      no.style.fontSize = '16px';
+      row.appendChild(yes);
+      row.appendChild(no);
+      panelEl.appendChild(row);
+    });
+  }
+
+  async function resetVariant() {
+    const yes = await askConfirm({
+      id: 'pivit-reset-confirm',
+      title: 'Reset this variant?',
+      detail: 'This puts the variant back to the last saved version and clears unsaved changes.',
+      confirmLabel: 'Reset this variant',
+      cancelLabel: 'Cancel',
+    });
+    if (!yes) return;
+    const saved = cloneSaved(savedState);
+    allChanges = saved.changes;
+    allGoals = saved.goals;
+    stepsNote = saved.stepsNote;
+    if (stepsInput) stepsInput.value = stepsNote;
+    savePhase = 'idle';
+    saveError = '';
+    noteEdit();
+    replayOnPage();
+  }
+
+  async function removeAllChanges() {
+    if (!allChanges.length) return;
+    const yes = await askConfirm({
+      id: 'pivit-remove-confirm',
+      title: 'Remove all changes?',
+      detail: 'This clears every change on this variant. Nothing is saved until you press Save. You can undo this.',
+      confirmLabel: 'Remove all changes',
+      cancelLabel: 'Cancel',
+    });
+    if (!yes) return;
+    allChanges = [];
+    noteEdit();
+    replayOnPage();
+  }
+
   // --- Save ---
   async function onSave() {
-    statusEl.textContent = 'Saving…';
+    if (savePhase === 'saving') return;
+    if (experimentStatus === 'running') {
+      const yes = await askConfirm({
+        id: 'pivit-live-save-confirm',
+        title: 'Save this live test?',
+        detail: 'This will change the live test for visitors now.',
+        confirmLabel: 'Save the live test',
+        cancelLabel: 'Cancel',
+      });
+      if (!yes) return;
+    }
+    savePhase = 'saving';
+    saveError = '';
+    if (statusEl) statusEl.textContent = '';
+    refreshToolbarState();
     try {
-      await saveWorkingSet(allChanges, allGoals);
+      const body = await saveWorkingSet(allChanges, allGoals);
+      if (!body || body.error || !changesConfirmed(allChanges, body.changes)) {
+        throw new Error('The saved test does not match this edit. Your changes are still here.');
+      }
+      if (typeof body.steps_note === 'string') {
+        stepsNote = body.steps_note;
+        if (stepsInput) stepsInput.value = stepsNote;
+      }
+      if (Array.isArray(body.goals)) allGoals = body.goals;
+      const reported = Number(body.content_revision);
+      if (Number.isInteger(reported) && reported >= 1) contentRevision = reported;
       savedSnapshot = currentSnapshot();
+      savedState = cloneSaved({ changes: allChanges, goals: allGoals, stepsNote });
+      if (history) history.replacePresent(historyState());
       clearPersistedWorkingSet();
+      savePhase = 'idle';
+      saveError = '';
       refreshToolbarState();
-      statusEl.textContent = 'Saved ✓';
-      setTimeout(() => { if (statusEl && statusEl.textContent === 'Saved ✓') statusEl.textContent = ''; }, 2000);
     } catch (err) {
       if (err.body && err.body.code === 'archived') {
         showExpiredNotice(err.body);
         if (root && root.parentNode) root.parentNode.removeChild(root);
         return;
       }
-      statusEl.textContent = `Save failed: ${err.message}`;
+      savePhase = 'failed';
+      saveError = err && err.message
+        ? err.message
+        : 'The save did not go through. Your changes are still here.';
+      persistWorkingSet();
+      refreshToolbarState();
     }
   }
 
@@ -2651,19 +3097,34 @@
       const serverChanges = Array.isArray(variant.changes) ? variant.changes : [];
       const serverGoals = Array.isArray(variant.goals) ? variant.goals : [];
       stepsNote = typeof variant.steps_note === 'string' ? variant.steps_note : '';
+      const reportedRevision = Number(variant.content_revision);
+      contentRevision = Number.isInteger(reportedRevision) && reportedRevision >= 1 ? reportedRevision : 1;
+      savedState = cloneSaved({
+        changes: serverChanges,
+        goals: serverGoals,
+        stepsNote: stepsNote.replace(/\s+/g, ' ').trim(),
+      });
       savedSnapshot = canon({
         changes: serverChanges,
         goals: serverGoals,
-        steps_note: stepsNote.replace(/\s+/g, ' ').trim(),
+        steps_note: savedState.stepsNote,
       });
 
       // A working set left over from a reload-and-replay (an in-progress,
       // not-yet-saved edit) takes precedence over what's on the server, but
       // only when it was stored for this experiment and this variant.
+      // localStorage is the fallback when the tab was closed after a failed save.
       const persisted = readPersistedWorkingSet();
       allChanges = persisted ? persisted.changes : serverChanges;
       allGoals = persisted && persisted.goals !== null ? persisted.goals : serverGoals;
       if (persisted && typeof persisted.stepsNote === 'string') stepsNote = persisted.stepsNote;
+      const bootState = historyState();
+      if (persisted && persisted.history) {
+        history = createEditorHistory(bootState, persisted.history);
+        if (!sameEditorState(history.current(), bootState)) history = createEditorHistory(bootState);
+      } else {
+        history = createEditorHistory(bootState);
+      }
       clearStaleEditorState();
       if (persisted) persistWorkingSet();
 
