@@ -95,7 +95,7 @@ nav.links a:hover{color:var(--ink)}
 .beta-pill{display:inline-flex;align-items:center;gap:8px;padding:6px 12px 6px 8px;border:1px solid var(--border);border-radius:999px;background:rgba(23,26,34,.7);font-size:.82rem;color:var(--muted);margin-bottom:24px}
 .beta-pill .dot{width:8px;height:8px;border-radius:50%;background:var(--mint);box-shadow:0 0 0 4px rgba(2,222,181,.18)}
 .hero h1{font-size:3.6rem;line-height:1.04;letter-spacing:-0.035em}
-.hero h1 .accent{background:linear-gradient(92deg,var(--mint) 0%,#8f7bff 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero h1 .accent{color:#fff}
 .hero .sub{font-size:1.2rem;color:#c3c6d4;margin-top:22px;max-width:540px}
 .hero .ctas{display:flex;gap:12px;margin-top:34px;flex-wrap:wrap}
 .hero .ctas .btn{min-height:50px;padding:13px 24px;font-size:1rem}
@@ -274,7 +274,6 @@ footer nav{display:flex;gap:22px;flex-wrap:wrap}
 <section class="hero">
   <div class="wrap">
     <div>
-      <div class="beta-pill"><span class="dot"></span>Private beta · invite only</div>
       <h1>A/B testing without the <span class="accent">enterprise baggage</span>.</h1>
       <p class="sub">Test a change on your website and get an honest answer. pivitlab plans the test with you, keeps the score hidden until there's enough data, then tells you plainly: Win, Loss or Inconclusive.</p>
       <div class="ctas">
@@ -551,7 +550,7 @@ footer nav{display:flex;gap:22px;flex-wrap:wrap}
         <div id="turnstile-slot"></div>
         <button class="btn btn-primary" type="submit">Request access</button>
         <p class="form-error" id="req-error" role="alert"></p>
-        <p class="where">Your request goes straight to the pivitlab team, not a mailing list. We'll only use your details to reply. <a href="/privacy.html">Privacy notice</a></p>
+        <p class="where">Your request goes straight to the pivitlab team, not a mailing list. We'll only use your details to reply. <a href="/privacy">Privacy notice</a></p>
       </form>
       <div class="thanks" id="thanks" role="status">
         <div class="tick">✓</div>
@@ -608,8 +607,8 @@ footer nav{display:flex;gap:22px;flex-wrap:wrap}
       <span>© 2026</span>
     </div>
     <nav aria-label="Footer">
-      <a href="/privacy.html">Privacy</a>
-      <a href="/legal.html">Terms</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
       <button type="button" class="cookie-settings" data-cookie-settings>Cookie settings</button>
       <a href="mailto:info@pivitlab.com">info@pivitlab.com</a>
       <a href="/login.html">Sign in</a>

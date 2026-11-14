@@ -20,6 +20,8 @@ const CONSENT_DEFAULT = [
 const PUBLIC_PAGES = [
   'src/pages/landing.html',
   'public/privacy.html',
+  'public/privacy-notice.html',
+  'public/terms.html',
   'public/legal.html',
 ];
 

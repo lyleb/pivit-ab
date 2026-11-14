@@ -18,7 +18,8 @@ function pageChecks() {
   assert.ok(signup.includes('Work email'));
   assert.ok(signup.includes('Your website'));
   assert.ok(signup.includes('By continuing you agree to the'));
-  assert.ok(signup.includes('/legal.html'));
+  assert.ok(signup.includes('href="/terms"'));
+  assert.ok(signup.includes('href="/privacy"'));
   assert.ok(check.includes('Check your email'));
   assert.ok(check.includes('6-digit code'));
   assert.ok(check.includes('Resend in'));

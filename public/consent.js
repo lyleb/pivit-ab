@@ -142,7 +142,7 @@
     var more = doc.createElement('p');
     more.className = 'pivit-consent-more';
     var privacy = doc.createElement('a');
-    privacy.href = '/privacy.html#cookies';
+    privacy.href = '/privacy#cookies';
     privacy.textContent = 'Privacy';
     more.appendChild(privacy);
 

@@ -157,6 +157,8 @@ To change or remove a change that is already in the list, choose **Apply without
 
 pivitlab can change the words and buttons on a page you own. A saved change is still there after a reload. The snippet runs again and applies it once.
 
+**Safe failure.** If pivitlab is slow, or cannot be reached, the page stays as it was. The page is never left blank for more than 3 seconds, and visitors can still click, type and buy. If the site has no cookie banner, pivitlab works as it does today. If someone refuses analytics cookies, pivitlab does not store a visitor id and does not send results. If they withdraw that permission during the visit, pivitlab stops storing and sending from that moment.
+
 These pages work:
 
 - **A normal page.** The content is already in the page when it loads. The Fernhill shop at `https://demo.pivitlab.com/` is one of these.

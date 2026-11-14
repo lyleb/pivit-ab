@@ -1,0 +1,105 @@
+<!-- The text on this page should be reviewed by a solicitor. -->
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script>
+window.dataLayer=window.dataLayer||[];
+function gtag(){dataLayer.push(arguments);}
+gtag('consent','default',{analytics_storage:'denied',ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied'});
+</script>
+<meta name="robots" content="noindex, nofollow">
+<link rel="canonical" href="https://pivitlab.com/privacy">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/svg+xml" href="/assets/pivitlab-icon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<title>pivitlab — Privacy notice</title>
+<link rel="stylesheet" href="/assets/pivit.css?v=5">
+<link rel="stylesheet" href="/consent.css?v=2">
+<style>
+  .legal-wrap { font-size: 1.125rem; line-height: 1.55; }
+  .legal-wrap h1 { font-size: 2rem; margin: 12px 0; }
+  .legal-wrap h2 { font-size: 1.35rem; margin-top: 28px; }
+  .legal-wrap p, .legal-wrap li { margin: 12px 0; }
+  .legal-wrap ul { padding-left: 1.2em; }
+</style>
+</head>
+<body>
+<div class="legal-wrap">
+  <a href="/" aria-label="pivitlab home"><span class="brand-logo" role="img" aria-label="pivitlab"></span></a>
+  <h1>Privacy notice</h1>
+  <p>Last updated: 14 November 2026</p>
+  <p>This notice says what pivitlab collects, why, and what you can ask us to do. It is written in plain English for people in the UK.</p>
+
+  <h2>Who we are</h2>
+  <p>pivitlab is a UK service for running A/B tests on a website. The operating entity is <strong>[Company name / sole trader name]</strong>. You can email us at <a href="mailto:info@pivitlab.com">info@pivitlab.com</a>.</p>
+  <p>For visitor data collected on a customer’s own website, pivitlab is the processor and the customer is the controller. For account data (the people who sign in to pivitlab), pivitlab is the controller.</p>
+
+  <h2>What we collect</h2>
+  <p><strong>Account data.</strong> When you ask for access, sign up, or are invited, we keep the details you give us, such as your name, work email, and website. We also keep a record of sign-in, your role (Owner, Member, or Viewer), and the tests you set up.</p>
+  <p><strong>Site visitor data.</strong> The snippet a customer pastes into their site can store a random visitor id, which variant that visitor was shown, page views, and goal events such as a click. It does not collect visitors’ names. A visit marked as a test (with <code>?pivit_qa=1</code>) is labelled so it can be left out of the results.</p>
+  <p>We do not ask the snippet to read the contents of a form, a payment page that belongs to someone else, or anything inside a closed-off part of the page.</p>
+
+  <h2>Why we use it</h2>
+  <ul>
+    <li>To run the account: sign-in, invites, and keeping each agency’s tests separate.</li>
+    <li>To run a test and show the results to the customer who set it up.</li>
+    <li>To keep the service reliable, including backups and a record of important account actions.</li>
+    <li>On pivitlab.com itself, to see how the public pages are used, and only after you click Accept.</li>
+  </ul>
+
+  <h2>Legal bases under UK GDPR</h2>
+  <ul>
+    <li><strong>Contract.</strong> We use account data to provide the service you signed up for.</li>
+    <li><strong>Legitimate interests.</strong> We use account and security records to keep the service safe, to answer a support email, and to understand whether the product is working. You can object.</li>
+    <li><strong>Consent.</strong> On a customer’s site, storing a visitor id and sending test results generally needs consent under PECR, unless the customer has a lawful reason not to ask. The customer’s own cookie banner is what collects that choice. On pivitlab.com, analytics cookies run only after Accept.</li>
+  </ul>
+  <p>The customer decides the lawful basis for testing on their site, and must say so in their own privacy notice. pivitlab does not put a consent banner on the customer’s site.</p>
+
+  <h2>Cookies and local storage</h2>
+  <p id="cookies"><strong>On a customer’s site, the snippet may use:</strong></p>
+  <ul>
+    <li><code>_ab_visitor_id</code> in local storage: a random id, not a name.</li>
+    <li><code>_ab_assign_…</code> in local storage: which variant that visitor was shown.</li>
+    <li><code>_ab_click_…</code>, <code>_ab_element_…</code>, <code>_ab_custom_…</code> and <code>_ab_converted_…</code> in local storage: so the same goal is counted once.</li>
+    <li><code>pivit_qa</code> in local storage and as a first-party cookie: only when the address includes <code>?pivit_qa=1</code>, to mark a test visit. <code>?pivit_qa=0</code> clears it.</li>
+  </ul>
+  <p>The snippet does not set an expiry on those local storage keys. They stay until the browser clears site data. If analytics consent is refused, or is withdrawn during the visit, the snippet does not write these and does not send results.</p>
+  <p><strong>In the pivitlab app:</strong></p>
+  <ul>
+    <li>A sign-in cookie, <code>pivit.sid</code> (in production, <code>__Host-pivit.sid</code>). It keeps you signed in. An Owner or Member session ends after 30 days without use, and never lasts more than 90 days from sign-in. A platform admin session lasts 12 hours.</li>
+  </ul>
+  <p><strong>On the public pivitlab pages</strong> (this site, not a customer’s site): before you choose, analytics and advertising storage are denied. Nothing is sent to Google or Microsoft until you click Accept. Reject loads nothing. The choice is stored in local storage as <code>pivitlab_analytics_consent</code> (<code>granted</code> or <code>denied</code>). That is not a cookie, and the code sets no expiry. Accept then loads Google Tag Manager, container <code>GTM-KZCDC3HJ</code>, which contains Google Analytics 4 (<code>G-NT78JHVHGY</code>) and Microsoft Clarity. Those can set <code>_ga</code>, <code>_ga_*</code>, <code>_clck</code> and <code>_clsk</code>. Choosing Reject after Accept sets consent back to denied and deletes those cookies where the browser allows. Cookie settings on this page lets you choose again.</p>
+
+  <h2>Who else handles the data</h2>
+  <p>We use these suppliers. They are the ones this product is built to call:</p>
+  <ul>
+    <li><strong>Railway</strong> hosts the app and the database.</li>
+    <li><strong>Postmark</strong> sends sign-in and invite email.</li>
+    <li><strong>Cloudflare R2</strong> stores database backups. Backups are kept for 30 days unless that setting is changed.</li>
+    <li><strong>Cloudflare Turnstile</strong> can check a form is not a bot. It runs only when it has been switched on.</li>
+    <li><strong>Google</strong> (Tag Manager and Analytics 4) and <strong>Microsoft</strong> (Clarity) on the public pivitlab pages, and only after Accept.</li>
+    <li><strong>Google Analytics 4 on a customer’s site</strong>, only when that customer turns on Send to GA4. The snippet sends one event through the Google tag already on their site. pivitlab does not receive a copy of that Google hit.</li>
+    <li>[Any other supplier]</li>
+  </ul>
+
+  <h2>How long we keep it</h2>
+  <p>We keep account data while the account is open, and sign-in sessions only for the times above. Visitor events stay in the account so the customer can read the test. [How long test results are kept after an account closes.] Local storage on a visitor’s browser stays until that browser clears it. Database backups are kept for 30 days by default.</p>
+
+  <h2>International transfers</h2>
+  <p>Some of the suppliers above store data outside the UK, including in the United States. Where a transfer needs a safeguard under UK GDPR, the safeguard we rely on is [transfer safeguard to confirm].</p>
+
+  <h2>Your rights</h2>
+  <p>You can ask to see the personal data we hold about you, to correct it, to delete it, to limit how it is used, to object, and, where it applies, to receive a copy you can move. Email <a href="mailto:info@pivitlab.com">info@pivitlab.com</a>. If the data is about a visit to a customer’s site, the customer is the controller and may be the right place to start. We will help them answer.</p>
+  <p>You can complain to the Information Commissioner’s Office (ICO) at <a href="https://ico.org.uk">ico.org.uk</a>. We would like the chance to put things right first.</p>
+
+  <h2>Changes</h2>
+  <p>If this notice changes, we will update the date at the top. If a change is important, we will also say so by email to account holders.</p>
+
+  <p><a href="/">Back to pivitlab</a> · <a href="/terms">Terms of use</a> · <button type="button" class="cookie-settings" data-cookie-settings>Cookie settings</button></p>
+</div>
+<script src="/consent.js?v=1"></script>
+</body>
+</html>

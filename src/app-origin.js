@@ -40,6 +40,8 @@ const CANONICAL_PAGES = {
   '/join.html': { file: 'join.html', pathname: '/join.html' },
   '/legal.html': { file: 'legal.html', pathname: '/legal.html' },
   '/privacy.html': { file: 'privacy.html', pathname: '/privacy.html' },
+  '/privacy': { file: 'privacy-notice.html', pathname: '/privacy' },
+  '/terms': { file: 'terms.html', pathname: '/terms' },
   '/help.html': { file: 'help.html', pathname: '/help.html' },
 };
 
