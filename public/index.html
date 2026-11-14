@@ -118,6 +118,7 @@
   .choice[aria-pressed="true"]:hover { background: rgba(86,53,251,0.26); border-color: var(--indigo); color: var(--ink); }
   .choice:focus { outline: none; }
   .choice:focus-visible { outline: 2px solid var(--indigo); outline-offset: 3px; }
+  .live-timing { font-size: 18px; line-height: 1.45; margin: 12px 0 0; max-width: 40rem; }
   @media (max-width: 720px) {
     .choice-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
@@ -567,6 +568,8 @@
       <a class="nav-item" href="/help.html">Help</a>
     </nav>
     <div class="sidebar-foot">
+      <a class="nav-item" href="/privacy">Privacy</a>
+      <a class="nav-item" href="/terms">Terms</a>
       <button type="button" class="nav-item" id="logout-all">Sign out everywhere</button>
       <button type="button" class="nav-item" onclick="logout()">Log out</button>
     </div>
@@ -974,6 +977,7 @@
         <div>
           <h1>Start &amp; pause</h1>
           <p class="hint" style="margin:4px 0 0;">Same control as an experiment’s Settings tab. Day to day, open the experiment and use Start, Pause or Settings.</p>
+          <p class="live-timing" id="status-live-timing">A start, a pause, or a rollback goes live on the next page load. Pausing stops the variant for every new page load. A tab that is already open keeps what it has until that person reloads.</p>
         </div>
       </div>
       <section class="card" style="max-width:640px;">
@@ -3374,6 +3378,7 @@ function renderDetail() {
         <div class="card">
           <div class="kicker">Status</div>
           <div class="status-big">${UI.escapeHtml(exp.status[0].toUpperCase() + exp.status.slice(1))}</div>
+          <p class="live-timing" id="live-timing-note">${UI.escapeHtml(UI.liveTimingNote(0))}</p>
           <p class="hint" id="overview-event-line">Created ${UI.escapeHtml(created)} · Checking activity…</p>
           ${UI.isDemoTest(exp) ? `<p class="hint">${UI.escapeHtml(UI.demoRuntimeNote())} A demo test cannot be switched to live. Real visitors are ignored.</p>` : ''}
         </div>
@@ -3595,6 +3600,7 @@ function renderDetail() {
           ${statusOptions}
         </select>
         <p class="hint">Start and pause from here, or use the button on the experiment. Archive is separate, and nothing is archived unless you choose it.</p>
+        <p class="live-timing">${UI.escapeHtml(UI.liveTimingNote(0))}</p>
         ${UI.isDemoTest(exp) ? `<p class="hint">${UI.escapeHtml(UI.demoRuntimeNote())} A demo test cannot be switched to live.</p>` : ''}
         <div class="inline-actions" style="margin-top:16px;">
           <button type="button" data-action="save-settings">Save</button>
@@ -4051,7 +4057,7 @@ async function patchVariant(variant, fields) {
 
 async function commitStatus(id, status) {
   if (!id) return { ok: false, message: 'Select an experiment above first.' };
-  if (status === 'paused' && !confirm('Pause this experiment? New visitors will stop being assigned.')) {
+  if (status === 'paused' && !confirm('Pause this experiment? New page loads will show the original page. A tab that is already open keeps what it has until that person reloads.')) {
     return { ok: false, cancelled: true };
   }
   if (status === 'archived' && !confirm('Archive this experiment? It leaves the live set. You can still read results.')) {

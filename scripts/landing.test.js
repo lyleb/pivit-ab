@@ -36,7 +36,7 @@ function staticChecks() {
   const on = landingHtml();
   assert.ok(on.includes('id="req-form"'));
   assert.ok(on.includes('name="pivit_hp"'));
-  assert.ok(on.includes('href="/privacy.html"'));
+  assert.ok(on.includes('href="/privacy"'));
   assert.ok(on.includes(hearBack));
   assert.ok(!on.includes('Request access: <a href="mailto:info@pivitlab.com">email info@pivitlab.com</a>'));
   const source = read('src/pages/landing.html');
