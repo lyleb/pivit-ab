@@ -25,9 +25,9 @@ Basic A/B testing platform: snippet + API + results dashboard.
 
 The public landing page at `/` is the only page that should be indexed, together with `/sitemap.xml`. It sends no `X-Robots-Tag`, and its robots meta is `index, follow`. The canonical link is `https://pivitlab.com/` (or `APP_ORIGIN` when that is set). The title, description and Open Graph tags are on that page. The share image is `/assets/og-pivitlab.png`.
 
-Every other response, including `/index.html` (the dashboard), `/login.html`, `/privacy.html`, `/legal.html`, the viewer page (`/client.html`), `/owner`, `/api`, `/snippet` and `/health`, sends `X-Robots-Tag: noindex, nofollow`. The app HTML pages repeat that in a robots meta tag. `robots.txt` disallows `/api/`, `/snippet/` and `/owner`, so the HTML stays crawlable and Google can read the noindex. It also has one sitemap line: `Sitemap: https://pivitlab.com/sitemap.xml`. The sitemap lists only `https://pivitlab.com/`.
+Every other response, including `/index.html` (the dashboard), `/login.html`, `/privacy`, `/terms`, the viewer page (`/client.html`), `/owner`, `/api`, `/snippet` and `/health`, sends `X-Robots-Tag: noindex, nofollow`. `/privacy.html` redirects to `/privacy`, and `/legal.html` redirects to `/terms`. The app HTML pages repeat that in a robots meta tag. `robots.txt` disallows `/api/`, `/snippet/` and `/owner`, so the HTML stays crawlable and Google can read the noindex. It also has one sitemap line: `Sitemap: https://pivitlab.com/sitemap.xml`. The sitemap lists only `https://pivitlab.com/`.
 
-The landing page form does not collect anything until `ACCESS_REQUESTS_ENABLED` is set (see `.env.example` and [docs/signup.md](docs/signup.md)). Until then it asks people to email info@pivitlab.com. `/privacy.html` is a placeholder for Lyle's wording.
+The landing page form does not collect anything until `ACCESS_REQUESTS_ENABLED` is set (see `.env.example` and [docs/signup.md](docs/signup.md)). Until then it asks people to email info@pivitlab.com. The privacy notice is at `/privacy`.
 
 ## How it works
 

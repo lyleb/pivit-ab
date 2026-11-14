@@ -14,11 +14,14 @@ function pageChecks() {
   const signup = read('signup.html');
   const check = read('check-email.html');
   const interstitial = read('sign-in.html');
-  const legal = read('legal.html');
+  const terms = fs.readFileSync(path.join(__dirname, '../public/terms.html'), 'utf8');
   assert.ok(signup.includes('Work email'));
   assert.ok(signup.includes('Your website'));
   assert.ok(signup.includes('By continuing you agree to the'));
-  assert.ok(signup.includes('/legal.html'));
+  assert.ok(signup.includes('href="/terms"'));
+  assert.ok(signup.includes('href="/privacy"'));
+  assert.ok(terms.includes('pivitlab is a service run by Go2Media'));
+  assert.ok(!/\[[A-Z][^\]]+\]/.test(terms));
   assert.ok(check.includes('Check your email'));
   assert.ok(check.includes('6-digit code'));
   assert.ok(check.includes('Resend in'));
@@ -28,9 +31,6 @@ function pageChecks() {
   assert.ok(interstitial.includes('>Sign in<'));
   assert.ok(interstitial.indexOf("addEventListener('submit'") < interstitial.indexOf("fetch('/api/auth/magic'"));
   assert.ok(!interstitial.includes('DOMContentLoaded'));
-  assert.ok(legal.includes('Placeholder for Lyle to write'));
-  assert.ok(legal.includes('beta-2026-10-09'));
-  assert.ok(legal.includes('This page is a placeholder'));
   const flow = fs.readFileSync(path.join(__dirname, '../src/auth-flow.js'), 'utf8');
   assert.ok(flow.includes("const TERMS_VERSION = 'beta-2026-10-09'"));
 }

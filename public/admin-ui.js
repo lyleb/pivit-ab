@@ -152,6 +152,23 @@
     return null;
   }
 
+  // cacheMs is the snippet's config cache. 0 means the next page load, because
+  // the snippet asks again every time and does not keep the answer.
+  function liveTimingNote(cacheMs) {
+    const ms = Number(cacheMs);
+    let when = 'on the next page load';
+    if (Number.isFinite(ms) && ms >= 1000) {
+      if (ms >= 60000) {
+        const minutes = Math.max(1, Math.round(ms / 60000));
+        when = minutes === 1 ? 'within 1 minute' : `within ${minutes} minutes`;
+      } else {
+        const seconds = Math.max(1, Math.round(ms / 1000));
+        when = seconds === 1 ? 'within 1 second' : `within ${seconds} seconds`;
+      }
+    }
+    return `A start, a pause, or a rollback goes live ${when}. Pausing stops the variant for every new page load. A tab that is already open keeps what it has until that person reloads.`;
+  }
+
   // A read that started before a confirmed write must not paint the old status.
   // A read that started after the write is the newer server state.
   function displayedStatus(readStatus, confirm, readStartedAt) {
@@ -1555,6 +1572,7 @@
     overviewBanner,
     showNextSteps,
     statusAction,
+    liveTimingNote,
     displayedStatus,
     PLAN_PRESETS,
     plannerChoice,

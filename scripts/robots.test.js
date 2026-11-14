@@ -84,8 +84,6 @@ const pagesOnDisk = {
   'check-email.html': 'https://pivitlab.com/check-email.html',
   'sign-in.html': 'https://pivitlab.com/sign-in.html',
   'join.html': 'https://pivitlab.com/join.html',
-  'legal.html': 'https://pivitlab.com/legal.html',
-  'privacy.html': 'https://pivitlab.com/privacy.html',
   'help.html': 'https://pivitlab.com/help.html',
 };
 for (const [file, href] of Object.entries(pagesOnDisk)) {
@@ -120,15 +118,16 @@ assert.ok(landingFile.includes('og:locale" content="en_GB"'));
 assert.ok(landingFile.includes('https://pivitlab.com/assets/og-pivitlab.png'));
 assert.ok(landingFile.includes('https://heclr.com'));
 assert.ok(landingFile.includes('Built by'));
-assert.ok(landingFile.includes('href="/privacy.html"'));
-assert.ok(landingFile.includes('href="/legal.html"'));
+assert.ok(landingFile.includes('href="/privacy"'));
+assert.ok(landingFile.includes('href="/terms"'));
 assert.ok(landingFile.includes('Request access: <a href="mailto:info@pivitlab.com">email info@pivitlab.com</a>'));
 assert.ok(fs.existsSync(path.join(__dirname, '../public/assets/og-pivitlab.png')));
-const privacy = fs.readFileSync(path.join(__dirname, '../public/privacy.html'), 'utf8');
-assert.ok(privacy.includes('Placeholder for Lyle to write'));
-assert.ok(privacy.includes("Lyle's wording"));
+assert.ok(!fs.existsSync(path.join(__dirname, '../public/privacy.html')));
+assert.ok(!fs.existsSync(path.join(__dirname, '../public/legal.html')));
 
 const serverSource = fs.readFileSync(path.join(__dirname, '../src/server.js'), 'utf8');
+assert.ok(serverSource.includes('legacyLegalRedirect'));
+assert.ok(serverSource.indexOf('legacyLegalRedirect') < serverSource.indexOf('express.static('));
 const robotsUse = serverSource.indexOf('app.use(robotsTagMiddleware)');
 const corsUse = serverSource.indexOf('app.use(cors(');
 const robotsRoute = serverSource.indexOf("app.get('/robots.txt', sendRobotsTxt)");
@@ -158,6 +157,7 @@ function buildApp() {
   app.get('/robots.txt', sendRobotsTxt);
   app.get('/sitemap.xml', sendSitemap);
   app.get('/', sendLandingPage);
+  app.use(origin.legacyLegalRedirect);
   app.use(origin.canonicalHtmlMiddleware);
   app.use('/snippet', express.static(path.join(__dirname, '../snippet')));
   app.use(express.static(path.join(__dirname, '../public')));
@@ -198,8 +198,6 @@ function get(port, urlPath, headers) {
       '/check-email.html': 'http://127.0.0.1:3000/check-email.html',
       '/sign-in.html': 'http://127.0.0.1:3000/sign-in.html',
       '/join.html': 'http://127.0.0.1:3000/join.html',
-      '/legal.html': 'http://127.0.0.1:3000/legal.html',
-      '/privacy.html': 'http://127.0.0.1:3000/privacy.html',
       '/help.html': 'http://127.0.0.1:3000/help.html',
     };
 
@@ -225,7 +223,14 @@ function get(port, urlPath, headers) {
     assert.strictEqual(home.headers['cache-control'], 'private, no-store');
     assert.ok(home.body.includes('id="invite-card"') === false);
 
-    const headerPaths = ['/index.html', '/login.html', '/client.html', '/privacy.html', '/snippet/ab.js', '/api/config', '/health'];
+    const privacyMoved = await get(port, '/privacy.html');
+    assert.strictEqual(privacyMoved.status, 301);
+    assert.strictEqual(privacyMoved.headers.location, '/privacy');
+    const termsMoved = await get(port, '/legal.html');
+    assert.strictEqual(termsMoved.status, 301);
+    assert.strictEqual(termsMoved.headers.location, '/terms');
+
+    const headerPaths = ['/index.html', '/login.html', '/client.html', '/snippet/ab.js', '/api/config', '/health'];
     for (const urlPath of headerPaths) {
       const res = await get(port, urlPath);
       assert.strictEqual(res.status, 200, urlPath);

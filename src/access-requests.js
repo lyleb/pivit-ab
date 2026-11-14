@@ -1,8 +1,7 @@
 // Access requests from the public landing page. Stored next to invite
 // codes. Each new row emails an alert through Postmark. If that send does
 // not go out, the owner home page gets a notice instead. The form stays
-// off until ACCESS_REQUESTS_ENABLED is set, because the privacy page is
-// still a placeholder.
+// off until ACCESS_REQUESTS_ENABLED is set. The privacy notice is at /privacy.
 
 const db = require('./db');
 const { normaliseEmail, customerHost, createInvite, requestIp } = require('./auth-flow');

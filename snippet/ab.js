@@ -122,9 +122,14 @@
  * Snippet" popover) is also installed in <head>, it hides the page via an
  * `ab-hide` class on <html>. This file removes that class as soon as DOM
  * changes are applied, so the reveal happens as fast as possible rather than
- * waiting for anything else (e.g. goal-checking) to finish. The anti-flicker
- * snippet has its own 3-second timeout as a safety net, so this file doesn't
- * need one — if you skip installing it, this call is just a harmless no-op.
+ * waiting for anything else (e.g. goal-checking) to finish. It also removes
+ * the class within 3 seconds, in a finally, if the config request is slow,
+ * fails, or this file throws. The head snippet's own 3-second timeout stays
+ * as a second net. The original page stays usable either way.
+ *
+ * Config cache: each page load asks for the running tests and does not store
+ * the answer (cache time 0). A start, pause or rollback is on the next page
+ * load. A tab that is already open keeps the variant it has until reload.
  *
  * Cookie/consent handling: this snippet writes to localStorage to recognize
  * a visitor, which generally requires consent under UK/EU rules (PECR, GDPR)
@@ -239,6 +244,10 @@
   const JS_CONDITION_POLL_MS = 500;
   const JS_CONDITION_LIMIT_MS = 10 * 60 * 1000;
   const JS_CONDITION_ERROR_LIMIT = 3;
+  // The live config is fetched on each page load and is not stored.
+  const CONFIG_CACHE_MS = 0;
+  // Hide from the anti-flicker class cannot last longer than this.
+  const ANTI_FLICKER_MAX_MS = 3000;
   const JS_CONDITION_MAX = 500;
   // These sit above the early return. Node requires this file and never
   // reaches the browser boot, so a const declared later would still be
@@ -305,6 +314,8 @@
   api.JS_CONDITION_POLL_MS = JS_CONDITION_POLL_MS;
   api.JS_CONDITION_LIMIT_MS = JS_CONDITION_LIMIT_MS;
   api.JS_CONDITION_ERROR_LIMIT = JS_CONDITION_ERROR_LIMIT;
+  api.CONFIG_CACHE_MS = CONFIG_CACHE_MS;
+  api.ANTI_FLICKER_MAX_MS = ANTI_FLICKER_MAX_MS;
   api.elementQuery = elementQuery;
   api.elementIsPresent = elementIsPresent;
   api.waitForElement = waitForElement;
@@ -373,6 +384,7 @@
         break;
       }
       if (!matched) continue;
+      if (!hasTrackingConsent()) return;
       if (!claimCustom(localStorage, goal.visitorId, goal.experimentId, goal.goalId, customMemory)) continue;
       sendEvent(goal.experimentId, goal.variantId, goal.visitorId, 'convert', goal.goalId);
     }
@@ -506,7 +518,29 @@
   }
 
   function revealPage() {
-    document.documentElement.classList.remove('ab-hide');
+    try {
+      const rootEl = document.documentElement;
+      if (rootEl && rootEl.classList && typeof rootEl.classList.remove === 'function') {
+        rootEl.classList.remove('ab-hide');
+      }
+    } catch (err) { /* the original page must not stay hidden */ }
+  }
+
+  function armAntiFlickerRelease() {
+    try {
+      const id = setTimeout(revealPage, ANTI_FLICKER_MAX_MS);
+      if (id && typeof id.unref === 'function') {
+        try { id.unref(); } catch (err) { /* already a browser timer */ }
+      }
+      return id;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function clearAntiFlickerRelease(id) {
+    if (id == null) return;
+    try { clearTimeout(id); } catch (err) { /* already gone */ }
   }
 
   // An archived test's edit or preview link does not open the editor and does
@@ -600,6 +634,7 @@
   }
 
   function getVisitorId() {
+    if (!hasTrackingConsent()) return '';
     let id = localStorage.getItem(VISITOR_KEY);
     if (!id) {
       id = 'v_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -723,7 +758,80 @@
     }
   }
 
+  // A short queue. A failed send is tried once more, then dropped. Nothing
+  // is written to the console: a down API must not spam the visitor's page.
+  const pendingEvents = [];
+  let eventRetryTimer = null;
+
+  function trackingAllowed() {
+    try { return hasTrackingConsent(); }
+    catch (err) { return false; }
+  }
+
+  function deliverEventBody(body) {
+    try {
+      if (typeof navigator !== 'undefined' && navigator && typeof navigator.sendBeacon === 'function') {
+        return navigator.sendBeacon(API_BASE + '/api/event', new Blob([body], { type: 'application/json' })) !== false;
+      }
+    } catch (err) {
+      return false;
+    }
+    try {
+      if (typeof fetch === 'function') {
+        Promise.resolve(fetch(API_BASE + '/api/event', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: body,
+          keepalive: true,
+        })).catch(function () {});
+        return true;
+      }
+    } catch (err) {
+      return false;
+    }
+    return false;
+  }
+
+  function flushPendingEvents() {
+    if (!trackingAllowed()) {
+      pendingEvents.length = 0;
+      return;
+    }
+    let steps = 0;
+    while (pendingEvents.length && steps < 30) {
+      steps += 1;
+      const item = pendingEvents[0];
+      let sent = false;
+      try { sent = deliverEventBody(item.body); }
+      catch (err) { sent = false; }
+      if (sent) {
+        pendingEvents.shift();
+        continue;
+      }
+      item.tries += 1;
+      if (item.tries >= 2) {
+        pendingEvents.shift();
+        continue;
+      }
+      if (eventRetryTimer == null) {
+        try {
+          eventRetryTimer = setTimeout(function () {
+            eventRetryTimer = null;
+            try { flushPendingEvents(); } catch (err) { /* drop the rest quietly */ }
+          }, 1000);
+          if (eventRetryTimer && typeof eventRetryTimer.unref === 'function') {
+            try { eventRetryTimer.unref(); } catch (err) { /* browser timer */ }
+          }
+        } catch (err) {
+          pendingEvents.shift();
+        }
+      }
+      return;
+    }
+  }
+
   function sendEvent(experimentId, variantId, visitorId, eventType, goalId, changeApplied) {
+    if (!trackingAllowed()) return;
     // is_test is a JSON field. sendBeacon cannot set X-Pivit-Test, and the
     // field is omitted for real visitors so their body stays the same.
     // change_applied is only set for a view that had element changes to check.
@@ -740,13 +848,12 @@
     const remembered = variantRevision[String(variantId)];
     if (remembered) fields.content_revision = remembered;
     if (SITE_KEY) fields.site = SITE_KEY;
-    const body = JSON.stringify(api.eventBody(fields, qaOn));
-    // sendBeacon is fire-and-forget and survives page navigation, ideal for tracking calls.
-    if (navigator.sendBeacon) {
-      navigator.sendBeacon(API_BASE + '/api/event', new Blob([body], { type: 'application/json' }));
-    } else {
-      fetch(API_BASE + '/api/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true });
-    }
+    let body;
+    try { body = JSON.stringify(api.eventBody(fields, qaOn)); }
+    catch (err) { return; }
+    pendingEvents.push({ body: body, tries: 0 });
+    if (pendingEvents.length > 20) pendingEvents.shift();
+    try { flushPendingEvents(); } catch (err) { /* the event is dropped */ }
   }
 
   // Experiment goals apply to every variant. An empty list means this test
@@ -778,9 +885,11 @@
       if (!pageClickTracker) {
         pageClickTracker = createClickTracker(document, {
           claim: function (goal) {
+            if (!trackingAllowed()) return false;
             return claimClick(localStorage, goal.visitorId, goal.experimentId, goal.goalId);
           },
           send: function (goal) {
+            if (!trackingAllowed()) return;
             sendEvent(goal.experimentId, goal.variantId, goal.visitorId, 'convert', goal.goalId);
           },
         });
@@ -797,9 +906,11 @@
     if (!pageElementWatcher) {
       pageElementWatcher = createElementWatcher(document, {
         claim: function (goal) {
+          if (!trackingAllowed()) return false;
           return claimElement(localStorage, goal.visitorId, goal.experimentId, goal.goalId);
         },
         send: function (goal) {
+          if (!trackingAllowed()) return;
           sendEvent(goal.experimentId, goal.variantId, goal.visitorId, 'convert', goal.goalId);
         },
       });
@@ -849,6 +960,7 @@
   }
 
   async function checkUrlGoals(visitorId, enrolledThisView, href) {
+    if (!trackingAllowed()) return;
     const assignments = {};
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
@@ -868,14 +980,13 @@
       if (pageViewKey(window.location.href) !== pageViewKey(pageHref)) return;
       const planned = planUrlConversions(data.experiments, assignments, pageHref, enrolledThisView);
       planned.forEach((item) => {
+        if (!trackingAllowed()) return;
         if (localStorage.getItem(item.key)) return; // only count once per visitor per goal
         localStorage.setItem(item.key, '1');
         sendEvent(item.experimentId, item.variantId, visitorId, 'convert', item.goalId);
       });
       addCustomGoals(customGoalsFromExperiments(data.experiments, assignments, visitorId));
-    } catch (err) {
-      console.warn('[ab] failed to check URL goals:', err);
-    }
+    } catch (err) { /* a failed goal check is dropped, with no console noise */ }
   }
 
   function elementSelectorOf(experiment) {
@@ -1733,8 +1844,11 @@
     try {
       const res = await fetch(
         api.withQaQuery(api.withSite(`${API_BASE}/api/experiments?url=${url}${previewQuery}`, SITE_KEY), fetchAsTest),
-        wantsPreview ? { cache: 'no-store' } : undefined
+        { cache: 'no-store' }
       );
+      if (!res || res.ok === false || (typeof res.status === 'number' && res.status >= 400)) {
+        throw new Error('config');
+      }
       const data = await res.json();
 
       // Authorised preview: show only that experiment's variant. Do not assign
@@ -1871,9 +1985,13 @@
         if (nextMode.type === 'edit' || nextMode.type === 'preview') return;
         rewatchPendingChanges();
         const token = navigationGate.start();
-        fetch(publicExperimentsUrl(href, fetchAsTest))
-          .then(function (res) { return res.json(); })
+        fetch(publicExperimentsUrl(href, fetchAsTest), { cache: 'no-store' })
+          .then(function (res) {
+            if (!res || res.ok === false || (typeof res.status === 'number' && res.status >= 400)) return null;
+            return res.json();
+          })
           .then(function (next) {
+            if (!next) return;
             if (!navigationGate.current(token, href, window.location.href)) return;
             if (!hasTrackingConsent()) return;
             rememberPublicGa4(next);
@@ -1914,9 +2032,13 @@
           rewatchPendingChanges();
           const href = window.location.href;
           const token = navigationGate.start();
-          fetch(publicExperimentsUrl(href, fetchAsTest))
-            .then(function (res) { return res.json(); })
+          fetch(publicExperimentsUrl(href, fetchAsTest), { cache: 'no-store' })
+            .then(function (res) {
+              if (!res || res.ok === false || (typeof res.status === 'number' && res.status >= 400)) return null;
+              return res.json();
+            })
             .then(function (next) {
+              if (!next) return;
               if (!navigationGate.current(token, href, window.location.href)) return;
               if (!hasTrackingConsent()) return;
               rememberPublicGa4(next);
@@ -1943,15 +2065,26 @@
       // single-page app checks again from refreshAfterNavigation.
       await checkUrlGoals(visitorId, enrolledThisView);
     } catch (err) {
-      console.warn('[ab] failed to load experiments:', err);
       revealPage(); // never leave the page hidden just because the API call failed
     }
   }
 
+  async function startSnippet() {
+    const hideTimer = armAntiFlickerRelease();
+    try {
+      await init();
+    } catch (err) {
+      // A throw in the snippet must not break the page or print a stack.
+    } finally {
+      revealPage();
+      clearAntiFlickerRelease(hideTimer);
+    }
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', startSnippet);
   } else {
-    init();
+    startSnippet();
   }
 
   // One click beacon per visitor + experiment + goal. localStorage is the
@@ -3900,6 +4033,130 @@
     return { selector: selector, type: 'replace', value: afterHtml };
   }
 
+  const REPLACE_HTML_WARNING = 'This element has a form or buttons. Replacing its HTML may stop them working. Edit the text instead?';
+  const ACCESSIBLE_NAME_WARNING = 'This button or link would have no name that a screen reader can read. Add some words, or keep a label on it.';
+
+  function applyStyleProperties(el, value) {
+    if (!el || !el.style || !value || typeof value !== 'object' || Array.isArray(value)) return;
+    Object.keys(value).forEach((key) => {
+      if (key === 'cssText' || key === 'length' || key === 'parentRule') return;
+      const next = value[key];
+      if (next == null || typeof next === 'function') return;
+      try { el.style[key] = next; }
+      catch (err) { /* leave the element as it is */ }
+    });
+  }
+
+  function attrText(el, name) {
+    if (!el || typeof el.getAttribute !== 'function') return '';
+    const value = el.getAttribute(name);
+    return value == null ? '' : String(value).replace(/\s+/g, ' ').trim();
+  }
+
+  function isNamedControl(el) {
+    const tag = String(el && el.tagName || '').toLowerCase();
+    if (tag === 'button' || tag === 'a') return true;
+    const role = attrText(el, 'role').toLowerCase();
+    if (role === 'button' || role === 'link') return true;
+    if (tag === 'input') {
+      const type = attrText(el, 'type').toLowerCase();
+      return type === 'button' || type === 'submit' || type === 'reset' || type === 'image';
+    }
+    return false;
+  }
+
+  function accessibleName(el, visibleText) {
+    const aria = attrText(el, 'aria-label');
+    if (aria) return aria;
+    if (attrText(el, 'aria-labelledby')) return attrText(el, 'aria-labelledby');
+    const alt = attrText(el, 'alt');
+    if (alt) return alt;
+    if (el && typeof el.querySelector === 'function') {
+      try {
+        const nested = el.querySelector('[aria-label], img[alt], [alt]');
+        if (nested) {
+          const nestedName = attrText(nested, 'aria-label') || attrText(nested, 'alt');
+          if (nestedName) return nestedName;
+        }
+      } catch (err) { /* an unreadable tree still has the element's own name */ }
+    }
+    const text = String(visibleText != null ? visibleText : readElementText(el)).replace(/\s+/g, ' ').trim();
+    if (text) return text;
+    return attrText(el, 'title');
+  }
+
+  function accessibleNameWarning(el, nextText) {
+    if (!isNamedControl(el)) return '';
+    if (accessibleName(el, nextText)) return '';
+    return ACCESSIBLE_NAME_WARNING;
+  }
+
+  function controlNameFromParsed(parsed) {
+    if (!parsed) return null;
+    const tag = parsed.tag;
+    const role = String((parsed.attrs && parsed.attrs.role) || '').toLowerCase();
+    const type = String((parsed.attrs && parsed.attrs.type) || '').toLowerCase();
+    const named = tag === 'button' || tag === 'a' || role === 'button' || role === 'link'
+      || (tag === 'input' && (type === 'button' || type === 'submit' || type === 'reset' || type === 'image'));
+    if (!named) return null;
+    const attrs = parsed.attrs || {};
+    const aria = String(attrs['aria-label'] || '').trim();
+    if (aria) return aria;
+    const alt = String(attrs.alt || '').trim();
+    if (alt) return alt;
+    const text = decodeHtmlText(String(parsed.inner || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+    if (text) return text;
+    return String(attrs.title || '').trim();
+  }
+
+  function accessibleNameWarningForHtml(html) {
+    const parsed = parseSingleElement(html);
+    if (!parsed) return '';
+    if (controlNameFromParsed(parsed) === '') return ACCESSIBLE_NAME_WARNING;
+    const re = /<(button|a)\b([^>]*)>([\s\S]*?)<\/\1>/gi;
+    let match;
+    while ((match = re.exec(parsed.inner || ''))) {
+      const inner = { tag: match[1].toLowerCase(), attrs: parseAttrList(match[2]), inner: match[3] };
+      if (controlNameFromParsed(inner) === '') return ACCESSIBLE_NAME_WARNING;
+    }
+    return '';
+  }
+
+  function elementHasHandler(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (typeof el.onclick === 'function') return true;
+    const names = ['onclick', 'onsubmit', 'onchange', 'oninput'];
+    for (let i = 0; i < names.length; i++) {
+      if (attrText(el, names[i])) return true;
+    }
+    const listeners = el.listeners;
+    if (listeners && listeners.click && listeners.click.length) return true;
+    return false;
+  }
+
+  function htmlReplaceRisk(el) {
+    if (!el || el.nodeType !== 1) return false;
+    const tag = String(el.tagName || '').toLowerCase();
+    if (tag === 'form' || tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button' || tag === 'a') return true;
+    if (elementHasHandler(el)) return true;
+    try {
+      if (typeof el.querySelector === 'function' && el.querySelector('form, input, textarea, select, button, a, [onclick], [onsubmit], [onchange]')) {
+        return true;
+      }
+    } catch (err) { /* fall through to a child walk */ }
+    const kids = el.children;
+    if (kids && typeof kids.length === 'number') {
+      for (let i = 0; i < kids.length; i++) {
+        if (htmlReplaceRisk(kids[i])) return true;
+      }
+    }
+    return false;
+  }
+
+  function replaceHtmlWarning(el) {
+    return htmlReplaceRisk(el) ? REPLACE_HTML_WARNING : '';
+  }
+
   function previewMissMessage(selectors) {
     const list = [];
     const source = Array.isArray(selectors) ? selectors : [selectors];
@@ -4436,7 +4693,7 @@
         el.appendChild(owner.createTextNode(next));
         return;
       }
-      el.textContent = next;
+      // textContent would drop the child elements and their handlers.
       return;
     }
     meaningful[0].nodeValue = next;
@@ -4813,7 +5070,7 @@
             el.style.display = '';
             break;
           case 'style':
-            Object.assign(el.style, change.value || {});
+            applyStyleProperties(el, change.value);
             break;
           case 'attr':
             if (change.attr) el.setAttribute(change.attr, change.value);
@@ -5184,6 +5441,12 @@
     isHiddenElement,
     readElementText,
     writeElementText,
+    applyStyleProperties,
+    replaceHtmlWarning,
+    accessibleNameWarning,
+    accessibleNameWarningForHtml,
+    REPLACE_HTML_WARNING,
+    ACCESSIBLE_NAME_WARNING,
     uniqueSelector,
     stableSelector,
     generaliseSelector,

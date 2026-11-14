@@ -318,7 +318,16 @@
         case 'html': el.innerHTML = change.value; break;
         case 'hide': el.style.display = 'none'; break;
         case 'show': el.style.display = ''; break;
-        case 'style': Object.assign(el.style, change.value || {}); break;
+        case 'style':
+          if (window.PivitRuntime && typeof window.PivitRuntime.applyStyleProperties === 'function') {
+            window.PivitRuntime.applyStyleProperties(el, change.value);
+          } else if (change.value && typeof change.value === 'object' && el && el.style) {
+            Object.keys(change.value).forEach((key) => {
+              if (key === 'cssText' || change.value[key] == null || typeof change.value[key] === 'function') return;
+              el.style[key] = change.value[key];
+            });
+          }
+          break;
         case 'attr': if (change.attr) el.setAttribute(change.attr, change.value); break;
         case 'js': try { new Function('el', change.value)(el); } catch (e) { console.warn('[pivit-editor] js change failed:', e); } break;
         case 'remove': el.remove(); break;
@@ -1694,12 +1703,60 @@
     if (scopePanelEl) { scopePanelEl.remove(); scopePanelEl = null; }
   }
 
+  const REPLACE_HTML_WARNING = 'This element has a form or buttons. Replacing its HTML may stop them working. Edit the text instead?';
+  const ACCESSIBLE_NAME_WARNING = 'This button or link would have no name that a screen reader can read. Add some words, or keep a label on it.';
+
+  function replaceHtmlWarning(el) {
+    try {
+      if (window.PivitRuntime && typeof window.PivitRuntime.replaceHtmlWarning === 'function') {
+        return window.PivitRuntime.replaceHtmlWarning(el) || '';
+      }
+    } catch (err) { /* show the same words from this file */ }
+    if (!el || !el.tagName) return '';
+    const tag = String(el.tagName).toLowerCase();
+    if (tag === 'form' || tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button' || tag === 'a') {
+      return REPLACE_HTML_WARNING;
+    }
+    try {
+      if (typeof el.querySelector === 'function' && el.querySelector('form, input, textarea, select, button, a')) {
+        return REPLACE_HTML_WARNING;
+      }
+    } catch (err) { /* no warning if the tree cannot be read */ }
+    return '';
+  }
+
+  function accessibleNameWarning(el, nextText) {
+    try {
+      if (window.PivitRuntime && typeof window.PivitRuntime.accessibleNameWarning === 'function') {
+        return window.PivitRuntime.accessibleNameWarning(el, nextText) || '';
+      }
+    } catch (err) { return ''; }
+    return '';
+  }
+
+  function accessibleNameWarningForHtml(html) {
+    try {
+      if (window.PivitRuntime && typeof window.PivitRuntime.accessibleNameWarningForHtml === 'function') {
+        return window.PivitRuntime.accessibleNameWarningForHtml(html) || '';
+      }
+    } catch (err) { return ''; }
+    if (String(html || '').indexOf(ACCESSIBLE_NAME_WARNING) !== -1) return '';
+    return '';
+  }
+
   function writeText(el, value) {
     if (window.PivitRuntime && typeof window.PivitRuntime.writeElementText === 'function') {
       window.PivitRuntime.writeElementText(el, value);
       return;
     }
-    if (el) el.textContent = value;
+    if (!el) return;
+    const nodes = el.childNodes;
+    if (nodes && typeof nodes.length === 'number') {
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i] && nodes[i].nodeType === 1) return;
+      }
+    } else if (el.children && el.children.length) return;
+    el.textContent = value;
   }
 
   function readText(el) {
@@ -2745,6 +2802,19 @@
         background: '#fff4e5', color: '#6a4b12', fontSize: '16px', fontWeight: '650', lineHeight: '1.45',
       });
       warn.textContent = opts.warning;
+      if (typeof opts.onEditText === 'function') {
+        const instead = makeButton('Edit the text instead', '#fff', () => {
+          const fn = opts.onEditText;
+          if (panelEl) { panelEl.remove(); panelEl = null; }
+          fn();
+        });
+        instead.id = 'pivit-edit-text-instead';
+        instead.style.display = 'block';
+        instead.style.width = '100%';
+        instead.style.marginTop = '10px';
+        instead.style.color = COLORS.ink;
+        warn.appendChild(instead);
+      }
       panelEl.appendChild(warn);
     }
 
@@ -2887,9 +2957,12 @@
     const baseHtml = cur('replace') ? cur('replace').value : (target ? cleanOuterHTML(target) : '');
     const cssSkeleton = `${selector} {\n  \n}`;
 
+    const replaceWarning = replaceHtmlWarning(target);
     showEditorPanel({
       title: 'Edit element',
       subtitle: selector,
+      warning: replaceWarning,
+      onEditText: replaceWarning && target ? () => openEditTextPanel(target, selector) : null,
       fields: [
         { key: 'html', label: 'HTML', value: baseHtml,
           hint: cur('replace')
@@ -2938,6 +3011,15 @@
 
         if (!changed) return { error: editing ? 'Nothing changed yet.' : 'Nothing to apply yet — change the HTML, add some CSS, or add some JS.' };
 
+        if (next.replace && next.replace.type === 'text') {
+          const nameWarn = accessibleNameWarning(target, next.replace.value);
+          if (nameWarn) return { error: nameWarn };
+        }
+        if (next.replace && next.replace.type === 'replace') {
+          const nameWarn = accessibleNameWarningForHtml(next.replace.value);
+          if (nameWarn) return { error: nameWarn };
+        }
+
         const finalSet = [next.replace, next.stylesheet, next.js].filter(Boolean); // order matters: replace -> stylesheet -> js
         if (!editing) { finalSet.forEach(recordAndApply); return; }
 
@@ -2975,6 +3057,8 @@
       applyLabel: existingIdx === -1 ? 'Apply' : 'Save change',
       onApply: (values) => {
         const value = values.text;
+        const nameWarn = accessibleNameWarning(el, value);
+        if (nameWarn) return { error: nameWarn };
         if (!String(value || '').trim()) return { error: 'Enter the text you want visitors to see.' };
         if (existingIdx === -1) {
           if (el && value === readText(el)) return { error: 'Nothing changed yet.' };

@@ -38,8 +38,8 @@ const CANONICAL_PAGES = {
   '/check-email.html': { file: 'check-email.html', pathname: '/check-email.html' },
   '/sign-in.html': { file: 'sign-in.html', pathname: '/sign-in.html' },
   '/join.html': { file: 'join.html', pathname: '/join.html' },
-  '/legal.html': { file: 'legal.html', pathname: '/legal.html' },
-  '/privacy.html': { file: 'privacy.html', pathname: '/privacy.html' },
+  '/privacy': { file: 'privacy-notice.html', pathname: '/privacy' },
+  '/terms': { file: 'terms.html', pathname: '/terms' },
   '/help.html': { file: 'help.html', pathname: '/help.html' },
 };
 
@@ -142,7 +142,19 @@ function applyCanonical(html, url) {
   return html.replace('</head>', `${tag}\n</head>`);
 }
 
-// Serves the three HTML pages with the canonical href filled in. Registered
+// Older addresses. The notice and the terms now live at /privacy and /terms.
+const LEGACY_LEGAL_REDIRECTS = {
+  '/privacy.html': '/privacy',
+  '/legal.html': '/terms',
+};
+
+function legacyLegalRedirect(req, res, next) {
+  const target = LEGACY_LEGAL_REDIRECTS[req.path];
+  if (!target || (req.method !== 'GET' && req.method !== 'HEAD')) return next();
+  res.redirect(301, target);
+}
+
+// Serves the HTML pages with the canonical href filled in. Registered
 // before express.static so the file on disk is not sent unchanged.
 // Cache-Control matches express.static's default (maxAge 0). Nothing else
 // about caching is set here.
@@ -172,4 +184,6 @@ module.exports = {
   canonicalUrl,
   applyCanonical,
   canonicalHtmlMiddleware,
+  legacyLegalRedirect,
+  LEGACY_LEGAL_REDIRECTS,
 };
