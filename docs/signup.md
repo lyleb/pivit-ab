@@ -19,7 +19,7 @@ Set this on the app service:
 | `POSTMARK_WEBHOOK_TOKEN` | No | Only if you turn on the bounce webhook. Postmark must send the same value in the `X-Postmark-Token` header. Leave unset and `POST /api/webhooks/postmark` stays closed. |
 | `TURNSTILE_SITE_KEY` | No | Leave unset. Public site key. Turnstile stays off unless this and `TURNSTILE_SECRET_KEY` are both set. |
 | `TURNSTILE_SECRET_KEY` | No | Leave unset. Secret key. Both keys are required before the widget or the check runs. |
-| `ACCESS_REQUESTS_ENABLED` | No | Leave unset. The landing-page form stores nothing until this is `true`, `1`, `yes` or `on`. `/privacy.html` is still a placeholder, so leave the form off until that page has real wording. |
+| `ACCESS_REQUESTS_ENABLED` | No | Leave unset. The landing-page form stores nothing until this is `true`, `1`, `yes` or `on`. The privacy notice is at `/privacy`. |
 | `ACCESS_REQUEST_EMAIL` | No | Inbox for each access request. Defaults to `EMAIL_REPLY_TO` (`info@heclr.com`). |
 
 Do not change `SESSION_SECRET` or `DATABASE_URL`. You do not set the cookie name: production sends `__Host-pivit.sid` on its own. Changing `ADMIN_API_KEY` signs out emergency-password sessions. Magic-link and viewer sessions stay.
@@ -35,7 +35,7 @@ pivitlab.com can receive mail. Every outgoing message still sets Reply-To to `EM
 ## How an agency gets in
 
 1. A platform admin creates an invite code on the home screen. It is shown once, works once, and expires after 14 days. Revoke stops it.
-2. The person opens `/signup.html?code=…`, enters a work email and a website, and agrees to the terms version `beta-2026-10-09`. The terms page is a placeholder for Lyle to replace.
+2. The person opens `/signup.html?code=…`, enters a work email and a website, and agrees to the terms version `beta-2026-10-09`. The terms are at `/terms`.
 3. The email contains a link and a 6-digit code. Both expire after 15 minutes. Either one works once. The link opens `/sign-in.html`, which does not sign them in until they press **Sign in**, so a mail scanner that only fetches the link does not use it up. The code allows 5 tries.
 4. That first sign-in is the email verification. The agency is named after the domain. The site is not verified yet.
 5. The home screen shows a Start here card above the experiments while the agency has no started test: add a site and install the snippet, check it has been seen, create a test, preview it, then start it. Each step links to that place and ticks from the agency's own data. A step that is waiting on an earlier one is greyed, for example “Available once your snippet has been seen”. Owner-only steps are hidden for a Member. The card can be hidden, and it hides itself once a test has been started. A test can be built before the snippet has been seen, and cannot be started until that check has passed. If a visit from the site arrives with no site key, or with a key that is not this agency's, the check says so. The public snippet response stays an empty list, the same as a host that is not allowed.
@@ -84,4 +84,4 @@ The request form (name, work email, website) is off until `ACCESS_REQUESTS_ENABL
 
 When the form is on, a request is stored in `access_requests` (migration 004, next to invite codes) and an email is sent through Postmark to `ACCESS_REQUEST_EMAIL`, or to `EMAIL_REPLY_TO` when that is unset. If Postmark does not accept the message, the row is kept and a notice is added on the owner home page. A honeypot field and a rate limit (5 per email address and 10 per IP, each hour) sit in front of it. The sign-in page, the sign-up page, the owner page and this form can show a Cloudflare Turnstile widget. It stays off unless both `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` are set. With either one missing, those pages do not load the Turnstile script and the check is skipped.
 
-The platform admin invite card on the dashboard lists the requests. **Create invite code** makes one code for that person, with their name, email and website in the note, and shows the code once. A second click does not make another code. Do not turn the form on until `/privacy.html` has Lyle's wording. That page is a placeholder.
+The platform admin invite card on the dashboard lists the requests. **Create invite code** makes one code for that person, with their name, email and website in the note, and shows the code once. A second click does not make another code. The privacy notice is at `/privacy` and the terms are at `/terms`. `/privacy.html` and `/legal.html` redirect there.

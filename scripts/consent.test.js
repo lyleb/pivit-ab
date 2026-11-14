@@ -19,10 +19,8 @@ const CONSENT_DEFAULT = [
 
 const PUBLIC_PAGES = [
   'src/pages/landing.html',
-  'public/privacy.html',
   'public/privacy-notice.html',
   'public/terms.html',
-  'public/legal.html',
 ];
 
 const APP_PAGES = [
@@ -110,10 +108,10 @@ function pageChecks() {
   assert.ok(!consentCss.includes('inset:'));
   assert.ok(consentCss.includes('.pivit-consent[hidden]'));
 
-  const privacy = read('public/privacy.html');
+  const privacy = read('public/privacy-notice.html');
   assert.ok(privacy.includes('id="cookies"'));
-  assert.ok(privacy.includes('Placeholder for Lyle to write'));
-  assert.ok(privacy.includes("Lyle's wording"));
+  assert.ok(!privacy.includes('Placeholder for Lyle'));
+  assert.ok(!privacy.includes('TODO'));
   for (const phrase of [
     'GTM-KZCDC3HJ',
     'G-NT78JHVHGY',
@@ -127,10 +125,7 @@ function pageChecks() {
     '<code>ANONCHK</code>',
     '<code>MR</code>',
     '<code>SM</code>',
-    'Google is the processor',
-    'Microsoft is the processor',
-    'After Accept only.',
-    'TODO',
+    'Go2Media',
   ]) {
     assert.ok(privacy.includes(phrase), 'privacy missing ' + phrase);
   }

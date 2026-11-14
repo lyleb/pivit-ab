@@ -10,7 +10,7 @@ const { personAccess } = require('./person-state');
 const { csrfMiddleware } = require('./csrf');
 
 const { hostScopingMode } = require('./host-scope');
-const { configuredAppOrigin, publicAppOrigin, sendPublicConfig, canonicalHtmlMiddleware } = require('./app-origin');
+const { configuredAppOrigin, publicAppOrigin, sendPublicConfig, canonicalHtmlMiddleware, legacyLegalRedirect } = require('./app-origin');
 const { robotsTagMiddleware, sendRobotsTxt, sendSitemap } = require('./robots');
 const { hostHitMiddleware } = require('./host-hits');
 const { backfillExperimentGoals } = require('./goals');
@@ -98,6 +98,10 @@ app.get('/owner', sendOwnerPage);
 // to the dashboard (/index.html). Client sessions go to /client.html.
 // Registered before the static files so / is not the dashboard.
 app.get('/', sendLandingPage);
+
+// /privacy.html and /legal.html permanently move to /privacy and /terms.
+// Registered before the static files so the old pages are not served.
+app.use(legacyLegalRedirect);
 
 // Fills in <link rel="canonical"> from APP_ORIGIN (else https://pivitlab.com)
 // before the static handler can send the file unchanged.

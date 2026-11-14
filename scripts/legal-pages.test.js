@@ -4,7 +4,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const express = require('express');
-const { canonicalHtmlMiddleware } = require('../src/app-origin');
+const { canonicalHtmlMiddleware, legacyLegalRedirect } = require('../src/app-origin');
 const { sendLandingPage } = require('../src/landing');
 const { robotsTagMiddleware } = require('../src/robots');
 
@@ -26,9 +26,9 @@ for (const html of [privacy, terms]) {
   assert.ok(html.startsWith('<!-- The text on this page should be reviewed by a solicitor. -->'));
   assert.ok(!html.includes('>The text on this page should be reviewed'));
   assert.ok(html.includes('Last updated: 14 November 2026'));
-  assert.ok(html.includes('[Company name / sole trader name]'));
+  assert.ok(html.includes('pivitlab is a service run by Go2Media'));
+  assert.ok(!/\[[A-Z][^\]]+\]/.test(html), 'a placeholder is still in the page');
   assert.ok(html.includes('info@pivitlab.com'));
-  assert.ok(!html.includes('[contact email]'));
   assert.ok(html.includes('class="brand-logo"'));
   assert.ok(html.includes('lang="en-GB"'));
   assert.ok(!html.includes('Pivitlab'));
@@ -40,13 +40,20 @@ assert.ok(privacy.includes('processor'));
 assert.ok(privacy.includes('controller'));
 assert.ok(privacy.includes('UK GDPR'));
 assert.ok(privacy.includes('Railway'));
+assert.ok(privacy.includes('application hosting and the database'));
 assert.ok(privacy.includes('Postmark'));
-assert.ok(privacy.includes('Cloudflare R2'));
-assert.ok(privacy.includes('Cloudflare Turnstile'));
-assert.ok(privacy.includes('Send to GA4'));
-assert.ok(privacy.includes('[Any other supplier]'));
-assert.ok(privacy.includes('[How long test results are kept after an account closes.]'));
-assert.ok(privacy.includes('[transfer safeguard to confirm]'));
+assert.ok(privacy.includes('transactional email'));
+assert.ok(privacy.includes('PostHog'));
+assert.ok(privacy.includes('product analytics'));
+assert.ok(privacy.includes('Hostinger'));
+assert.ok(privacy.includes('domain and email hosting'));
+assert.ok(privacy.includes('only where a customer turns on Send to GA4'));
+assert.ok(privacy.includes('deleted 30 days after an account closes'));
+assert.ok(privacy.includes('unless the law requires us to keep them longer'));
+assert.ok(privacy.includes('UK-US data bridge'));
+assert.ok(privacy.includes('International Data Transfer Addendum'));
+assert.ok(!privacy.includes('Cloudflare'));
+assert.ok(!privacy.includes('Any other supplier'));
 assert.ok(privacy.includes('ico.org.uk'));
 assert.ok(privacy.includes('id="cookies"'));
 assert.ok(privacy.includes('_ab_visitor_id'));
@@ -81,7 +88,11 @@ function get(port, urlPath) {
     const req = http.get({ hostname: '127.0.0.1', port, path: urlPath }, (res) => {
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));
-      res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+      res.on('end', () => resolve({
+        status: res.statusCode,
+        headers: res.headers,
+        body: Buffer.concat(chunks).toString('utf8'),
+      }));
     });
     req.on('error', reject);
   });
@@ -90,6 +101,7 @@ function get(port, urlPath) {
 const app = express();
 app.use(robotsTagMiddleware);
 app.get('/', sendLandingPage);
+app.use(legacyLegalRedirect);
 app.use(canonicalHtmlMiddleware);
 
 const server = http.createServer(app);
@@ -108,14 +120,23 @@ server.listen(0, '127.0.0.1', async () => {
     assert.strictEqual(privacyRes.status, 200);
     assert.ok(privacyRes.body.includes('Privacy notice'));
     assert.ok(privacyRes.body.includes('href="/terms"'));
-    assert.ok(privacyRes.body.includes('[Company name / sole trader name]'));
-    assert.ok(!privacyRes.body.includes('The text on this page should be reviewed by a solicitor. -->\n<h1>'));
+    assert.ok(privacyRes.body.includes('pivitlab is a service run by Go2Media'));
+    assert.ok(privacyRes.body.includes('deleted 30 days after an account closes'));
+    assert.ok(!/\[[A-Z][^\]]+\]/.test(privacyRes.body));
 
     const termsRes = await get(port, '/terms');
     assert.strictEqual(termsRes.status, 200);
     assert.ok(termsRes.body.includes('Terms of use'));
     assert.ok(termsRes.body.includes('href="/privacy"'));
     assert.ok(termsRes.body.includes('law of Scotland'));
+    assert.ok(termsRes.body.includes('pivitlab is a service run by Go2Media'));
+
+    const oldPrivacy = await get(port, '/privacy.html');
+    assert.strictEqual(oldPrivacy.status, 301);
+    assert.strictEqual(oldPrivacy.headers.location, '/privacy');
+    const oldTerms = await get(port, '/legal.html');
+    assert.strictEqual(oldTerms.status, 301);
+    assert.strictEqual(oldTerms.headers.location, '/terms');
 
     const joinRes = await get(port, '/join.html');
     assert.strictEqual(joinRes.status, 200);

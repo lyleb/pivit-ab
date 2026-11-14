@@ -34,7 +34,7 @@ gtag('consent','default',{analytics_storage:'denied',ad_storage:'denied',ad_user
   <p>This notice says what pivitlab collects, why, and what you can ask us to do. It is written in plain English for people in the UK.</p>
 
   <h2>Who we are</h2>
-  <p>pivitlab is a UK service for running A/B tests on a website. The operating entity is <strong>[Company name / sole trader name]</strong>. You can email us at <a href="mailto:info@pivitlab.com">info@pivitlab.com</a>.</p>
+  <p>pivitlab is a UK service for running A/B tests on a website. pivitlab is a service run by Go2Media. You can email us at <a href="mailto:info@pivitlab.com">info@pivitlab.com</a>.</p>
   <p>For visitor data collected on a customer’s own website, pivitlab is the processor and the customer is the controller. For account data (the people who sign in to pivitlab), pivitlab is the controller.</p>
 
   <h2>What we collect</h2>
@@ -71,25 +71,23 @@ gtag('consent','default',{analytics_storage:'denied',ad_storage:'denied',ad_user
   <ul>
     <li>A sign-in cookie, <code>pivit.sid</code> (in production, <code>__Host-pivit.sid</code>). It keeps you signed in. An Owner or Member session ends after 30 days without use, and never lasts more than 90 days from sign-in. A platform admin session lasts 12 hours.</li>
   </ul>
-  <p><strong>On the public pivitlab pages</strong> (this site, not a customer’s site): before you choose, analytics and advertising storage are denied. Nothing is sent to Google or Microsoft until you click Accept. Reject loads nothing. The choice is stored in local storage as <code>pivitlab_analytics_consent</code> (<code>granted</code> or <code>denied</code>). That is not a cookie, and the code sets no expiry. Accept then loads Google Tag Manager, container <code>GTM-KZCDC3HJ</code>, which contains Google Analytics 4 (<code>G-NT78JHVHGY</code>) and Microsoft Clarity. Those can set <code>_ga</code>, <code>_ga_*</code>, <code>_clck</code> and <code>_clsk</code>. Choosing Reject after Accept sets consent back to denied and deletes those cookies where the browser allows. Cookie settings on this page lets you choose again.</p>
+  <p><strong>On the public pivitlab pages</strong> (this site, not a customer’s site): before you choose, analytics and advertising storage are denied. Nothing is sent until you click Accept. Reject loads nothing. The choice is stored in local storage as <code>pivitlab_analytics_consent</code> (<code>granted</code> or <code>denied</code>). That is not a cookie, and the code sets no expiry. Accept then loads Google Tag Manager, container <code>GTM-KZCDC3HJ</code>, which contains Google Analytics 4 (<code>G-NT78JHVHGY</code>) and Microsoft Clarity. Google Analytics 4 can set <code>_ga</code> and <code>_ga_*</code>. Microsoft Clarity can set <code>_clck</code> and <code>_clsk</code>, and Microsoft can also set <code>CLID</code>, <code>MUID</code>, <code>ANONCHK</code>, <code>MR</code> and <code>SM</code>. Choosing Reject after Accept sets consent back to denied and deletes the first-party cookies where the browser allows. Cookie settings on this page lets you choose again.</p>
 
   <h2>Who else handles the data</h2>
-  <p>We use these suppliers. They are the ones this product is built to call:</p>
+  <p>We use these suppliers:</p>
   <ul>
-    <li><strong>Railway</strong> hosts the app and the database.</li>
-    <li><strong>Postmark</strong> sends sign-in and invite email.</li>
-    <li><strong>Cloudflare R2</strong> stores database backups. Backups are kept for 30 days unless that setting is changed.</li>
-    <li><strong>Cloudflare Turnstile</strong> can check a form is not a bot. It runs only when it has been switched on.</li>
-    <li><strong>Google</strong> (Tag Manager and Analytics 4) and <strong>Microsoft</strong> (Clarity) on the public pivitlab pages, and only after Accept.</li>
-    <li><strong>Google Analytics 4 on a customer’s site</strong>, only when that customer turns on Send to GA4. The snippet sends one event through the Google tag already on their site. pivitlab does not receive a copy of that Google hit.</li>
-    <li>[Any other supplier]</li>
+    <li><strong>Railway</strong> provides application hosting and the database.</li>
+    <li><strong>Postmark</strong> sends transactional email.</li>
+    <li><strong>PostHog</strong> provides product analytics.</li>
+    <li><strong>Hostinger</strong> provides domain and email hosting.</li>
+    <li><strong>Google Analytics 4</strong>, only where a customer turns on Send to GA4. The snippet sends one event through the Google tag already on that customer’s site. pivitlab does not receive a copy of that Google hit.</li>
   </ul>
 
   <h2>How long we keep it</h2>
-  <p>We keep account data while the account is open, and sign-in sessions only for the times above. Visitor events stay in the account so the customer can read the test. [How long test results are kept after an account closes.] Local storage on a visitor’s browser stays until that browser clears it. Database backups are kept for 30 days by default.</p>
+  <p>We keep account data and test results while the account is open, so you can sign in and read a test. Sign-in sessions end on the times above. Test results and account data are deleted 30 days after an account closes, unless the law requires us to keep them longer. Local storage on a visitor’s browser stays until that browser clears it.</p>
 
   <h2>International transfers</h2>
-  <p>Some of the suppliers above store data outside the UK, including in the United States. Where a transfer needs a safeguard under UK GDPR, the safeguard we rely on is [transfer safeguard to confirm].</p>
+  <p>Some suppliers (Railway, Postmark and PostHog) are based in, or process data in, the United States. Where a supplier is certified under the UK Extension to the EU-US Data Privacy Framework (the UK-US data bridge), we rely on UK adequacy regulations. Otherwise we rely on the ICO’s International Data Transfer Addendum to the EU Standard Contractual Clauses, as included in each supplier’s data processing agreement.</p>
 
   <h2>Your rights</h2>
   <p>You can ask to see the personal data we hold about you, to correct it, to delete it, to limit how it is used, to object, and, where it applies, to receive a copy you can move. Email <a href="mailto:info@pivitlab.com">info@pivitlab.com</a>. If the data is about a visit to a customer’s site, the customer is the controller and may be the right place to start. We will help them answer.</p>
