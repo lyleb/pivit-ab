@@ -47,9 +47,14 @@
   .page { display: none; min-width: 0; }
   .page.active { display: block; }
   .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
+  /* The experiments title follows the sites card. */
+  #page-home > .page-head { margin-top: 28px; }
   .page-actions, .header-actions, .wizard-actions .right, .inline-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
   label { margin-top: 14px; }
+  /* Space under a stacked field, before its button. Inline rows such as .add-row set their own margins. */
+  .form-actions,
+  form > :is(input, select, textarea) + button { margin-top: 14px; }
   label.test-toggle {
     display: flex; align-items: center; gap: 10px; margin-top: 0; font-size: 0.95em;
   }
@@ -619,7 +624,7 @@
                 <form id="add-site-form" hidden style="margin-top:10px;">
                   <label for="add-site-website">Website</label>
                   <input id="add-site-website" placeholder="example.co.uk" spellcheck="false" autocapitalize="off">
-                  <button type="submit" id="add-site-btn">Add site</button>
+                  <button type="submit" class="form-actions" id="add-site-btn">Add site</button>
                   <p id="add-site-error" class="error-msg"></p>
                   <p id="add-site-warning" class="banner" role="status" hidden></p>
                 </form>
@@ -690,7 +695,7 @@
         <form id="sites-add-form" style="margin-top:12px;">
           <label for="sites-add-website">Website</label>
           <input id="sites-add-website" placeholder="example.co.uk" spellcheck="false" autocapitalize="off" autocomplete="off">
-          <button type="submit" id="sites-add-btn">Add site</button>
+          <button type="submit" class="form-actions" id="sites-add-btn">Add site</button>
           <p id="sites-add-error" class="error-msg"></p>
           <p id="sites-add-warning" class="banner" role="status" hidden></p>
         </form>
@@ -2214,7 +2219,7 @@ function paintIntegrations(sites) {
         <form class="site-ga4" data-ga4-form="${id}">
           <label for="ga4-id-${id}">GA4 measurement ID</label>
           <input id="ga4-id-${id}" data-ga4-id value="${UI.escapeHtml(site.ga4_measurement_id || '')}" placeholder="G-XXXXXXXXXX" spellcheck="false" autocapitalize="off" autocomplete="off"${readOnly ? ' disabled' : ''}>
-          ${readOnly ? '' : '<button type="submit">Save</button>'}
+          ${readOnly ? '' : '<button type="submit" class="form-actions">Save</button>'}
           <label class="check"><input type="checkbox" data-ga4-enabled${ga4On ? ' checked' : ''}${toggleDisabled ? ' disabled' : ''}> Send to GA4</label>
           ${paid ? '' : `<p class="hint">${UI.escapeHtml(UI.GA4_UNPAID_NOTE)}</p>`}
           <p><a href="/api/sites/${id}/ga4/container.json">Download Tag Manager container</a></p>
