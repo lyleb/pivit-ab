@@ -622,6 +622,9 @@
     datalayer_events: 'Updated dataLayer events',
     experiment_integrations: 'Updated test integrations',
     paid_plan: 'Changed the paid plan',
+    agency_archive: 'Archived an agency',
+    agency_restore: 'Restored an agency',
+    agency_delete: 'Deleted an agency',
   };
 
   function auditActionLabel(action) {
@@ -631,6 +634,9 @@
 
   function auditDetailText(entry) {
     const detail = (entry && entry.detail) || {};
+    if (entry && (entry.action === 'agency_archive' || entry.action === 'agency_restore' || entry.action === 'agency_delete')) {
+      return detail.name ? String(detail.name) : '';
+    }
     if (entry && String(entry.action || '').indexOf('user.') === 0) {
       if (detail.label) return String(detail.label);
       if (detail.email) return String(detail.email);
@@ -1048,7 +1054,7 @@
   function peopleAgencies(people) {
     const map = new Map();
     (people || []).forEach((person) => {
-      if (!person || !person.account_id) return;
+      if (!person || !person.account_id || person.account_archived) return;
       if (!map.has(String(person.account_id))) {
         map.set(String(person.account_id), person.account_name || 'Agency');
       }
@@ -1095,6 +1101,110 @@
     }
     if (visible !== all) return `Showing ${noun} of ${all}.`;
     return `Showing ${noun}.`;
+  }
+
+  const AGENCY_ARCHIVED_BANNER = 'This agency is archived. Tests are not running on its sites. Everything is kept. Restore it to turn the tests back on.';
+  const AGENCY_ARCHIVED_MEMBER = 'This agency is archived. Tests are not running on its sites. Ask an Owner to restore it.';
+  const AGENCY_ORIGINAL = 'This is the original agency. It stays so snippets that were installed before site keys keep working.';
+
+  function agencyDeleteSummary(sites, experiments) {
+    const siteCount = Number(sites) || 0;
+    const experimentCount = Number(experiments) || 0;
+    const siteText = siteCount === 1 ? '1 site' : `${siteCount} sites`;
+    const experimentText = experimentCount === 1 ? '1 experiment' : `${experimentCount} experiments`;
+    return `This deletes ${siteText}, ${experimentText} and all their results. This can't be undone.`;
+  }
+
+  function filterAgencies(agencies, options) {
+    const showArchived = !!(options && options.showArchived);
+    return (agencies || []).filter((agency) => {
+      if (!agency) return false;
+      if (agency.archived && !showArchived) return false;
+      return true;
+    });
+  }
+
+  function agenciesSummary({ shown, archivedHidden } = {}) {
+    const visible = Number(shown) || 0;
+    const hidden = Number(archivedHidden) || 0;
+    if (visible === 0 && hidden > 0) {
+      return hidden === 1 ? '1 archived agency is hidden.' : `${hidden} archived agencies are hidden.`;
+    }
+    if (visible === 0) return 'No agencies to show.';
+    const noun = visible === 1 ? '1 agency' : `${visible} agencies`;
+    if (hidden > 0) {
+      const extra = hidden === 1 ? '1 archived agency is hidden.' : `${hidden} archived agencies are hidden.`;
+      return `Showing ${noun}. ${extra}`;
+    }
+    return `Showing ${noun}.`;
+  }
+
+  function agencyActions(agency) {
+    if (!agency) return { actions: [], reason: '' };
+    if (agency.legacy) return { actions: [], reason: AGENCY_ORIGINAL };
+    if (agency.archived) {
+      return {
+        actions: [
+          { id: 'restore', label: 'Restore' },
+          { id: 'delete', label: 'Delete', danger: true },
+        ],
+        reason: '',
+      };
+    }
+    return {
+      actions: [{ id: 'archive', label: 'Archive', danger: true }],
+      reason: '',
+    };
+  }
+
+  function agencyConfirm(action, agency) {
+    const name = agency && agency.name ? agency.name : 'this agency';
+    if (action === 'archive') {
+      return {
+        title: 'Archive this agency?',
+        confirm: 'Archive',
+        danger: true,
+        typed: false,
+        body: `Archive ${name}? It disappears from lists, and tests stop running on its sites. Everything is kept. You can restore it later.`,
+      };
+    }
+    if (action === 'restore') {
+      return {
+        title: 'Restore this agency?',
+        confirm: 'Restore',
+        danger: false,
+        typed: false,
+        body: `Restore ${name}? It shows in lists again, and its tests go back to the state they were in.`,
+      };
+    }
+    if (action === 'delete') {
+      const summary = agency && agency.summary
+        ? agency.summary
+        : agencyDeleteSummary(agency && agency.sites, agency && agency.experiments);
+      return {
+        title: 'Delete this agency?',
+        confirm: 'Delete this agency',
+        danger: true,
+        typed: true,
+        body: summary,
+        warning: agency && agency.sign_out_warning ? agency.sign_out_warning : '',
+      };
+    }
+    return null;
+  }
+
+  function agencyNameReady(agency, typed) {
+    if (!agency || !agency.name) return false;
+    return String(typed || '').trim() === String(agency.name).trim();
+  }
+
+  function agencyDoneMessage(action, name) {
+    const who = name || 'The agency';
+    return {
+      archive: `${who} is archived. Tests are not running on its sites. You can restore it.`,
+      restore: `${who} is restored. Its tests are back as they were.`,
+      delete: `${who} is deleted.`,
+    }[action] || '';
   }
 
   function canOpenUsers(me) {
@@ -1642,6 +1752,16 @@
     usersSummary,
     canOpenUsers,
     usersDeniedMessage,
+    AGENCY_ARCHIVED_BANNER,
+    AGENCY_ARCHIVED_MEMBER,
+    AGENCY_ORIGINAL,
+    agencyDeleteSummary,
+    filterAgencies,
+    agenciesSummary,
+    agencyActions,
+    agencyConfirm,
+    agencyNameReady,
+    agencyDoneMessage,
     usersRoute,
     canManageTeam,
     canChangeAgency,

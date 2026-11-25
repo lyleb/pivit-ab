@@ -88,13 +88,17 @@ async function publicGa4ForScope(db, scope) {
 
 async function ga4Uptake(db) {
   const total = await db.query(
-    `SELECT COUNT(*)::int AS n FROM sites WHERE ga4_enabled`
+    `SELECT COUNT(*)::int AS n
+     FROM sites s
+     JOIN accounts a ON a.id = s.account_id
+     WHERE s.ga4_enabled AND a.archived_at IS NULL`
   );
   const { rows } = await db.query(
     `SELECT a.id, a.name, a.paid_plan,
             COUNT(s.id) FILTER (WHERE s.ga4_enabled)::int AS sites_on
      FROM accounts a
      LEFT JOIN sites s ON s.account_id = a.id
+     WHERE a.archived_at IS NULL
      GROUP BY a.id
      ORDER BY a.name, a.id`
   );

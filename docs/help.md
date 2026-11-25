@@ -45,6 +45,18 @@ This screen is for a Platform admin. Stop a support view first. Users is hidden 
 
 You cannot suspend, archive or delete yourself. pivitlab also refuses if that would leave no Platform admin, or no Owner for an agency. The screen says why.
 
+## Archive or delete an agency
+
+Archive hides an agency. Delete removes it, and only after it is archived. A Member cannot do this.
+
+1. A Platform admin opens **Users** and finds **Agencies**. An Owner opens **Team** and finds **This agency**.
+2. **Archive** hides the agency from lists and from the support-view menu. Tests stop running on its sites. The snippet stays in place and returns nothing to run. Experiments stay in the state they were in. People can still sign in and read the results.
+3. Tick **Show archived** to see archived agencies. **Restore** puts the agency back. Tests run again in the state they were left in.
+4. **Delete** appears only for an archived agency. Type the agency name exactly. The page says how many sites and experiments will go, for example: This deletes 2 sites, 5 experiments and all their results. This can't be undone.
+5. Deleting removes the sites, experiments, variants, revisions, results, members, invites and integration settings. People keep their pivitlab sign-in if they belong to another agency. If this was their only agency, they cannot sign in until someone invites them again.
+6. If you are signed in to the agency you delete, pivitlab warns you, then signs you out.
+7. The original agency cannot be archived or deleted. Existing snippets that were installed before site keys still depend on it.
+
 ## Agency invites
 
 There are two invites. Do not mix them up.

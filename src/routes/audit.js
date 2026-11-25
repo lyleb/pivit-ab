@@ -31,7 +31,9 @@ const adminRouter = express.Router();
 adminRouter.get('/accounts', requireSuperadmin, async (req, res) => {
   try {
     const { rows } = await db.query(
-      `SELECT id, name, legacy, created_at FROM accounts ORDER BY created_at, name`
+      `SELECT id, name, legacy, created_at FROM accounts
+       WHERE archived_at IS NULL
+       ORDER BY created_at, name`
     );
     res.json({
       accounts: rows.map((row) => ({

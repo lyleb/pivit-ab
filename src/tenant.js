@@ -38,7 +38,7 @@ function normaliseSiteKey(value) {
 async function legacyAccount() {
   if (cachedLegacy) return cachedLegacy;
   const { rows } = await db.query(
-    `SELECT a.id, a.name, u.id AS user_id
+    `SELECT a.id, a.name, a.archived_at, u.id AS user_id
      FROM accounts a
      LEFT JOIN memberships m ON m.account_id = a.id AND m.role = 'owner'
      LEFT JOIN users u ON u.id = m.user_id AND u.is_superadmin IS TRUE
@@ -77,6 +77,7 @@ function accountShape(row, extra) {
     id: row.id,
     name: row.name,
     legacy: row.legacy === true,
+    archived: row.archived_at != null,
     role: extra.role || 'owner',
     userId: extra.userId || null,
     superadmin: extra.superadmin === true,
@@ -91,7 +92,7 @@ async function resolveSessionAccount(req) {
     const actor = await sessionActor(req);
     if (session.viewAsAccountId && actor && actor.is_superadmin === true) {
       const { rows } = await db.query(
-        `SELECT id, name, legacy FROM accounts WHERE id = $1`,
+        `SELECT id, name, legacy, archived_at FROM accounts WHERE id = $1`,
         [session.viewAsAccountId]
       );
       if (!rows[0]) return null;
@@ -99,7 +100,7 @@ async function resolveSessionAccount(req) {
     }
     if (session.accountId) {
       const { rows } = await db.query(
-        `SELECT id, name, legacy FROM accounts WHERE id = $1`,
+        `SELECT id, name, legacy, archived_at FROM accounts WHERE id = $1`,
         [session.accountId]
       );
       if (!rows[0]) return null;
@@ -129,13 +130,13 @@ async function resolveSessionAccount(req) {
     const legacy = await legacyAccount();
     if (!legacy) return null;
     return accountShape(
-      { id: legacy.id, name: legacy.name, legacy: true },
+      { id: legacy.id, name: legacy.name, legacy: true, archived_at: legacy.archived_at },
       { userId: legacy.user_id || null, superadmin: !!(actor && actor.is_superadmin) }
     );
   }
   if (session.role === 'client' && session.clientId) {
     const { rows } = await db.query(
-      `SELECT c.id, c.account_id, a.name AS account_name, a.legacy
+      `SELECT c.id, c.account_id, a.name AS account_name, a.legacy, a.archived_at
        FROM clients c
        JOIN accounts a ON a.id = c.account_id
        WHERE c.id = $1`,
@@ -148,6 +149,7 @@ async function resolveSessionAccount(req) {
       id: client.account_id,
       name: client.account_name,
       legacy: client.legacy === true,
+      archived: client.archived_at != null,
       role: 'client_viewer',
       clientId: client.id,
     };
@@ -188,10 +190,19 @@ async function publicScope(rawKey) {
   if (!key) {
     const legacy = await legacyAccount();
     if (!legacy) return { ok: false, reason: 'no-legacy' };
-    return { ok: true, legacy: true, accountId: legacy.id, siteId: null };
+    return {
+      ok: true,
+      legacy: true,
+      accountId: legacy.id,
+      siteId: null,
+      archived: legacy.archived_at != null,
+    };
   }
   const { rows } = await db.query(
-    `SELECT id, account_id, public_key FROM sites WHERE public_key = $1`,
+    `SELECT s.id, s.account_id, s.public_key, a.archived_at
+     FROM sites s
+     JOIN accounts a ON a.id = s.account_id
+     WHERE s.public_key = $1`,
     [key]
   );
   if (!rows[0]) return { ok: false, reason: 'unknown-key' };
@@ -201,6 +212,7 @@ async function publicScope(rawKey) {
     accountId: rows[0].account_id,
     siteId: rows[0].id,
     siteKey: rows[0].public_key,
+    archived: rows[0].archived_at != null,
   };
 }
 
