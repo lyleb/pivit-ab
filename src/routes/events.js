@@ -74,9 +74,11 @@ router.post('/', async (req, res) => {
   try {
     const scope = await publicScope(req.body && req.body.site);
     const { rows } = await db.query(
-      `SELECT e.allowed_hosts, e.account_id, e.site_id, e.test_type, v.content_revision
+      `SELECT e.allowed_hosts, e.account_id, e.site_id, e.test_type, v.content_revision,
+              (a.archived_at IS NOT NULL) AS account_archived
        FROM variants v
        JOIN experiments e ON e.id = v.experiment_id
+       JOIN accounts a ON a.id = e.account_id
        WHERE v.id = $1 AND v.experiment_id = $2`,
       [variant_id, experiment_id]
     );
@@ -89,6 +91,11 @@ router.post('/', async (req, res) => {
     // key does not fall back to the legacy account. The drop is silent, same
     // as a host that is not on the list.
     const row = rows[0];
+    // Archived agencies keep the rows, but a cached snippet must not record
+    // a result. The reply is the same quiet 204 as a host that is not served.
+    if (row.account_archived === true || (scope.ok && scope.archived)) {
+      return res.status(204).end();
+    }
     const wrongAccount = !scope.ok
       || (scope.legacy ? row.account_id !== scope.accountId : row.site_id !== scope.siteId);
     if (wrongAccount) {

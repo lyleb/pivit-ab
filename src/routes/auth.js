@@ -372,8 +372,14 @@ router.post('/view-as', async (req, res) => {
     if (!accountId || accountId === account.id) {
       return res.status(400).json({ error: 'Choose a different agency.' });
     }
-    const { rows } = await db.query(`SELECT id, name FROM accounts WHERE id = $1`, [accountId]);
+    const { rows } = await db.query(
+      `SELECT id, name, archived_at FROM accounts WHERE id = $1`,
+      [accountId]
+    );
     if (!rows[0]) return res.status(404).json({ error: 'not found' });
+    if (rows[0].archived_at) {
+      return res.status(400).json({ error: 'That agency is archived. Restore it before you view it.' });
+    }
     const viewed = rows[0];
     await rotateSession(req, (session) => {
       session.viewAsAccountId = viewed.id;
@@ -435,7 +441,11 @@ router.get('/me', async (req, res) => {
     try {
       const account = await resolveSessionAccount(req);
       if (account) {
-        body.account = { id: account.id, name: account.name };
+        body.account = {
+          id: account.id,
+          name: account.name,
+          archived: account.archived === true,
+        };
         body.superadmin = account.superadmin === true;
         body.emergency = req.session.emergency === true;
         body.view_as = account.viewAs ? { id: account.id, name: account.name } : null;

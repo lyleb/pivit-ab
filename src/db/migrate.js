@@ -31,6 +31,7 @@ const { applyElementActivationSelector } = require('./element-activation-selecto
 const { applyJoinCodes } = require('./join-codes');
 const { applyExperimentIntegrations } = require('./experiment-integrations');
 const { applyContentRevision } = require('./content-revision');
+const { applyAccountArchive } = require('./account-archive');
 
 const LOCK_KEY = 814021;
 
@@ -103,6 +104,9 @@ const VERSIONS = [
   // Revision of variant content. Existing rows stay on revision 1. Old events
   // keep a null revision and count as revision 1. Stays out of schema.sql.
   { version: '025', name: 'content-revision', run: applyContentRevision },
+  // When an agency was archived. Nullable, so existing agencies stay active.
+  // Stays out of schema.sql.
+  { version: '026', name: 'account-archive', run: applyAccountArchive },
 ];
 
 async function ensureMigrationsTable(queryable) {

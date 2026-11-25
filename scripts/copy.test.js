@@ -214,6 +214,7 @@ const helpDoc = fs.readFileSync(path.join(__dirname, '../docs/help.md'), 'utf8')
 for (const phrase of [
   "Who's who in pivitlab",
   'The Users screen',
+  'Archive or delete an agency',
   'Agency invites',
   'The Team page and Viewers',
   'How sign-in works',

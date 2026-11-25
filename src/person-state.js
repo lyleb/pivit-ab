@@ -456,6 +456,7 @@ function personShape(row) {
     name: row.name || null,
     account_id: row.account_id || null,
     account_name: row.account_name || null,
+    account_archived: row.account_archived_at != null,
     role: row.role,
     superadmin: row.superadmin === true,
     suspended: row.suspended_at != null,
@@ -469,7 +470,7 @@ async function listPeople() {
   const [users, viewers] = await Promise.all([
     db.query(
       `SELECT u.id, u.email, u.is_superadmin, u.suspended_at, u.archived_at, u.created_at,
-              m.role, m.account_id, a.name AS account_name,
+              m.role, m.account_id, a.name AS account_name, a.archived_at AS account_archived_at,
               (SELECT MAX(l.created_at) FROM audit_log l
                WHERE l.actor_user_id = u.id AND l.action = 'signin') AS last_sign_in
        FROM users u
@@ -479,7 +480,7 @@ async function listPeople() {
     ),
     db.query(
       `SELECT c.id, c.name, c.username, c.suspended_at, c.archived_at, c.created_at,
-              c.account_id, a.name AS account_name,
+              c.account_id, a.name AS account_name, a.archived_at AS account_archived_at,
               (SELECT MAX(l.created_at) FROM audit_log l
                WHERE l.target_type = 'client' AND l.target_id = c.id::text AND l.action = 'signin') AS last_sign_in
        FROM clients c
@@ -494,6 +495,7 @@ async function listPeople() {
     role: row.role || null,
     account_id: row.account_id,
     account_name: row.account_name,
+    account_archived_at: row.account_archived_at,
     superadmin: row.is_superadmin === true,
     suspended_at: row.suspended_at,
     archived_at: row.archived_at,
@@ -507,6 +509,7 @@ async function listPeople() {
     role: 'viewer',
     account_id: row.account_id,
     account_name: row.account_name,
+    account_archived_at: row.account_archived_at,
     superadmin: false,
     suspended_at: row.suspended_at,
     archived_at: row.archived_at,

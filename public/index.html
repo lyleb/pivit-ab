@@ -544,7 +544,51 @@
       min-width: 0;
     }
     #page-team .inline-actions button { min-height: 44px; margin: 0; }
+    #agencies-card .table-scroll,
+    #agency-lifecycle-card .table-scroll { overflow: visible; }
+    #agencies-table.is-visible,
+    #agency-lifecycle-table.is-visible { min-width: 0; width: 100%; }
+    #agencies-table.is-visible thead,
+    #agency-lifecycle-table.is-visible thead { display: none; }
+    #agencies-table.is-visible tr,
+    #agency-lifecycle-table.is-visible tr {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      padding: 12px 0;
+    }
+    #agencies-table.is-visible td,
+    #agency-lifecycle-table.is-visible td { width: 100%; padding: 0; }
+    #agencies-table.is-visible td[data-label]::before,
+    #agency-lifecycle-table.is-visible td[data-label]::before {
+      content: attr(data-label);
+      display: block;
+      margin-bottom: 2px;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+    #agencies-table.is-visible td.card-title::before,
+    #agency-lifecycle-table.is-visible td.card-title::before { display: none; }
+    #agencies-table.is-visible .users-actions,
+    #agency-lifecycle-table.is-visible .users-actions {
+      display: grid;
+      gap: 8px;
+    }
+    #agencies-table.is-visible .users-actions button,
+    #agency-lifecycle-table.is-visible .users-actions button {
+      width: 100%;
+      min-height: 44px;
+      margin: 0;
+    }
   }
+  .agency-lead, #agency-confirm-body, #agency-confirm-warning {
+    font-size: 1.2rem;
+    line-height: 1.45;
+    max-width: 40rem;
+  }
+  #agency-confirm-warning { font-weight: 700; margin-bottom: 12px; }
+  #agency-archived-banner { font-size: 1.05rem; line-height: 1.45; }
 </style>
 </head>
 <body>
@@ -576,6 +620,10 @@
   </aside>
 
   <div class="main-area">
+    <div id="agency-archived-banner" class="banner" hidden>
+      <span id="agency-archived-text">This agency is archived. Tests are not running on its sites. Everything is kept. Restore it to turn the tests back on.</span>
+      <button type="button" id="agency-archived-restore">Restore</button>
+    </div>
     <div id="page-home" class="page active">
       <div id="emergency-banner" class="banner" hidden>
         <span id="emergency-banner-text">You signed in with the owner password. Day to day, sign in by email at info@heclr.com. This password is only the fallback.</span>
@@ -1123,6 +1171,20 @@
           </table>
         </div>
       </section>
+      <section class="card" id="agency-lifecycle-card" hidden>
+        <h2>This agency</h2>
+        <p class="agency-lead" id="agency-lifecycle-lead">Archive hides this agency and stops tests on its sites. Everything is kept. Delete comes after archive, and you type the agency name.</p>
+        <p id="agency-lifecycle-count" class="hint"></p>
+        <p id="agency-lifecycle-msg" class="hint"></p>
+        <div class="table-scroll">
+          <table id="agency-lifecycle-table" class="table-cards">
+            <thead>
+              <tr><th>Agency</th><th>Sites</th><th>Experiments</th><th>Status</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="agency-lifecycle-body"></tbody>
+          </table>
+        </div>
+      </section>
     </div>
 
     <div id="page-users" class="page">
@@ -1188,6 +1250,27 @@
           <tbody id="users-body"></tbody>
         </table>
       </section>
+      <section class="card" id="agencies-card" hidden>
+        <h2>Agencies</h2>
+        <p class="agency-lead">Archive hides an agency and stops tests on its sites. Everything is kept. You can restore it later. Delete is only for an archived agency, and you type its name.</p>
+        <div class="users-toolbar">
+          <label class="test-toggle" for="agencies-show-archived">
+            <input type="checkbox" id="agencies-show-archived">
+            Show archived
+          </label>
+          <p id="agencies-count" class="hint" style="margin:0;"></p>
+        </div>
+        <p id="agencies-msg" class="hint"></p>
+        <p id="agencies-empty" class="hint" hidden>No agencies to show.</p>
+        <div class="table-scroll">
+          <table id="agencies-table" class="table-cards">
+            <thead>
+              <tr><th>Agency</th><th>Sites</th><th>Experiments</th><th>Status</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="agencies-body"></tbody>
+          </table>
+        </div>
+      </section>
     </div>
   </div>
 </div>
@@ -1226,6 +1309,28 @@
     <div class="modal-foot">
       <button type="button" class="btn-ghost" id="users-confirm-cancel">Cancel</button>
       <button type="button" id="users-confirm-go">Suspend</button>
+    </div>
+  </div>
+</div>
+
+<div id="agency-confirm" class="modal-backdrop">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="agency-confirm-title">
+    <div class="modal-head">
+      <h2 id="agency-confirm-title">Archive this agency?</h2>
+      <button type="button" class="modal-close" id="agency-confirm-close" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p id="agency-confirm-body" style="margin-top:0;"></p>
+      <p id="agency-confirm-warning" hidden></p>
+      <div id="agency-confirm-match-wrap" hidden>
+        <label id="agency-confirm-match-label" for="agency-confirm-match">Type the agency name</label>
+        <input id="agency-confirm-match" type="text" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off">
+      </div>
+      <p id="agency-confirm-error" class="error-msg" hidden></p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn-ghost" id="agency-confirm-cancel">Cancel</button>
+      <button type="button" id="agency-confirm-go">Archive</button>
     </div>
   </div>
 </div>
@@ -1456,6 +1561,17 @@ function applySessionChrome() {
   if (newExperiment) newExperiment.hidden = !canChange;
   const viewersBtn = document.getElementById('viewers-btn');
   if (viewersBtn) viewersBtn.hidden = !canChange;
+  const archivedBanner = document.getElementById('agency-archived-banner');
+  const archivedText = document.getElementById('agency-archived-text');
+  const archivedRestore = document.getElementById('agency-archived-restore');
+  if (archivedBanner) {
+    const archived = !!(me.account && me.account.archived);
+    archivedBanner.hidden = !archived;
+    if (archivedText) {
+      archivedText.textContent = canChange ? UI.AGENCY_ARCHIVED_BANNER : UI.AGENCY_ARCHIVED_MEMBER;
+    }
+    if (archivedRestore) archivedRestore.hidden = !canChange;
+  }
   const memberNote = document.getElementById('member-view-only');
   if (memberNote) {
     memberNote.hidden = canChange || me.membership !== 'member';
@@ -1666,6 +1782,9 @@ async function loadTeam() {
   }
   if (peopleCard) peopleCard.hidden = !allowed;
   if (card) card.hidden = !manage;
+  const ownAgency = UI.canChangeAgency(sessionMe) && !(sessionMe && sessionMe.superadmin);
+  const lifecycle = document.getElementById('agency-lifecycle-card');
+  if (lifecycle) lifecycle.hidden = !(allowed && ownAgency);
   const form = document.getElementById('team-viewer-form');
   if (form) form.hidden = !manage;
   const hint = document.getElementById('team-people-hint');
@@ -1673,6 +1792,7 @@ async function loadTeam() {
   if (!allowed) return;
   await loadTeamPeople();
   if (manage) await loadTeamInvites();
+  if (ownAgency) await loadAgencies();
 }
 
 function findTeamPerson(id) {
@@ -2614,9 +2734,10 @@ function syncModalScrollLock() {
   const revealOpen = document.getElementById('reveal-modal').classList.contains('active');
   const usersOpen = document.getElementById('users-confirm').classList.contains('active');
   const teamOpen = document.getElementById('team-confirm').classList.contains('active');
+  const agencyOpen = document.getElementById('agency-confirm').classList.contains('active');
   const pop = document.getElementById('snippet-popover');
   const snippetSheet = pop.classList.contains('open') && pop.classList.contains('is-sheet');
-  document.body.classList.toggle('modal-open', clientsOpen || testOpen || revealOpen || usersOpen || teamOpen || snippetSheet);
+  document.body.classList.toggle('modal-open', clientsOpen || testOpen || revealOpen || usersOpen || teamOpen || agencyOpen || snippetSheet);
 }
 
 function openClientsModal() {
@@ -8018,11 +8139,13 @@ function renderUsers() {
 function setUsersAccess(open) {
   const denied = document.getElementById('users-denied');
   const panel = document.getElementById('admin-users');
+  const agencies = document.getElementById('agencies-card');
   if (denied) {
     denied.hidden = open;
     denied.textContent = open ? '' : UI.usersDeniedMessage(sessionMe);
   }
   if (panel) panel.hidden = !open;
+  if (agencies) agencies.hidden = !open;
 }
 
 async function loadUsers(token) {
@@ -8055,6 +8178,7 @@ async function loadUsers(token) {
   usersPeople = (result.data && result.data.people) || [];
   fillUsersAgencies(usersPeople);
   renderUsers();
+  await loadAgencies();
 }
 
 function findUsersPerson(key) {
@@ -8247,6 +8371,252 @@ document.getElementById('team-confirm-cancel').addEventListener('click', closeTe
 document.getElementById('team-confirm-go').addEventListener('click', confirmTeamAction);
 document.getElementById('team-confirm').addEventListener('click', (event) => {
   if (event.target.id === 'team-confirm') closeTeamConfirm();
+});
+
+let agencyRows = [];
+let agencyFlash = '';
+let agencyPending = null;
+
+function agencyHtml(agencies) {
+  return agencies.map((agency) => {
+    const decision = UI.agencyActions(agency);
+    const buttons = decision.actions.map((action) => {
+      const klass = action.danger ? 'btn-danger' : '';
+      return `<button type="button" class="${klass}" data-agency-action="${UI.escapeHtml(action.id)}" data-agency-id="${UI.escapeHtml(agency.id)}">${UI.escapeHtml(action.label)}</button>`;
+    }).join(' ');
+    const reason = decision.reason ? `<p class="hint">${UI.escapeHtml(decision.reason)}</p>` : '';
+    const status = agency.archived
+      ? '<span class="badge archived">Archived</span>'
+      : '<span class="badge live">Active</span>';
+    const signedIn = agency.current ? ' <span class="badge draft">Signed in</span>' : '';
+    return `<tr>
+      <td class="card-title" data-label="Agency"><strong>${UI.escapeHtml(agency.name || '')}</strong>${signedIn}</td>
+      <td data-label="Sites">${Number(agency.sites) || 0}</td>
+      <td data-label="Experiments">${Number(agency.experiments) || 0}</td>
+      <td class="card-status" data-label="Status">${status}</td>
+      <td class="card-action" data-label="Actions"><div class="users-actions">${buttons}${reason}</div></td>
+    </tr>`;
+  }).join('');
+}
+
+function renderAgencies() {
+  const flash = agencyFlash;
+  agencyFlash = '';
+  const showArchived = !!(document.getElementById('agencies-show-archived') && document.getElementById('agencies-show-archived').checked);
+  const visible = UI.filterAgencies(agencyRows, { showArchived });
+  const hidden = agencyRows.filter((agency) => agency && agency.archived && !showArchived).length;
+  const count = document.getElementById('agencies-count');
+  const body = document.getElementById('agencies-body');
+  const table = document.getElementById('agencies-table');
+  const empty = document.getElementById('agencies-empty');
+  const msg = document.getElementById('agencies-msg');
+  if (count) count.textContent = UI.agenciesSummary({ shown: visible.length, archivedHidden: hidden });
+  if (msg) {
+    msg.className = flash ? 'ok-msg' : 'hint';
+    msg.textContent = flash;
+  }
+  if (body) body.innerHTML = agencyHtml(visible);
+  if (table) table.classList.toggle('is-visible', visible.length > 0);
+  if (empty) empty.hidden = visible.length > 0;
+
+  const ownBody = document.getElementById('agency-lifecycle-body');
+  const ownTable = document.getElementById('agency-lifecycle-table');
+  const ownCount = document.getElementById('agency-lifecycle-count');
+  const ownMsg = document.getElementById('agency-lifecycle-msg');
+  if (ownCount) {
+    ownCount.textContent = agencyRows.length
+      ? 'Archive stops tests on this agency\'s sites. Restore brings those tests back as they were.'
+      : '';
+  }
+  if (ownMsg) {
+    ownMsg.className = flash ? 'ok-msg' : 'hint';
+    ownMsg.textContent = flash;
+  }
+  if (ownBody) ownBody.innerHTML = agencyHtml(agencyRows);
+  if (ownTable) ownTable.classList.toggle('is-visible', agencyRows.length > 0);
+}
+
+async function loadAgencies() {
+  const wantUsers = UI.canOpenUsers(sessionMe);
+  const wantOwn = UI.canChangeAgency(sessionMe) && !(sessionMe && sessionMe.superadmin);
+  const usersCard = document.getElementById('agencies-card');
+  const ownCard = document.getElementById('agency-lifecycle-card');
+  if (usersCard && !wantUsers) usersCard.hidden = true;
+  if (ownCard && !wantOwn) ownCard.hidden = true;
+  if (!wantUsers && !wantOwn) return;
+  const result = await callApi('/api/agencies');
+  if (!result.ok) {
+    const text = apiErrorText(result);
+    const msg = document.getElementById(wantUsers ? 'agencies-msg' : 'agency-lifecycle-msg');
+    if (msg) {
+      msg.className = 'error-msg';
+      msg.textContent = text;
+    }
+    return;
+  }
+  agencyRows = (result.data && result.data.agencies) || [];
+  renderAgencies();
+}
+
+function closeAgencyConfirm() {
+  const modal = document.getElementById('agency-confirm');
+  if (modal) modal.classList.remove('active');
+  agencyPending = null;
+  const matchWrap = document.getElementById('agency-confirm-match-wrap');
+  const match = document.getElementById('agency-confirm-match');
+  const warning = document.getElementById('agency-confirm-warning');
+  const error = document.getElementById('agency-confirm-error');
+  if (matchWrap) matchWrap.hidden = true;
+  if (match) match.value = '';
+  if (warning) {
+    warning.hidden = true;
+    warning.textContent = '';
+  }
+  if (error) {
+    error.hidden = true;
+    error.textContent = '';
+  }
+  syncModalScrollLock();
+}
+
+function syncAgencyConfirmReady() {
+  const go = document.getElementById('agency-confirm-go');
+  if (!go || !agencyPending) return;
+  const agency = agencyRows.find((row) => row.id === agencyPending.id);
+  if (!agency) {
+    go.disabled = true;
+    return;
+  }
+  if (agencyPending.action !== 'delete') {
+    go.disabled = false;
+    return;
+  }
+  go.disabled = !UI.agencyNameReady(agency, document.getElementById('agency-confirm-match').value);
+}
+
+function openAgencyConfirm(agency, action) {
+  const copy = UI.agencyConfirm(action, agency);
+  if (!copy || !agency) return;
+  agencyPending = { id: agency.id, action };
+  document.getElementById('agency-confirm-title').textContent = copy.title;
+  document.getElementById('agency-confirm-body').textContent = copy.body;
+  const warning = document.getElementById('agency-confirm-warning');
+  if (warning) {
+    warning.hidden = !copy.warning;
+    warning.textContent = copy.warning || '';
+  }
+  const go = document.getElementById('agency-confirm-go');
+  go.textContent = copy.confirm;
+  go.classList.toggle('btn-danger', copy.danger === true);
+  go.disabled = false;
+  const matchWrap = document.getElementById('agency-confirm-match-wrap');
+  const match = document.getElementById('agency-confirm-match');
+  const matchLabel = document.getElementById('agency-confirm-match-label');
+  match.value = '';
+  if (copy.typed) {
+    matchWrap.hidden = false;
+    matchLabel.textContent = `Type ${agency.name} to confirm`;
+    go.disabled = true;
+  } else {
+    matchWrap.hidden = true;
+  }
+  const error = document.getElementById('agency-confirm-error');
+  error.hidden = true;
+  error.textContent = '';
+  document.getElementById('agency-confirm').classList.add('active');
+  syncModalScrollLock();
+  if (copy.typed) match.focus();
+  else document.getElementById('agency-confirm-cancel').focus();
+}
+
+async function refreshSessionAccount() {
+  try {
+    const res = await fetch('/api/auth/me');
+    const data = await res.json();
+    if (data.role === 'owner') {
+      sessionMe = data;
+      applySessionChrome();
+    }
+  } catch (err) { /* the next page load will ask again */ }
+}
+
+async function confirmAgencyAction() {
+  if (!agencyPending) return;
+  const pending = agencyPending;
+  const agency = agencyRows.find((row) => row.id === pending.id);
+  const go = document.getElementById('agency-confirm-go');
+  const error = document.getElementById('agency-confirm-error');
+  const typed = document.getElementById('agency-confirm-match').value;
+  if (!agency) {
+    error.hidden = false;
+    error.textContent = 'That agency is no longer in the list.';
+    return;
+  }
+  if (pending.action === 'delete' && !UI.agencyNameReady(agency, typed)) {
+    error.hidden = false;
+    error.textContent = 'Type the agency name exactly.';
+    return;
+  }
+  if (go) go.disabled = true;
+  const path = `/api/agencies/${encodeURIComponent(agency.id)}`;
+  let result;
+  if (pending.action === 'delete') {
+    result = await callApi(path, {
+      method: 'DELETE',
+      headers: authHeaders(),
+      body: JSON.stringify({ confirm: typed.trim() }),
+    });
+  } else {
+    result = await callApi(`${path}/${pending.action}`, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+  }
+  if (!result.ok) {
+    if (go) go.disabled = pending.action === 'delete';
+    error.hidden = false;
+    error.textContent = (result.data && result.data.error) || apiErrorText(result);
+    return;
+  }
+  const signedOut = !!(result.data && result.data.signed_out);
+  closeAgencyConfirm();
+  if (signedOut) {
+    window.location.href = '/login.html';
+    return;
+  }
+  if (pending.action === 'archive') {
+    const box = document.getElementById('agencies-show-archived');
+    if (box) box.checked = true;
+  }
+  agencyFlash = UI.agencyDoneMessage(pending.action, agency.name);
+  if (UI.canOpenUsers(sessionMe)) await loadUsers();
+  else await loadAgencies();
+  if (agency.current) await refreshSessionAccount();
+  else if (sessionMe && sessionMe.superadmin) await loadViewAsAccounts();
+}
+
+function onAgencyClick(event) {
+  const button = event.target.closest('[data-agency-action]');
+  if (!button) return;
+  const agency = agencyRows.find((row) => row.id === button.getAttribute('data-agency-id'));
+  if (!agency) return;
+  openAgencyConfirm(agency, button.getAttribute('data-agency-action'));
+}
+
+document.getElementById('agencies-body').addEventListener('click', onAgencyClick);
+document.getElementById('agency-lifecycle-body').addEventListener('click', onAgencyClick);
+document.getElementById('agencies-show-archived').addEventListener('change', () => renderAgencies());
+document.getElementById('agency-confirm-match').addEventListener('input', syncAgencyConfirmReady);
+document.getElementById('agency-confirm-close').addEventListener('click', closeAgencyConfirm);
+document.getElementById('agency-confirm-cancel').addEventListener('click', closeAgencyConfirm);
+document.getElementById('agency-confirm-go').addEventListener('click', confirmAgencyAction);
+document.getElementById('agency-confirm').addEventListener('click', (event) => {
+  if (event.target.id === 'agency-confirm') closeAgencyConfirm();
+});
+document.getElementById('agency-archived-restore').addEventListener('click', async () => {
+  if (!agencyRows.length) await loadAgencies();
+  const current = agencyRows.find((row) => row.current);
+  if (current) openAgencyConfirm(current, 'restore');
 });
 
 document.getElementById('view-as-go').addEventListener('click', async () => {

@@ -201,6 +201,9 @@ router.get('/', async (req, res) => {
         }),
       });
     }
+    // An archived agency keeps its data, but the snippet must not run anything.
+    // No experiments, no GA4 id, and no dataLayer flag. Restore serves again.
+    if (scope.archived) return res.json({ experiments: [] });
     const ga4 = await publicGa4ForScope(db, scope);
     const datalayerEvents = await publicDatalayerEvents(db, scope);
     const sendPublic = (body) => {
@@ -317,6 +320,7 @@ router.get('/by-ids', async (req, res) => {
   try {
     const scope = await openPublicScope(req);
     if (!scope) return res.json({ experiments: [] });
+    if (scope.archived) return res.json({ experiments: [] });
     const { rows: experiments } = await db.query(
       `SELECT id, name, allowed_hosts, goals, test_type, ga4_enabled, datalayer_events FROM experiments
        WHERE id = ANY($1::uuid[])

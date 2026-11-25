@@ -30,6 +30,7 @@
     <li><a href="#who">Who's who</a></li>
     <li><a href="#your-first-test">Your first test</a></li>
     <li><a href="#users">The Users screen</a></li>
+    <li><a href="#archive-agency">Archive or delete an agency</a></li>
     <li><a href="#invites">Agency invites</a></li>
     <li><a href="#team">The Team page and Viewers</a></li>
     <li><a href="#sign-in">How sign-in works</a></li>
@@ -85,6 +86,18 @@
     <li><strong>Delete</strong> is rare. It appears only when the person is already suspended or archived. Type their email, or a Viewer's username, exactly. pivitlab then removes their name, email or username, password and sign-in links, and their place in every agency. This cannot be undone. The audit log stays. The person is shown as "Deleted user" and a short code, not their name.</li>
   </ol>
   <p>You cannot suspend, archive or delete yourself. pivitlab also refuses if that would leave no Platform admin, or no Owner for an agency. The screen says why.</p>
+
+  <h2 id="archive-agency">Archive or delete an agency</h2>
+  <p>Archive hides an agency. Delete removes it, and only after it is archived. A Member cannot do this.</p>
+  <ol>
+    <li>A Platform admin opens <strong>Users</strong> and finds <strong>Agencies</strong>. An Owner opens <strong>Team</strong> and finds <strong>This agency</strong>.</li>
+    <li><strong>Archive</strong> hides the agency from lists and from the support-view menu. Tests stop running on its sites. The snippet stays in place and returns nothing to run. Experiments stay in the state they were in. People can still sign in and read the results.</li>
+    <li>Tick <strong>Show archived</strong> to see archived agencies. <strong>Restore</strong> puts the agency back. Tests run again in the state they were left in.</li>
+    <li><strong>Delete</strong> appears only for an archived agency. Type the agency name exactly. The page says how many sites and experiments will go, for example: This deletes 2 sites, 5 experiments and all their results. This can't be undone.</li>
+    <li>Deleting removes the sites, experiments, variants, revisions, results, members, invites and integration settings. People keep their pivitlab sign-in if they belong to another agency. If this was their only agency, they cannot sign in until someone invites them again.</li>
+    <li>If you are signed in to the agency you delete, pivitlab warns you, then signs you out.</li>
+    <li>The original agency cannot be archived or deleted. Existing snippets that were installed before site keys still depend on it.</li>
+  </ol>
 
   <h2 id="invites">Agency invites</h2>
   <p>There are two invites. Do not mix them up.</p>
